@@ -17,11 +17,11 @@ import pygame
 from . import chart as C
 from .chart import BEATS, EXERCISES, build_lanes, load_midi_chart
 from .game import Game
-from .kit import default_kit, describe, load_kit, save_kit
+from .kit import default_kit, describe, load_kit, load_settings, save_kit, save_settings
 from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, lerp
 from .game import TAIL_S, lead_in_for
 from .sounds import (BACKING_GAIN, METRONOME_GAIN, PROGRESSIONS, SoundBank, Track, menu_music_sound,
-                     render_backing_track, render_metronome)
+                     output_devices, render_backing_track, render_metronome)
 
 TARGET_FPS = 240
 CAPTURE_S = 1.5           # wizard: keep collecting note numbers this long after the first hit
@@ -51,6 +51,9 @@ SONGS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 class App:
     def __init__(self, args):
         self.args = args
+        self.settings = load_settings()
+        if args.audio_device:
+            self.settings["audio_device"] = args.audio_device
         kit = load_kit(args.kit) if args.kit else load_kit()
         self.first_run = kit is None
         self.set_kit(kit or default_kit())
@@ -72,16 +75,44 @@ class App:
         self.legend_flash = {}     # instrument -> wall time of its last navigation hit
 
         pygame.init()
-        self.sounds = SoundBank(enabled=not args.no_sound)
+        self.sounds = SoundBank(enabled=not args.no_sound, device=self.settings.get("audio_device"))
         w, h = (int(v) for v in args.size.lower().split("x"))
         # RESIZABLE gives the window macOS's green fullscreen button (native Spaces fullscreen).
         self.surface = pygame.display.set_mode((w, h), pygame.RESIZABLE)
         pygame.display.set_caption("drumhero")
         self.size = self.surface.get_size()
         self.fonts = Fonts(self.scale)
+        fullscreen = self.settings.get("fullscreen", True)
         if args.fullscreen:
+            fullscreen = True
+        if args.windowed:
+            fullscreen = False
+        if fullscreen:
             self.toggle_fullscreen()
+            self.on_resize()
         self.open_midi(args.port)
+
+    # --- audio output ------------------------------------------------------------
+    def set_audio_device(self, name):
+        """Reopen the mixer on another output; every Sound belongs to the old mixer, so rebuild."""
+        if self.menu_music is not None:
+            self.menu_music.stop()
+        if isinstance(self.screen_obj, PlayScreen):
+            self.screen_obj.game.stop_tracks()
+        self.settings["audio_device"] = name
+        save_settings(self.settings)
+        self.sounds = SoundBank(enabled=not self.args.no_sound, device=name)
+        self.track_cache = {}
+        self.menu_music = None
+        if isinstance(self.screen_obj, PlayScreen):
+            self.screen_obj.game.sounds = self.sounds
+        self.update_menu_music()
+
+    def cycle_audio_device(self):
+        names = [None] + output_devices()
+        current = self.sounds.device
+        i = names.index(current) if current in names else 0
+        self.set_audio_device(names[(i + 1) % len(names)])
 
     # --- window --------------------------------------------------------------------
     @property
@@ -412,6 +443,8 @@ class ListScreen(Screen):
                     (f"Backing loop: {'on' if self.app.backing_on else 'off'}", "bass, chords and arpeggio under the built-in levels"),
                     (f"Metronome: {self.app.metronome_mode}", "congas: full follows the subdivision, beats only marks the beats"),
                     (f"Menu music: {'on' if self.app.menu_music_on else 'off'}", "ambient texture outside the game"),
+                    (f"Audio output: {self.app.sounds.device or 'system default'}", "select cycles through the outputs, saved"),
+                    (f"Start fullscreen: {'on' if self.app.settings.get('fullscreen', True) else 'off'}", "F11 or Cmd+F toggles any time, saved"),
                     ("Quit", "")]
         return [(ch.name, f"{ch.bpm:.0f} bpm · {len(ch.notes):3d} notes · {ch.desc}") for ch in self.app.items_for(self.cat)]
 
@@ -436,6 +469,11 @@ class ListScreen(Screen):
             elif self.sel == 5:
                 self.app.menu_music_on = not self.app.menu_music_on
                 self.app.update_menu_music()
+            elif self.sel == 6:
+                self.app.cycle_audio_device()
+            elif self.sel == 7:
+                self.app.settings["fullscreen"] = not self.app.settings.get("fullscreen", True)
+                save_settings(self.app.settings)
             else:
                 return False
         elif self.items():
@@ -863,7 +901,9 @@ def main(argv=None):
     ap.add_argument("--offset", type=float, default=0.0, help="input latency compensation in ms (positive = treat hits as earlier)")
     ap.add_argument("--speed", type=float, default=1.0, help="scroll speed multiplier")
     ap.add_argument("--size", default="1280x720", help="window size WxH")
-    ap.add_argument("--fullscreen", action="store_true", help="start in fullscreen (F11 or Cmd+F toggles it)")
+    ap.add_argument("--fullscreen", action="store_true", help="start in fullscreen (the saved default is on)")
+    ap.add_argument("--windowed", action="store_true", help="start in a window, ignoring the saved setting")
+    ap.add_argument("--audio-device", help="audio output name (substring), e.g. XR18; saved setting otherwise")
     ap.add_argument("--no-sound", action="store_true", help="disable all audio")
     ap.add_argument("--no-guide", action="store_true", help="start with the guide track off")
     ap.add_argument("--no-backing", action="store_true", help="start with the backing loop off")

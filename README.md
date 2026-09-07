@@ -199,14 +199,23 @@ next launch. Run the installer again after moving the repo or recreating
 `.venv`. Output goes to `~/Library/Logs/drumhero.log`. Pass a folder to install
 somewhere else, for example `~/Applications`.
 
+## Audio output
+
+Setup has an "Audio output" item that cycles through the system's output
+devices (an audio interface, the display, the speakers) and remembers the
+choice in `~/.config/drumhero/settings.json`. `--audio-device XR18` picks one
+by name for a single run. The mixer is reopened on the new device and every
+sound is rebuilt, so it works mid-session. An unknown name falls back to the
+system default with a message in the log.
+
 ## Fullscreen
 
-The window is resizable, so on macOS it has the green traffic-light button
-that puts it in native fullscreen on its own Space. F11 or Cmd+F toggle the
-same thing from the keyboard, and `--fullscreen` starts that way. Leaving
-fullscreen returns to the window size you had before. Every screen relayouts
-and rescales to the window height, so 1080p fullscreen looks like the 720p
-window, only bigger.
+The app starts in native macOS fullscreen by default; "Start fullscreen" in
+Setup turns that off (saved), and `--windowed` overrides it for one run. The
+window is resizable, so it has the green traffic-light button, and F11 or
+Cmd+F toggle fullscreen at any time. Leaving fullscreen returns to the window
+size you had before. Every screen relayouts and rescales to the window height,
+so 1080p fullscreen looks like the 720p window, only bigger.
 
 ## Feedback latency
 

@@ -67,22 +67,46 @@ def _to_sound(x):
     return pygame.sndarray.make_sound(np.ascontiguousarray(stereo))
 
 
-class SoundBank:
-    """Builds the sounds once and plays them by chart key ("kick", "n45", ...)."""
+def output_devices():
+    """Names of the audio output devices SDL can open."""
+    try:
+        from pygame._sdl2 import audio
+        return list(audio.get_audio_device_names(False))
+    except Exception:
+        return []
 
-    def __init__(self, enabled=True):
+
+class SoundBank:
+    """Builds the sounds once and plays them by chart key ("kick", "n45", ...).
+    device: output device name (substring match), None = system default."""
+
+    def __init__(self, enabled=True, device=None):
         self.ok = False
         self.sounds = {}
+        self.device = None
         if not enabled:
             return
+        if pygame.mixer.get_init():
+            pygame.mixer.quit()
+        name = None
+        if device:
+            names = output_devices()
+            name = next((n for n in names if device.lower() in n.lower()), None)
+            if name is None:
+                print(f"audio device '{device}' not found, using the default. Available: {', '.join(names) or 'none'}")
         try:
             pygame.mixer.pre_init(SR, -16, 2, MIXER_BUFFER)
-            pygame.mixer.init()
+            if name:
+                pygame.mixer.init(devicename=name)
+            else:
+                pygame.mixer.init()
             pygame.mixer.set_num_channels(24)
         except pygame.error as e:
             print(f"audio disabled: {e}")
             return
         self.ok = True
+        self.device = name
+        print(f"audio output: {name or 'system default'}")
         self.sounds = {
             "kick": _to_sound(kick()), "snare": _to_sound(snare()),
             "hihat": _to_sound(hihat()), "crash": _to_sound(crash()),

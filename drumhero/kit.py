@@ -5,6 +5,24 @@ import os
 from .chart import DEFAULT_KIT, INSTRUMENTS, LABELS
 
 KIT_PATH = os.path.expanduser("~/.config/drumhero/kit.json")
+SETTINGS_PATH = os.path.expanduser("~/.config/drumhero/settings.json")
+DEFAULT_SETTINGS = {"audio_device": None, "fullscreen": True}
+
+
+def load_settings(path=SETTINGS_PATH):
+    out = dict(DEFAULT_SETTINGS)
+    try:
+        with open(path) as f:
+            out.update(json.load(f))
+    except (OSError, ValueError):
+        pass
+    return out
+
+
+def save_settings(settings, path=SETTINGS_PATH):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(settings, f, indent=2)
 
 
 def load_kit(path=KIT_PATH):
