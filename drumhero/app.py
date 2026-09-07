@@ -72,6 +72,7 @@ class App:
         self.midi_name = None
         self.midi_in = None
         self.screen_obj = None
+        self.fullscreen = False
         self.drum_queue = deque()  # navigation hits, handed to the screen on the main thread
         self.ghosts = GhostFilter()  # drops the hi-hat notes the pedal produces on its own
         self.last_nav = {}
@@ -123,9 +124,17 @@ class App:
         return self.size[1] / 720
 
     def toggle_fullscreen(self):
+        """Desktop fullscreen (macOS Spaces, the green button), never the exclusive mode that
+        switches the monitor to the window's resolution and swallows trackpad gestures."""
         try:
-            pygame.display.toggle_fullscreen()
-        except pygame.error as e:
+            win = pygame.Window.from_display_module()
+            if self.fullscreen:
+                win.set_windowed()
+                self.fullscreen = False
+            else:
+                win.set_fullscreen(desktop=True)
+                self.fullscreen = True
+        except (pygame.error, AttributeError) as e:
             print(f"fullscreen: {e}")
 
     def on_resize(self):

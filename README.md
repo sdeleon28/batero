@@ -275,8 +275,11 @@ system default with a message in the log.
 The app starts in native macOS fullscreen by default; "Start fullscreen" in
 Setup turns that off (saved), and `--windowed` overrides it for one run. The
 window is resizable, so it has the green traffic-light button, and F11 or
-Cmd+F toggle fullscreen at any time. Leaving fullscreen returns to the window
-size you had before. Every screen relayouts and rescales to the window height,
+Cmd+F toggle fullscreen at any time. Both use desktop fullscreen (its own
+Space), never the exclusive mode: that one switches the monitor to the
+window's resolution and disables trackpad gestures, and if the app dies it can
+leave the monitor at 1280x720. Leaving fullscreen returns to the window size
+you had before. Every screen relayouts and rescales to the window height,
 so 1080p fullscreen looks like the 720p window, only bigger.
 
 ## Feedback latency
