@@ -123,6 +123,7 @@ timing errors; the mean is your latency, the deviation is you.
 |---------------|------------------------------------|
 | arrows, Enter | navigate menus                     |
 | Esc           | back                               |
+| F11, Cmd+F    | fullscreen on / off                |
 | Space         | pause / resume                     |
 | R             | restart the level                  |
 | Enter         | next level, on the results screen  |
@@ -133,6 +134,15 @@ timing errors; the mean is your latency, the deviation is you.
 
 `--no-sound` disables audio entirely, `--no-guide` starts with the guide track
 off. If the audio crackles, raise `MIXER_BUFFER` in `drumhero/sounds.py`.
+
+## Fullscreen
+
+The window is resizable, so on macOS it has the green traffic-light button
+that puts it in native fullscreen on its own Space. F11 or Cmd+F toggle the
+same thing from the keyboard, and `--fullscreen` starts that way. Leaving
+fullscreen returns to the window size you had before. Every screen relayouts
+and rescales to the window height, so 1080p fullscreen looks like the 720p
+window, only bigger.
 
 ## Feedback latency
 

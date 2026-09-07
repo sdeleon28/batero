@@ -67,11 +67,36 @@ class App:
         pygame.init()
         self.sounds = SoundBank(enabled=not args.no_sound)
         w, h = (int(v) for v in args.size.lower().split("x"))
-        self.surface = pygame.display.set_mode((w, h), pygame.FULLSCREEN if args.fullscreen else 0)
+        # RESIZABLE gives the window macOS's green fullscreen button (native Spaces fullscreen).
+        self.surface = pygame.display.set_mode((w, h), pygame.RESIZABLE)
         pygame.display.set_caption("drumhero")
         self.size = self.surface.get_size()
-        self.fonts = Fonts()
+        self.fonts = Fonts(self.scale)
+        if args.fullscreen:
+            self.toggle_fullscreen()
         self.open_midi(args.port)
+
+    # --- window --------------------------------------------------------------------
+    @property
+    def scale(self):
+        return self.size[1] / 720
+
+    def toggle_fullscreen(self):
+        try:
+            pygame.display.toggle_fullscreen()
+        except pygame.error as e:
+            print(f"fullscreen: {e}")
+
+    def on_resize(self):
+        """The window changed size (green button, drag, fullscreen toggle): relayout everything."""
+        self.surface = pygame.display.get_surface()
+        new = self.surface.get_size()
+        if new == self.size and self.fonts.scale == self.scale:
+            return
+        self.size = new
+        self.fonts = Fonts(self.scale)
+        if self.screen_obj is not None:
+            self.screen_obj.on_resize()
 
     # --- kit / content -----------------------------------------------------------
     def set_kit(self, kit):
@@ -162,8 +187,12 @@ class App:
             for ev in pygame.event.get():
                 if ev.type == pygame.QUIT:
                     running = False
+                elif ev.type in (pygame.VIDEORESIZE, pygame.WINDOWSIZECHANGED):
+                    self.on_resize()
                 elif ev.type == pygame.KEYDOWN:
-                    if self.screen_obj.on_key(ev.key) is False:
+                    if ev.key == pygame.K_F11 or (ev.key == pygame.K_f and ev.mod & (pygame.KMOD_META | pygame.KMOD_CTRL)):
+                        self.toggle_fullscreen()
+                    elif self.screen_obj.on_key(ev.key) is False:
                         running = False
             while self.drum_queue:
                 if self.screen_obj.on_drum(self.drum_queue.popleft()) is False:
@@ -181,8 +210,26 @@ class App:
 class Screen:
     def __init__(self, app: App):
         self.app = app
-        self.f = app.fonts
-        self.w, self.h = app.size
+
+    # window geometry is read live so a resize or fullscreen toggle relayouts every screen
+    @property
+    def f(self):
+        return self.app.fonts
+
+    @property
+    def w(self):
+        return self.app.size[0]
+
+    @property
+    def h(self):
+        return self.app.size[1]
+
+    @property
+    def s(self):
+        return self.app.scale
+
+    def on_resize(self):
+        pass
 
     def on_note(self, note, velocity):
         """MIDI thread. Default: the hit is a button press."""
@@ -205,27 +252,28 @@ class Screen:
     # --- shared widgets ----------------------------------------------------------
     def legend(self, surf, pairs, y=None, keys=None):
         """Colored drum chips: [(instrument, action label), ...]. Flash when that drum is hit."""
-        y = self.h - 44 if y is None else y
+        S = self.s
+        y = self.h - 44 * S if y is None else y
         now = time.perf_counter()
         chips = []
         for inst, label in pairs:
             ts = self.f.text(f"{C.LABELS[inst]}  {label}", self.f.small, TEXT)
             chips.append((inst, ts))
-        gap, pad, r = 26, 12, 8
+        gap, pad, r = 26 * S, 12 * S, 8 * S
         total = sum(ts.get_width() + 2 * r + pad for _, ts in chips) + gap * (len(chips) - 1)
         x = self.w / 2 - total / 2
         for inst, ts in chips:
             color = C.COLORS[inst]
             k = max(0.0, 1 - (now - self.app.legend_flash.get(inst, 0)) / 0.25)
             w = ts.get_width() + 2 * r + pad
-            box = pygame.Rect(int(x - 10), int(y - 14), int(w + 20), 28)
-            pygame.draw.rect(surf, lerp(LANE_BG, color, 0.6 * k), box, border_radius=14)
-            pygame.draw.rect(surf, color if k > 0 else (50, 50, 60), box, 1, border_radius=14)
-            pygame.draw.circle(surf, color, (int(x + r), int(y)), r + int(3 * k))
+            box = pygame.Rect(int(x - 10 * S), int(y - 14 * S), int(w + 20 * S), int(28 * S))
+            pygame.draw.rect(surf, lerp(LANE_BG, color, 0.6 * k), box, border_radius=int(14 * S))
+            pygame.draw.rect(surf, color if k > 0 else (50, 50, 60), box, 1, border_radius=int(14 * S))
+            pygame.draw.circle(surf, color, (int(x + r), int(y)), int(r + 3 * k * S))
             surf.blit(ts, (x + 2 * r + pad - 4, y - ts.get_height() / 2))
             x += w + gap
         if keys:
-            self.f.center(surf, keys, self.f.small, DIM, y + 26)
+            self.f.center(surf, keys, self.f.small, DIM, y + 26 * S)
 
     def midi_line(self):
         return f"MIDI: {self.app.midi_name}" if self.app.midi_in else "no MIDI input, keyboard only"
@@ -266,9 +314,10 @@ class HubScreen(Screen):
 
     def draw(self, surf, fps):
         surf.fill(BG)
-        self.f.center(surf, "drumhero", self.f.big, TEXT, 52)
-        self.f.center(surf, "strike a drum to open its section", self.f.small, DIM, 92)
-        gap, top, bottom, side = 18, 118, self.h - 70, 60
+        S = self.s
+        self.f.center(surf, "drumhero", self.f.big, TEXT, 52 * S)
+        self.f.center(surf, "strike a drum to open its section", self.f.small, DIM, 92 * S)
+        gap, top, bottom, side = 18 * S, 118 * S, self.h - 70 * S, 60 * S
         pw = (self.w - 2 * side - gap) / 2
         ph = (bottom - top - gap) / 2
         now = time.perf_counter()
@@ -279,26 +328,27 @@ class HubScreen(Screen):
             hot = max(0.0, 1 - (now - self.app.legend_flash.get(cat, 0)) / 0.3)
             fill = lerp(lerp(LANE_BG, color, 0.14), color, 0.5 * hot)
             rect = pygame.Rect(int(x), int(y), int(pw), int(ph))
-            pygame.draw.rect(surf, fill, rect, border_radius=18)
+            pygame.draw.rect(surf, fill, rect, border_radius=int(18 * S))
             pygame.draw.rect(surf, color if (i == self.sel or hot) else lerp(LANE_BG, color, 0.5), rect,
-                             3 if i == self.sel else 2, border_radius=18)
+                             3 if i == self.sel else 2, border_radius=int(18 * S))
             # drum chip
-            pygame.draw.circle(surf, color, (int(x + 34), int(y + 34)), 12)
-            surf.blit(self.f.text(f"{C.LABELS[cat]}", self.f.mid, color), (x + 56, y + 20))
-            surf.blit(self.f.text(f"key {i + 1}", self.f.small, DIM), (x + pw - 70, y + 24))
-            self.f.center(surf, title, self.f.big, TEXT, y + ph / 2 - 6, x + pw / 2)
-            self.f.center(surf, sub, self.f.small, DIM, y + ph / 2 + 36, x + pw / 2)
+            pygame.draw.circle(surf, color, (int(x + 34 * S), int(y + 34 * S)), int(12 * S))
+            surf.blit(self.f.text(f"{C.LABELS[cat]}", self.f.mid, color), (x + 56 * S, y + 20 * S))
+            surf.blit(self.f.text(f"key {i + 1}", self.f.small, DIM), (x + pw - 70 * S, y + 24 * S))
+            self.f.center(surf, title, self.f.big, TEXT, y + ph / 2 - 6 * S, x + pw / 2)
+            self.f.center(surf, sub, self.f.small, DIM, y + ph / 2 + 36 * S, x + pw / 2)
             if cat in ("kick", "snare"):
                 n = len(self.app.items_for(cat))
-                self.f.center(surf, f"{n} levels", self.f.small, color, y + ph - 26, x + pw / 2)
+                self.f.center(surf, f"{n} levels", self.f.small, color, y + ph - 26 * S, x + pw / 2)
             elif cat == "hihat":
                 n = len(self.app.songs) if self.app.songs is not None else None
-                self.f.center(surf, f"{n} songs" if n is not None else "songs/ folder", self.f.small, color, y + ph - 26, x + pw / 2)
+                self.f.center(surf, f"{n} songs" if n is not None else "songs/ folder", self.f.small, color, y + ph - 26 * S, x + pw / 2)
             else:
-                self.f.center(surf, describe(self.app.kit), self.f.small, color, y + ph - 26, x + pw / 2)
+                self.f.center(surf, describe(self.app.kit), self.f.small, color, y + ph - 26 * S, x + pw / 2)
             if not self.app.has_drum(cat) and self.app.midi_in:
-                self.f.center(surf, "no pad assigned", self.f.small, JUDGE_COLORS["MISS"], y + 60, x + pw / 2)
-        self.f.center(surf, f"{self.midi_line()}   ·   keys 1-4 or arrows + Enter   ·   Esc quit", self.f.small, DIM, self.h - 30)
+                self.f.center(surf, "no pad assigned", self.f.small, JUDGE_COLORS["MISS"], y + 60 * S, x + pw / 2)
+        self.f.center(surf, f"{self.midi_line()}   ·   keys 1-4 or arrows + Enter   ·   F11 fullscreen   ·   Esc quit",
+                      self.f.small, DIM, self.h - 30 * S)
 
 
 # ---------------------------------------------------------------------------
@@ -367,35 +417,36 @@ class ListScreen(Screen):
 
     def draw(self, surf, fps):
         surf.fill(BG)
-        pygame.draw.rect(surf, lerp(LANE_BG, self.color, 0.14), (0, 0, self.w, 96))
-        pygame.draw.circle(surf, self.color, (int(self.w * 0.12) - 30, 48), 12)
-        surf.blit(self.f.text(self.title, self.f.big, TEXT), (self.w * 0.12, 20))
+        S = self.s
+        pygame.draw.rect(surf, lerp(LANE_BG, self.color, 0.14), (0, 0, self.w, 96 * S))
+        pygame.draw.circle(surf, self.color, (int(self.w * 0.12 - 30 * S), int(48 * S)), int(12 * S))
+        surf.blit(self.f.text(self.title, self.f.big, TEXT), (self.w * 0.12, 20 * S))
         ts = self.f.text(self.sub, self.f.small, DIM)
-        surf.blit(ts, (self.w * 0.88 - ts.get_width(), 60))
+        surf.blit(ts, (self.w * 0.88 - ts.get_width(), 60 * S))
         items = self.items()
-        y = 140
+        y = 140 * S
         if not items:
             self.f.center(surf, "No songs yet.", self.f.mid, TEXT, self.h * 0.42)
-            self.f.center(surf, f"Drop .mid files into {self.app.args.songs or SONGS_DIR}", self.f.small, DIM, self.h * 0.42 + 36)
-            self.f.center(surf, "or pass them on the command line. Drums on MIDI channel 10 work best.", self.f.small, DIM, self.h * 0.42 + 58)
-        row_h = 44
-        max_rows = int((self.h - 140 - 90) / row_h)
+            self.f.center(surf, f"Drop .mid files into {self.app.args.songs or SONGS_DIR}", self.f.small, DIM, self.h * 0.42 + 36 * S)
+            self.f.center(surf, "or pass them on the command line. Drums on MIDI channel 10 work best.", self.f.small, DIM, self.h * 0.42 + 58 * S)
+        row_h = 44 * S
+        max_rows = int((self.h - 230 * S) / row_h)
         first = max(0, min(self.sel - max_rows // 2, len(items) - max_rows))
         for i in range(first, min(len(items), first + max_rows)):
             name, sub = items[i]
             selected = i == self.sel
             x = self.w * 0.12
             if selected:
-                pygame.draw.rect(surf, lerp(LANE_BG, self.color, 0.18), (x - 20, y - 8, self.w * 0.76 + 40, row_h - 4), border_radius=10)
-                pygame.draw.rect(surf, self.color, (x - 20, y - 8, 6, row_h - 4), border_radius=3)
+                pygame.draw.rect(surf, lerp(LANE_BG, self.color, 0.18), (x - 20 * S, y - 8 * S, self.w * 0.76 + 40 * S, row_h - 4 * S), border_radius=int(10 * S))
+                pygame.draw.rect(surf, self.color, (x - 20 * S, y - 8 * S, 6 * S, row_h - 4 * S), border_radius=int(3 * S))
             shown = name if len(name) <= 22 else name[:21] + "…"
             surf.blit(self.f.text(shown, self.f.mid, self.color if selected else TEXT), (x, y))
-            surf.blit(self.f.text(sub, self.f.small, DIM), (x + 370, y + 4))
+            surf.blit(self.f.text(sub, self.f.small, DIM), (x + 370 * S, y + 4 * S))
             best = self.app.results.get(name)
             if best:
                 s = f"best {best['accuracy'] * 100:.0f}%  mean {best['mean_ms']:+.0f} ms"
                 ts = self.f.text(s, self.f.small, JUDGE_COLORS["PERFECT"] if best["accuracy"] >= 0.9 else JUDGE_COLORS["GOOD"])
-                surf.blit(ts, (self.w * 0.88 - ts.get_width(), y + 4))
+                surf.blit(ts, (self.w * 0.88 - ts.get_width(), y + 4 * S))
             y += row_h
         self.legend(surf, [("hihat", "down"), ("crash", "up"), ("snare", "select"), ("kick", "back")],
                     keys="arrows · Enter · Esc")
@@ -479,49 +530,50 @@ class SetupScreen(Screen):
             step, key, captured = self.step, self.key, {k: list(v) for k, v in self.captured.items()}
             capture_start, flash, done_at = self.capture_start, self.flash, self.done_at
         now = time.perf_counter()
-        self.f.center(surf, "Set up your kit", self.f.large, TEXT, 60)
+        S = self.s
+        self.f.center(surf, "Set up your kit", self.f.large, TEXT, 60 * S)
         if not self.app.midi_in:
             self.f.center(surf, "No MIDI input connected. Start with --port NAME, or press Esc and play with keys 1-4.",
-                          self.f.small, JUDGE_COLORS["MISS"], self.h - 76)
+                          self.f.small, JUDGE_COLORS["MISS"], self.h - 76 * S)
             self.f.center(surf, "Keys 1-4 here stand in for a pad and assign the default General MIDI numbers.",
-                          self.f.small, DIM, self.h - 54)
+                          self.f.small, DIM, self.h - 54 * S)
 
         for i, k in enumerate(C.INSTRUMENTS):
-            x = self.w / 2 + (i - 1.5) * 150
+            x = self.w / 2 + (i - 1.5) * 150 * S
             state_color = C.COLORS[k] if (i < step or done_at) else (ACCENT if i == step else DIM)
-            pygame.draw.circle(surf, state_color, (int(x), 120), 10, 0 if (i < step or done_at) else 2)
-            self.f.center(surf, C.LABELS[k], self.f.small, state_color, 145, x)
+            pygame.draw.circle(surf, state_color, (int(x), int(120 * S)), int(10 * S), 0 if (i < step or done_at) else 2)
+            self.f.center(surf, C.LABELS[k], self.f.small, state_color, 145 * S, x)
             got = captured[k]
-            self.f.center(surf, "/".join(map(str, got)) if got else ("skipped" if i < step else ""), self.f.small, DIM, 165, x)
+            self.f.center(surf, "/".join(map(str, got)) if got else ("skipped" if i < step else ""), self.f.small, DIM, 165 * S, x)
 
         if done_at is not None:
             self.f.center(surf, "Kit saved", self.f.big, JUDGE_COLORS["PERFECT"], self.h * 0.45)
-            self.f.center(surf, describe(self.app.kit), self.f.small, DIM, self.h * 0.45 + 60)
+            self.f.center(surf, describe(self.app.kit), self.f.small, DIM, self.h * 0.45 + 60 * S)
             return
 
         color = C.COLORS[key]
         cx, cy = self.w / 2, self.h * 0.5
-        r = 110
+        r = 110 * S
         if flash and now - flash[0] < 0.25:
             k = 1 - (now - flash[0]) / 0.25
-            pygame.draw.circle(surf, lerp(LANE_BG, color, k), (int(cx), int(cy)), int(r + 40 * (1 - k)))
-        pygame.draw.circle(surf, color, (int(cx), int(cy)), r, 4)
+            pygame.draw.circle(surf, lerp(LANE_BG, color, k), (int(cx), int(cy)), int(r + 40 * S * (1 - k)))
+        pygame.draw.circle(surf, color, (int(cx), int(cy)), int(r), max(2, int(4 * S)))
         self.f.center(surf, C.LABELS[key].upper(), self.f.big, color, cy)
-        self.f.center(surf, WIZARD_PROMPTS[key], self.f.mid, TEXT, cy - r - 40)
+        self.f.center(surf, WIZARD_PROMPTS[key], self.f.mid, TEXT, cy - r - 40 * S)
 
         if captured[key]:
-            self.f.center(surf, "got note " + ", ".join(map(str, captured[key])), self.f.mid, JUDGE_COLORS["PERFECT"], cy + r + 40)
+            self.f.center(surf, "got note " + ", ".join(map(str, captured[key])), self.f.mid, JUDGE_COLORS["PERFECT"], cy + r + 40 * S)
             if flash:
-                self.f.center(surf, f"last: note {flash[1]} · velocity {flash[2]}", self.f.small, DIM, cy + r + 70)
+                self.f.center(surf, f"last: note {flash[1]} · velocity {flash[2]}", self.f.small, DIM, cy + r + 70 * S)
             if capture_start is not None:
                 frac = max(0.0, 1 - (now - capture_start) / CAPTURE_S)
-                bw = 300
-                pygame.draw.rect(surf, LANE_BG, (cx - bw / 2, cy + r + 95, bw, 6))
-                pygame.draw.rect(surf, color, (cx - bw / 2, cy + r + 95, bw * frac, 6))
-                self.f.center(surf, "keep hitting, moving on...", self.f.small, DIM, cy + r + 118)
+                bw = 300 * S
+                pygame.draw.rect(surf, LANE_BG, (cx - bw / 2, cy + r + 95 * S, bw, 6 * S))
+                pygame.draw.rect(surf, color, (cx - bw / 2, cy + r + 95 * S, bw * frac, 6 * S))
+                self.f.center(surf, "keep hitting, moving on...", self.f.small, DIM, cy + r + 118 * S)
         else:
-            self.f.center(surf, "waiting...", self.f.mid, DIM, cy + r + 40)
-        self.f.center(surf, "Enter next · S skip this drum · Backspace redo previous · Esc cancel", self.f.small, DIM, self.h - 28)
+            self.f.center(surf, "waiting...", self.f.mid, DIM, cy + r + 40 * S)
+        self.f.center(surf, "Enter next · S skip this drum · Backspace redo previous · Esc cancel", self.f.small, DIM, self.h - 28 * S)
 
 
 # ---------------------------------------------------------------------------
@@ -584,42 +636,43 @@ class SoundcheckScreen(Screen):
             heard = dict(self.heard)
             unknown = self.unknown
         now = time.perf_counter()
+        S = self.s
         ready = self.all_heard()
-        self.f.center(surf, "Soundcheck", self.f.large, TEXT, 60)
-        self.f.center(surf, "hit every pad: it should light up its drum and sound like it", self.f.small, DIM, 96)
+        self.f.center(surf, "Soundcheck", self.f.large, TEXT, 60 * S)
+        self.f.center(surf, "hit every pad: it should light up its drum and sound like it", self.f.small, DIM, 96 * S)
 
         n = len(C.INSTRUMENTS)
-        cy, r = self.h * 0.47, 82
+        cy, r = self.h * 0.47, 82 * S
         for i, inst in enumerate(C.INSTRUMENTS):
-            cx = self.w / 2 + (i - (n - 1) / 2) * 250
+            cx = self.w / 2 + (i - (n - 1) / 2) * 250 * S
             color = C.COLORS[inst]
             assigned = bool(self.app.kit.get(inst))
             h = heard[inst]
             k = max(0.0, 1 - (now - h[0]) / 0.3) if h else 0.0
             vel = h[2] / 127 if h else 0
             if k > 0:
-                pygame.draw.circle(surf, lerp(LANE_BG, color, 0.5 * k), (int(cx), int(cy)), int(r + (30 + 40 * vel) * (1 - k)))
-            pygame.draw.circle(surf, lerp(LANE_BG, color, 0.25 + 0.75 * k) if assigned else LANE_BG, (int(cx), int(cy)), r)
-            pygame.draw.circle(surf, color if assigned else (60, 60, 70), (int(cx), int(cy)), r, 4)
+                pygame.draw.circle(surf, lerp(LANE_BG, color, 0.5 * k), (int(cx), int(cy)), int(r + (30 + 40 * vel) * S * (1 - k)))
+            pygame.draw.circle(surf, lerp(LANE_BG, color, 0.25 + 0.75 * k) if assigned else LANE_BG, (int(cx), int(cy)), int(r))
+            pygame.draw.circle(surf, color if assigned else (60, 60, 70), (int(cx), int(cy)), int(r), max(2, int(4 * S)))
             self.f.center(surf, C.LABELS[inst].upper(), self.f.mid, TEXT if assigned else DIM, cy, cx)
             notes = "/".join(map(str, sorted(self.app.kit.get(inst, [])))) or "not assigned"
-            self.f.center(surf, notes, self.f.small, DIM, cy + r + 24, cx)
+            self.f.center(surf, notes, self.f.small, DIM, cy + r + 24 * S, cx)
             if h:
-                self.f.center(surf, f"note {h[1]} · vel {h[2]}", self.f.small, color, cy + r + 46, cx)
-                self.f.center(surf, "✓", self.f.mid, JUDGE_COLORS["PERFECT"], cy - r - 24, cx)
+                self.f.center(surf, f"note {h[1]} · vel {h[2]}", self.f.small, color, cy + r + 46 * S, cx)
+                self.f.center(surf, "✓", self.f.mid, JUDGE_COLORS["PERFECT"], cy - r - 24 * S, cx)
             elif assigned:
-                self.f.center(surf, "waiting", self.f.small, DIM, cy + r + 46, cx)
+                self.f.center(surf, "waiting", self.f.small, DIM, cy + r + 46 * S, cx)
 
         if unknown and now - unknown[0] < 2.5:
             self.f.center(surf, f"note {unknown[1]} is not assigned to any drum (vel {unknown[2]})",
                           self.f.mid, JUDGE_COLORS["MISS"], self.h * 0.78)
-            self.f.center(surf, "if that pad should count, redo the setup and hit it during its drum", self.f.small, DIM, self.h * 0.78 + 30)
+            self.f.center(surf, "if that pad should count, redo the setup and hit it during its drum", self.f.small, DIM, self.h * 0.78 + 30 * S)
 
         if ready:
-            self.f.center(surf, "All pads heard.", self.f.mid, JUDGE_COLORS["PERFECT"], self.h * 0.78 - 30 if not unknown or now - unknown[0] >= 2.5 else self.h * 0.70)
+            self.f.center(surf, "All pads heard.", self.f.mid, JUDGE_COLORS["PERFECT"], self.h * 0.78 - 30 * S if not unknown or now - unknown[0] >= 2.5 else self.h * 0.70)
             self.legend(surf, [("snare", "continue"), ("kick", "redo setup")], keys="Enter continue · Backspace redo setup")
         else:
-            self.f.center(surf, "Enter skip · Backspace redo setup · keys 1-4 stand in for the pads", self.f.small, DIM, self.h - 28)
+            self.f.center(surf, "Enter skip · Backspace redo setup · keys 1-4 stand in for the pads", self.f.small, DIM, self.h - 28 * S)
 
 
 # ---------------------------------------------------------------------------
@@ -635,6 +688,9 @@ class PlayScreen(Screen):
         self.recorded = False
         self.finished_at = None
         self.game.reset()
+
+    def on_resize(self):
+        self.renderer = Renderer(self.game, self.app.size, self.app.fonts)
 
     def nav_ready(self):
         return self.finished_at is not None and time.perf_counter() - self.finished_at > RESULTS_GRACE_S
@@ -722,7 +778,7 @@ class PlayScreen(Screen):
     def draw(self, surf, fps):
         self.renderer.draw(surf, fps)
         if self.game.finished:
-            self.legend(surf, [("snare", "next"), ("hihat", "retry"), ("kick", "back")], y=self.h - 30,
+            self.legend(surf, [("snare", "next"), ("hihat", "retry"), ("kick", "back")], y=self.h - 30 * self.s,
                         keys=None)
 
 
@@ -737,7 +793,7 @@ def main(argv=None):
     ap.add_argument("--offset", type=float, default=0.0, help="input latency compensation in ms (positive = treat hits as earlier)")
     ap.add_argument("--speed", type=float, default=1.0, help="scroll speed multiplier")
     ap.add_argument("--size", default="1280x720", help="window size WxH")
-    ap.add_argument("--fullscreen", action="store_true")
+    ap.add_argument("--fullscreen", action="store_true", help="start in fullscreen (F11 or Cmd+F toggles it)")
     ap.add_argument("--no-sound", action="store_true", help="disable all audio")
     ap.add_argument("--no-guide", action="store_true", help="start with the guide track off")
     ap.add_argument("--log", help="write every judged hit of the last run to this CSV")
