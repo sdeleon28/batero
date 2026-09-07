@@ -5,7 +5,7 @@ import time
 import pygame
 
 from .chart import COUNT_LABELS
-from .game import Game
+from .game import CONTRAST_TARGET, Game
 from .ghost import PEDAL_CLOSED_CC, openness_label
 
 LOOKAHEAD_S = 2.0        # seconds of chart visible above the line at speed 1.0
@@ -32,6 +32,9 @@ JUDGE_COLORS = {
     "MISS": (230, 70, 70),
     "STRAY": (170, 90, 200),
 }
+DYN_COLORS = {"ACCENT": (255, 255, 255), "TAP": (150, 200, 160), "SOFT": (240, 140, 60), "LOUD": (240, 140, 60)}
+DYN_LABELS = {"ACCENT": "ACCENT", "TAP": "tap", "SOFT": "no accent!", "LOUD": "too loud!"}
+ACCENT_NOTE_SCALE = 1.7   # accented notes are this much taller
 
 
 def lerp(a, b, k):
@@ -181,15 +184,26 @@ class Renderer:
                 if age > 1:
                     continue
                 color = lerp(JUDGE_COLORS["MISS"], BG, age)
-            rect = (x, int(y - self.note_h / 2), w, self.note_h)
+            accent = n.accent or (not g.chart.dynamics and n.velocity >= 100)
+            nh = int(self.note_h * ACCENT_NOTE_SCALE) if accent else self.note_h
+            if g.chart.dynamics and not accent:
+                x, w = x + int(w * 0.15), int(w * 0.7)        # taps: narrower and dimmer
+                if n.state != "miss":
+                    color = lerp(color, LANE_BG, 0.35)
+            rect = (x, int(y - nh / 2), w, nh)
             pygame.draw.rect(surf, color, rect, border_radius=int(6 * S))
-            if n.velocity >= 100:
+            if accent:
                 pygame.draw.rect(surf, (255, 255, 255), rect, 2, border_radius=int(6 * S))
-            if n.hand and n.state != "miss":
-                f.center(surf, n.hand, f.small, (20, 20, 24), y, x + w / 2)
+            if n.state != "miss":
+                label = (">" + n.hand if accent and n.hand else (">" if accent else n.hand))
+                if label:
+                    f.center(surf, label, f.mid if accent else f.small, (20, 20, 24), y, x + w / 2)
 
         # flashes: ring at the line + error number, drawn the frame after the hit arrives
         latest = None
+        newest_in_lane = {}                      # the dynamic tag is shown for the newest flash per lane only
+        for fl in flashes:
+            newest_in_lane[fl.lane] = fl
         for fl in flashes:
             age = (wall - fl.wall_t) / FLASH_S
             cx = int(self.lane_x[fl.lane] + self.lane_w / 2)
@@ -205,6 +219,9 @@ class Renderer:
                     label = f"{'+' if fl.error_ms >= 0 else '-'}{abs(fl.error_ms):.0f}"
                     ts = f.text(label, f.mid, lerp(color, BG, jt))
                     surf.blit(ts, (cx - ts.get_width() / 2, self.line_y - (70 + 40 * jt) * S))
+                if fl.dyn and newest_in_lane[fl.lane] is fl:
+                    ds = f.text(DYN_LABELS[fl.dyn], f.mid if fl.dyn in ("SOFT", "LOUD") else f.small, lerp(DYN_COLORS[fl.dyn], BG, jt))
+                    surf.blit(ds, (cx - ds.get_width() / 2, self.line_y - (44 + 40 * jt) * S))
 
         if latest is not None:
             jt = (wall - latest.wall_t) / JUDGE_TEXT_S
@@ -219,16 +236,24 @@ class Renderer:
                 es.set_alpha(int(255 * (1 - jt)))
                 surf.blit(es, (self.w / 2 - es.get_width() / 2, self.h * 0.30 + 60 * S))
                 es.set_alpha(255)
+            if latest.dyn in ("SOFT", "LOUD"):
+                ds = f.text("ACCENT MISSING" if latest.dyn == "SOFT" else "TAP TOO LOUD", f.mid, DYN_COLORS[latest.dyn])
+                ds.set_alpha(int(255 * (1 - jt)))
+                surf.blit(ds, (self.w / 2 - ds.get_width() / 2, self.h * 0.30 + 90 * S))
+                ds.set_alpha(255)
 
         self.metronome(surf, now)
         if any(l.key == "hihat" for l in g.lanes):
             draw_hihat_state(surf, f, self.ghosts, self.w - 110 * S, 200 * S, S)
 
         # HUD with a backing so it stays readable over notes
-        backing = pygame.Surface((int(360 * S), int(100 * S)))
+        dyn = g.dynamics(32) if g.chart.dynamics else None
+        backing = pygame.Surface((int(360 * S), int((150 if dyn is not None else 100) * S)))
         backing.fill(BG)
         backing.set_alpha(235)
         surf.blit(backing, (0, 0))
+        if dyn is not None:
+            self.dynamics_meter(surf, dyn, 12 * S, 96 * S)
         surf.blit(f.text(g.chart.name, f.mid, ACCENT), (12 * S, 8 * S))
         surf.blit(f.text(f"score {score}   combo {combo}", f.mid, TEXT), (12 * S, 38 * S))
         line = f"P {counts['PERFECT']}  G {counts['GOOD']}  O {counts['OK']}  M {counts['MISS']}  S {counts['STRAY']}"
@@ -252,6 +277,27 @@ class Renderer:
             f.center(surf, g.chart.desc, f.mid, DIM, self.h * 0.45 + 80 * S)
         if finished:
             self.results(surf)
+
+    def dynamics_meter(self, surf, dyn, x, y):
+        """Accent and tap tallies plus a contrast bar (median accent / median tap velocity
+        over the last strokes) with the target marked."""
+        f, S = self.f, self.s
+        dc = self.game.dyn_counts
+        line = f"accents {dc['ACCENT']}/{dc['ACCENT'] + dc['SOFT']}  taps {dc['TAP']}/{dc['TAP'] + dc['LOUD']}"
+        surf.blit(f.text(line, f.small, TEXT), (x, y))
+        c = dyn.get("contrast")
+        bw, bh = 200 * S, 10 * S
+        by = y + 26 * S
+        pygame.draw.rect(surf, LANE_BG, (x, by, bw, bh), border_radius=int(5 * S))
+        top = 2.5                                   # bar spans ratios 1.0 .. 2.5
+        tx = x + bw * (CONTRAST_TARGET - 1) / (top - 1)
+        if c is not None:
+            k = max(0.0, min(1.0, (c - 1) / (top - 1)))
+            col = JUDGE_COLORS["PERFECT"] if c >= CONTRAST_TARGET else JUDGE_COLORS["OK"]
+            pygame.draw.rect(surf, col, (x, by, bw * k, bh), border_radius=int(5 * S))
+        pygame.draw.line(surf, TEXT, (tx, by - 3 * S), (tx, by + bh + 3 * S), max(1, int(2 * S)))
+        label = f"contrast {c:.2f}x" if c is not None else "contrast -"
+        surf.blit(f.text(label, f.small, DIM), (x + bw + 12 * S, by - 4 * S))
 
     def metronome(self, surf, t):
         """Four beat squares, each split into the current subdivision, lit in time."""
@@ -288,7 +334,7 @@ class Renderer:
         name = {1: "quarter notes", 2: "eighth notes", 3: "triplets", 4: "sixteenth notes"}.get(sub, f"{sub} per beat")
         f.center(surf, name, f.small, DIM, y0 + size + 12 * S)
         if g.chart.sticking:
-            self.sticking_strip(surf, pos, sub, y0 + size + 34 * S)
+            self.sticking_strip(surf, pos, sub, y0 + size + (44 if g.chart.accents else 34) * S)
 
     def sticking_strip(self, surf, pos, sub, y):
         """The rudiment's hand pattern, the stroke being played lit up."""
@@ -298,13 +344,18 @@ class Renderer:
         idx = int(math.floor(pos * sub)) % n if pos >= 0 else -1
         cw = 26 * S
         x0 = self.w / 2 - n * cw / 2
+        accents = self.game.chart.accents or set()
         for i, hand in enumerate(pattern):
             cx = x0 + (i + 0.5) * cw
             hot = i == idx
             color = (255, 255, 255) if hot else ((245, 90, 90) if hand == "R" else (80, 200, 230))
             if hot:
                 pygame.draw.circle(surf, lerp(LANE_BG, color, 0.5), (int(cx), int(y)), int(12 * S))
-            f.center(surf, hand, f.mid, color, y, cx)
+            if i in accents:
+                f.center(surf, ">", f.small, (255, 255, 255) if hot else TEXT, y - 17 * S, cx)
+                f.center(surf, hand, f.large, color, y + 4 * S, cx)
+            else:
+                f.center(surf, hand, f.small, lerp(color, LANE_BG, 0.35), y + 2 * S, cx)
             if i % (n // max(1, n // 4) if n >= 4 else n) == 0 and i > 0:
                 pygame.draw.line(surf, (60, 60, 70), (int(cx - cw / 2), int(y - 12 * S)), (int(cx - cw / 2), int(y + 12 * S)))
 
@@ -312,18 +363,27 @@ class Renderer:
         g = self.game
         st = g.stats()
         S = self.s
-        box = pygame.Surface((int(560 * S), int(320 * S)))
-        box.fill((10, 10, 14))
-        box.set_alpha(250)
-        cy = self.h * 0.42
-        surf.blit(box, (self.w / 2 - 280 * S, cy - 160 * S))
-        y = cy - 125 * S
-        for s, font, color in [
+        lines = [
             ("RESULTS", self.f.big, TEXT),
             (f"{st['hit']}/{st['notes']} notes  ·  {st['accuracy'] * 100:.1f}%", self.f.mid, TEXT),
             (f"max combo {g.max_combo}   score {g.score}", self.f.mid, TEXT),
             (f"timing: mean {st['mean_ms']:+.1f} ms, std {st['std_ms']:.1f} ms", self.f.mid, TEXT),
             (f"{st['early']} early · {st['late']} late · {g.counts['STRAY']} stray", self.f.small, DIM),
-            ("Enter next · R retry · Esc back", self.f.small, DIM),
-        ]:
+        ]
+        if g.chart.dynamics:
+            c = st.get("contrast")
+            ok = c is not None and c >= CONTRAST_TARGET
+            lines.append((f"accents {st['accents_ok']}/{st['accents']} · taps {st['taps_ok']}/{st['taps']} · "
+                          f"contrast {c:.2f}x" if c is not None else
+                          f"accents {st['accents_ok']}/{st['accents']} · taps {st['taps_ok']}/{st['taps']}",
+                          self.f.mid, JUDGE_COLORS["PERFECT"] if ok else JUDGE_COLORS["OK"]))
+        lines.append(("Enter next · R retry · Esc back", self.f.small, DIM))
+        bh = 320 + (40 if g.chart.dynamics else 0)
+        box = pygame.Surface((int(600 * S), int(bh * S)))
+        box.fill((10, 10, 14))
+        box.set_alpha(250)
+        cy = self.h * 0.42
+        surf.blit(box, (self.w / 2 - 300 * S, cy - bh / 2 * S))
+        y = cy - (bh / 2 - 35) * S
+        for s, font, color in lines:
             y += self.f.center(surf, s, font, color, y) + 12 * S

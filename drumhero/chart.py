@@ -118,6 +118,9 @@ class ChartNote:
     error_ms: float = None  # hit time - note time (negative = early)
     sounded: bool = False   # guide sound already played
     hand: str = None        # "R" / "L" sticking hint for rudiments, shown on the note
+    accent: bool = False    # an accented stroke (judged when the chart has dynamics)
+    hit_velocity: int = None
+    dyn: str = None         # ACCENT / TAP (right) or SOFT / LOUD (wrong), set when hit
 
 
 @dataclass
@@ -148,6 +151,8 @@ class Chart:
     audio: str = None           # audio file played along (songs)
     audio_offset: float = 0.0   # audio time of chart time 0 (the first charted downbeat)
     sticking: list = None       # ["R", "L", ...] pattern shown as a strip (rudiments)
+    accents: set = None         # indices within the sticking pattern that are accented
+    dynamics: bool = False      # judge accents vs taps by velocity
 
     @property
     def length(self):
@@ -383,8 +388,9 @@ def _crash_quarters(bar):
 
 def _rudiment(name, desc, bpm, bars, sticking, sub, accents=(0,), lanes=None):
     """A practice-pad rudiment: `sticking` repeats over the bar at `sub` notes per beat.
-    accents: indices within the sticking pattern that get the accent velocity.
-    lanes: optional map hand -> instrument key (default: everything on the snare)."""
+    accents: indices within the sticking pattern that are accented; the chart then judges
+    dynamics (accent vs tap velocity). lanes: optional map hand -> instrument key
+    (default: everything on the snare)."""
     beat = 60 / bpm
     lanes = lanes or {"R": "snare", "L": "snare"}
     notes = []
@@ -393,10 +399,18 @@ def _rudiment(name, desc, bpm, bars, sticking, sub, accents=(0,), lanes=None):
         for i in range(per_bar):
             hand = sticking[i % len(sticking)]
             accent = (i % len(sticking)) in accents
-            notes.append(ChartNote((bar * 4 + i / sub) * beat, lanes[hand], 115 if accent else 78, hand=hand))
+            notes.append(ChartNote((bar * 4 + i / sub) * beat, lanes[hand], ACCENT_VELOCITY if accent else TAP_VELOCITY,
+                                   hand=hand, accent=accent))
     ch = Chart(name, notes, bpm, desc, [(0, sub)])
     ch.sticking = list(sticking)
+    ch.accents = set(accents)
+    ch.dynamics = bool(accents)
     return ch
+
+
+# Chart velocities for accented and unaccented strokes; also what the guide plays.
+ACCENT_VELOCITY = 115
+TAP_VELOCITY = 70
 
 
 RUDIMENTS = [
@@ -411,6 +425,13 @@ RUDIMENTS = [
     _rudiment("Double paradiddle", "R L R L R R  L R L R L L in triplets.", 70, 8, "RLRLRRLRLRLL", 3, accents=(0, 6)),
     _rudiment("Paradiddle-diddle", "R L R R L L in triplets, accent on the first.", 75, 8, "RLRRLL", 3, accents=(0,)),
     _rudiment("Doubles 16ths", "R R L L on the sixteenths.", 70, 8, "RRLL", 4, accents=(0,)),
+    # accent control: same hands, the accent walks through the sixteenth
+    _rudiment("Accent on 1", "Sixteenths, accent on the beat, taps in between.", 70, 8, "RLRL", 4, accents=(0,)),
+    _rudiment("Accent on e", "Sixteenths, accent on the e.", 70, 8, "RLRL", 4, accents=(1,)),
+    _rudiment("Accent on &", "Sixteenths, accent on the &.", 70, 8, "RLRL", 4, accents=(2,)),
+    _rudiment("Accent on a", "Sixteenths, accent on the a.", 70, 8, "RLRL", 4, accents=(3,)),
+    _rudiment("Moving accent", "The accent walks: 1, then e, then &, then a, one per beat.", 70, 8,
+              "RLRLRLRLRLRLRLRL", 4, accents=(0, 5, 10, 15)),
 ]
 
 

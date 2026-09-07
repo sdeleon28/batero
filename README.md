@@ -107,9 +107,25 @@ basic beat at 85 bpm up to a rock beat at 130.
 Exercises also hold the rudiments, practice-pad style on the snare: single
 strokes in eighths and sixteenths, paradiddle at 70 and 90, paradiddle split
 between hi-hat and snare, triplets, R L L triplets, double paradiddle,
-paradiddle-diddle, doubles. Each note carries its hand (R or L), the strip
-under the metronome shows the whole sticking with the stroke being played lit
-up, and accented strokes get the white outline.
+paradiddle-diddle, doubles, and five accent-control exercises (accent on 1, on
+e, on &, on a, and a moving accent). Each note carries its hand (R or L) and
+the strip under the metronome shows the whole sticking with the stroke being
+played lit up.
+
+## Accents
+
+Rudiments judge dynamics as well as timing. Accented strokes are the tall notes
+with a white outline and a `>`; taps are the narrow dim ones. A hit is an
+ACCENT when it lands at velocity 88 or more on an accented note, a TAP at 84 or
+less on an unaccented one; either earns a bonus. "ACCENT MISSING" and "TAP TOO
+LOUD" are called out under the judgement, and a velocity in the band between
+the thresholds is neither. The thresholds come from measured paradiddles on the
+TD-17 snare: accents 88..124 (median 112), taps 29..84 (median 66).
+
+The HUD counts accents and taps and shows the contrast: median accent velocity
+divided by median tap velocity over the last strokes, with the target (1.4x)
+marked on the bar. The results screen repeats the tallies and contrast for the
+whole run, and the `--log` CSV carries every hit's velocity and dynamic.
 
 Songs are folders in `songs/` made by the ingest pipeline (see below), or plain
 MIDI files dropped in `songs/` or given on the command line. General MIDI drum
