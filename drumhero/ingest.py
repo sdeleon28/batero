@@ -57,26 +57,106 @@ PATTERNS = {
 FILL = [(3, "snare", 100), (3.25, "snare", 90), (3.5, "snare", 105), (3.75, "snare", 110)]
 
 
+ONSET_LAG_S = 0.0135        # onset-strength peaks trail the stroke by this much (calibrated on synthetic drums)
+CONSTANT_STD_MS = 12.0      # residual std under which a song counts as constant tempo (played to a click)
+
+
+def comb_bpm(onset_env, fps, lo=65.0, hi=150.0, step=0.5):
+    """Global tempo by comb filter over the onset envelope: for each candidate bpm, the best
+    phase's summed onset energy on the pulse train. From santi's tempo repo. Exact on steady
+    tempos where the tempogram is off by a bpm or two; blind to drift."""
+    cands = np.arange(lo, hi, step)
+    scores = np.zeros(len(cands))
+    n = len(onset_env)
+    for i, bpm in enumerate(cands):
+        period = 60.0 / bpm * fps
+        n_pulses = int(n / period)
+        if n_pulses < 2:
+            continue
+        pulses = np.arange(n_pulses) * period
+        offs = np.linspace(0, period, min(int(period), 50), endpoint=False)
+        idx = np.round(pulses[None, :] + offs[:, None]).astype(int)
+        valid = (idx >= 0) & (idx < n)
+        idx = np.clip(idx, 0, n - 1)
+        scores[i] = np.max(np.sum(onset_env[idx] * valid, axis=1))
+    return float(cands[np.argmax(scores)])
+
+
 def track_beats(audio_path, bpm_hint=None, offset_hint=None):
-    """Beat times (s) and the index of the first downbeat, from librosa's beat tracker.
-    The first downbeat is the tracked beat nearest offset_hint (audio time of a known
-    downbeat) when given; otherwise the beat nearest the first strong onset, since most
-    recordings start on a downbeat. Songs that start with a pickup need the hint."""
+    """Beat times (s), the index of the first downbeat, the tempo and a mode string.
+
+    1. Global tempo: the bpm hint from song.json, else the comb filter (65..150 bpm).
+    2. Coarse beats from librosa's tracker seeded with that tempo (23 ms frames).
+    3. Each beat refined to the onset peak within +-40 ms at 2.9 ms resolution, minus the
+       calibrated onset lag; beats without a strong onset (intros) are not anchored.
+    4. Linear fit over anchored beats: if the residual std is under CONSTANT_STD_MS the
+       song was played to a click and the grid is the fitted constant tempo over the
+       whole track; otherwise the grid follows the anchored beats with a light smoothing.
+    5. Octave guard: a grid faster than 1.5x the tempo estimate is decimated.
+    The first downbeat is the beat nearest offset_hint when given, else the beat nearest
+    the first strong onset (most recordings start on a downbeat; pickups need the hint)."""
     import librosa
     y, sr = librosa.load(audio_path, sr=22050, mono=True)
-    onset = librosa.onset.onset_strength(y=y, sr=sr)
-    kw = {"start_bpm": bpm_hint} if bpm_hint else {}
-    tempo, frames = librosa.beat.beat_track(onset_envelope=onset, sr=sr, units="frames", trim=False, **kw)
-    beats = librosa.frames_to_time(frames, sr=sr)
-    if len(beats) < 8:
-        sys.exit(f"only {len(beats)} beats found in {audio_path}; is it silent?")
+    onset = librosa.onset.onset_strength(y=y, sr=sr, hop_length=512)
+    hint = float(bpm_hint) if bpm_hint else comb_bpm(onset, sr / 512)
+    _, frames = librosa.beat.beat_track(onset_envelope=onset, sr=sr, units="frames", trim=False, start_bpm=hint)
+    coarse = librosa.frames_to_time(frames, sr=sr)
+    if len(coarse) < 8:
+        sys.exit(f"only {len(coarse)} beats found in {audio_path}; is it silent?")
+
+    hop = 64
+    fine = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop)
+    ffps = sr / hop
+    thresh = 0.3 * np.percentile(fine, 95)
+    win = int(0.04 * ffps)
+    refined, anchored = [], []
+    for t in coarse:
+        c = int(round(t * ffps))
+        lo, hi = max(0, c - win), min(len(fine), c + win + 1)
+        seg = fine[lo:hi]
+        if len(seg) and seg.max() > thresh:
+            refined.append((lo + int(np.argmax(seg))) / ffps)
+            anchored.append(True)
+        else:
+            refined.append(t)
+            anchored.append(False)
+    refined = np.array(refined) - ONSET_LAG_S
+    anchored = np.array(anchored)
+    i = np.arange(len(refined))
+
+    if anchored.sum() < 8:
+        beats, bpm, mode = refined, hint, "coarse (too few clear onsets)"
+    else:
+        ia, ta = i[anchored], refined[anchored]
+        b, a = np.polyfit(ia, ta, 1)
+        keep = np.abs(ta - (a + b * ia)) < 0.03
+        if keep.sum() >= 8:
+            b, a = np.polyfit(ia[keep], ta[keep], 1)
+        resid = ta - (a + b * ia)
+        std = float(np.std(resid[keep]) * 1000) if keep.sum() >= 8 else float(np.std(resid) * 1000)
+        if std < CONSTANT_STD_MS:
+            beats, bpm, mode = a + b * i, 60.0 / b, f"constant tempo (residual {std:.1f} ms)"
+        else:
+            knots = np.interp(i, ia, ta)
+            iv = np.diff(knots)
+            sm = np.array([np.median(iv[max(0, j - 2): j + 3]) for j in range(len(iv))])
+            beats, bpm, mode = np.concatenate([[knots[0]], knots[0] + np.cumsum(sm)]), 60.0 / float(np.median(sm)), \
+                f"variable tempo (residual {std:.1f} ms)"
+
+    while bpm > 1.5 * hint and len(beats) > 16:          # tracked the eighths: keep the stronger half
+        idx = [np.clip(np.round(beats[k::2] * ffps).astype(int), 0, len(fine) - 1) for k in (0, 1)]
+        k = int(np.argmax([fine[ix].sum() for ix in idx]))
+        beats, bpm = beats[k::2], bpm / 2
+    while bpm < hint / 1.5 and len(beats) > 8:            # tracked the half notes: insert midpoints
+        beats = np.sort(np.concatenate([beats, (beats[:-1] + beats[1:]) / 2]))
+        bpm *= 2
+
     if offset_hint is None:
         peaks = librosa.onset.onset_detect(onset_envelope=onset, sr=sr, units="frames")
         strong = [f for f in peaks if onset[f] >= 0.35 * onset.max()]
         offset_hint = float(librosa.frames_to_time(strong[0] if strong else peaks[0], sr=sr)) if len(peaks) else beats[0]
-    phase = int(np.argmin(np.abs(beats - offset_hint)))
-    tempo = float(np.atleast_1d(tempo)[0])
-    return beats.tolist(), phase, tempo
+    phase = int(np.argmin(np.abs(np.asarray(beats) - offset_hint)))
+    return [float(x) for x in beats], phase, float(bpm), mode
 
 
 def build_events(sections, bars_available):
@@ -140,16 +220,17 @@ def ingest(folder, bpm=None, offset=None):
         sys.exit(f"missing {audio}: drop the recording there first")
     bpm = bpm or meta.get("bpm")
     offset = offset if offset is not None else meta.get("offset_hint")
-    beats, phase, tempo = track_beats(audio, bpm, offset)
+    beats, phase, tempo, mode = track_beats(audio, bpm, offset)
     bars_available = (len(beats) - phase) // 4
     events, bars_needed = build_events(meta["sections"], bars_available + 64)   # extrapolate a bit past the audio
     grid = write_chart(os.path.join(folder, "chart.mid"), beats, phase, events, bars_needed)
     meta["offset"] = round(beats[phase], 4)
     meta["tracked_bpm"] = round(60.0 / statistics.median(np.diff(grid)), 2)
     json.dump(meta, open(meta_path, "w"), indent=2)
-    json.dump({"beats": [round(b, 4) for b in beats], "downbeat_index": phase, "tempo": tempo},
+    meta["tempo_mode"] = mode
+    json.dump({"beats": [round(b, 4) for b in beats], "downbeat_index": phase, "tempo": tempo, "mode": mode},
               open(os.path.join(folder, "beats.json"), "w"))
-    print(f"{meta.get('title', folder)}: {len(beats)} beats tracked, ~{meta['tracked_bpm']} bpm, "
+    print(f"{meta.get('title', folder)}: {len(beats)} beats tracked, {mode}, {meta['tracked_bpm']} bpm, "
           f"first downbeat at {meta['offset']} s, {bars_available} bars of audio, chart covers {bars_needed} bars, "
           f"{len(events)} notes -> chart.mid")
     if bars_needed > bars_available:
