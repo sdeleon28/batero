@@ -130,7 +130,7 @@ class Game:
         with self.lock:
             if self.paused or self.finished:
                 return None
-            t = self.song_time(wall_t) + self.offset_ms / 1000
+            t = self.song_time(wall_t) - self.offset_ms / 1000   # offset = your chain's latency: hits are treated as earlier
             best, best_err = None, None
             for n in self.notes[self.cursor:]:
                 if n.t - t > OK_MS / 1000:

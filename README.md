@@ -166,11 +166,15 @@ The error shown is `hit time - note time`: negative is early, positive is late.
 
 ## Calibration
 
-Everything between your stick and the screen adds latency: the module's
-triggering, USB, the OS, and the display. If your PERFECT hits keep reading
-"late", the offset compensates for that chain. Press `.` to add 5 ms (hits are
-treated as earlier) or `,` to subtract, until the mean on the results screen
-sits near 0. Then pass it as `--offset 20` next time.
+The MIDI input itself is instant (measured: the game judges a note within 2 ms
+of its arrival at the Mac). What adds latency is the reference you play to: the
+metronome and backing come out after the mixer buffer and the interface, and the
+display draws the falling note a frame or two late. Playing to what you see and
+hear therefore reads "late" by a constant amount, and the offset compensates
+for that chain. Press `.` to add 5 ms (hits are treated as earlier) or `,` to
+subtract, until the mean on the results screen sits near 0. The value is shown
+in the HUD, saved to settings and used from then on; `--offset 20` overrides it
+for one run.
 
 The results screen and `--log` CSV give the mean and standard deviation of your
 timing errors; the mean is your latency, the deviation is you.

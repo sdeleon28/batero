@@ -59,7 +59,7 @@ class App:
         self.menu_music_on = not args.no_menu_music
         self.menu_music = None
         self.track_cache = {}
-        self.offset_ms = args.offset
+        self.offset_ms = args.offset if args.offset else float(self.settings.get("offset_ms") or 0.0)
         self.speed = args.speed
         self.results = {}          # chart name -> stats of the best run this session
         self.songs = None          # loaded lazily
@@ -933,10 +933,10 @@ class PlayScreen(Screen):
             g.speed = self.app.speed = max(0.25, g.speed - 0.25)
         elif key == pygame.K_RIGHTBRACKET:
             g.speed = self.app.speed = min(4.0, g.speed + 0.25)
-        elif key == pygame.K_COMMA:
-            g.offset_ms = self.app.offset_ms = g.offset_ms - 5
-        elif key == pygame.K_PERIOD:
-            g.offset_ms = self.app.offset_ms = g.offset_ms + 5
+        elif key in (pygame.K_COMMA, pygame.K_PERIOD):
+            g.offset_ms = self.app.offset_ms = g.offset_ms + (5 if key == pygame.K_PERIOD else -5)
+            self.app.settings["offset_ms"] = self.app.offset_ms      # remembered across runs
+            save_settings(self.app.settings)
         elif key == pygame.K_g:
             g.guide = self.app.guide = not g.guide
         elif key == pygame.K_b:
@@ -1008,7 +1008,8 @@ def main(argv=None):
     ap.add_argument("--channel", type=int, help="only use chart notes on this MIDI channel (1-16)")
     ap.add_argument("--port", help="MIDI input port (substring). Default: first port that looks like a drum module")
     ap.add_argument("--kit", help="kit file to load/save instead of ~/.config/drumhero/kit.json")
-    ap.add_argument("--offset", type=float, default=0.0, help="input latency compensation in ms (positive = treat hits as earlier)")
+    ap.add_argument("--offset", type=float, default=0.0,
+                    help="latency compensation in ms: your mean error when uncalibrated (positive = hits are treated as earlier); 0 = the saved value")
     ap.add_argument("--speed", type=float, default=1.0, help="scroll speed multiplier")
     ap.add_argument("--size", default="1280x720", help="window size WxH")
     ap.add_argument("--fullscreen", action="store_true", help="start in fullscreen (the saved default is on)")
