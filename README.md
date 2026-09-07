@@ -180,6 +180,16 @@ pending note in its lane; a note can only be hit once.
 
 The error shown is `hit time - note time`: negative is early, positive is late.
 
+## Tempo
+
+`[` and `]` slow the level down or speed it up in steps of 10 % (0.3x to 2x)
+and restart it at the new tempo. Everything follows: the notes, the metronome,
+the backing loop, and for songs the recording itself, time-stretched with
+librosa's phase vocoder (pitch kept; a few seconds of work the first time for
+each tempo). The notes scroll slower too, so a beat is always the same distance
+on screen. The HUD shows the multiplier and the effective bpm. `--speed 0.5`
+starts every level at half tempo.
+
 ## Calibration
 
 The MIDI input itself is instant (measured: the game judges a note within 2 ms
@@ -209,7 +219,7 @@ timing errors; the mean is your latency, the deviation is you.
 | B             | backing loop on / off              |
 | M             | metronome full / beats / off       |
 | h j k l       | same as the arrows, Enter and Esc in menus |
-| [ / ]         | scroll speed                       |
+| [ / ]         | tempo -/+ 10 % (restarts the level) |
 | , / .         | input offset -/+ 5 ms              |
 | 1..9, 0       | hit lanes from the keyboard        |
 

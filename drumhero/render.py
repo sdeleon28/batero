@@ -260,7 +260,9 @@ class Renderer:
         if self.ghosts is not None and self.ghosts.filtered:
             line += f"  ghosts {self.ghosts.filtered}"
         surf.blit(f.text(line, f.small, DIM), (12 * S, 70 * S))
-        right = [f"{fps:5.0f} fps", f"offset {offset:+.0f} ms", f"speed {speed:.2f}x", f"{g.chart.bpm:.0f} bpm",
+        right = [f"{fps:5.0f} fps", f"offset {offset:+.0f} ms",
+                 f"tempo {g.chart.rate:.2f}x" if g.chart.rate != 1.0 else "tempo 1x",
+                 f"{g.chart.bpm:.0f} bpm" + (f" (of {g.chart.bpm / g.chart.rate:.0f})" if g.chart.rate != 1.0 else ""),
                  f"guide {'on' if g.guide else 'off'}",
                  f"backing {'on' if g.track_enabled('backing') else 'off'}" if 'backing' in g.tracks else "no backing",
                  f"metronome {g.metronome_mode}"]

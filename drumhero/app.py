@@ -60,7 +60,7 @@ class App:
         self.menu_music = None
         self.track_cache = {}
         self.offset_ms = args.offset if args.offset else float(self.settings.get("offset_ms") or 0.0)
-        self.speed = args.speed
+        self.rate = args.speed          # tempo multiplier for levels, 1.0 = as written
         self.results = {}          # chart name -> stats of the best run this session
         self.songs = None          # loaded lazily
         self.midi_name = None
@@ -214,10 +214,10 @@ class App:
                 self.track_cache[key] = Track(render_metronome(chart, lead_in, total, self.metronome_mode), -lead_in, METRONOME_GAIN)
             out["metronome"] = self.track_cache[key]
         if chart.audio:
-            key = ("music", chart.audio)
+            key = ("music", chart.audio, round(chart.rate, 3))
             if key not in self.track_cache:
                 try:
-                    self.track_cache[key] = load_audio_track(chart.audio, -chart.audio_offset)
+                    self.track_cache[key] = load_audio_track(chart.audio, -chart.audio_offset, rate=chart.rate)
                 except (pygame.error, OSError) as e:
                     print(f"{chart.audio}: {e}")
                     self.track_cache[key] = None
@@ -880,9 +880,10 @@ class PlayScreen(Screen):
     def __init__(self, app, cat, index):
         super().__init__(app)
         self.cat, self.index = cat, index
-        self.chart = app.items_for(cat)[index]
+        self.chart = app.items_for(cat)[index].at_rate(app.rate)
         self.lanes, self.by_note = build_lanes(self.chart, app.kit)
-        self.game = Game(self.chart, self.lanes, self.by_note, offset_ms=app.offset_ms, speed=app.speed,
+        # scroll speed follows the tempo so a beat is always the same distance on screen
+        self.game = Game(self.chart, self.lanes, self.by_note, offset_ms=app.offset_ms, speed=app.rate,
                          sounds=app.sounds, guide=app.guide and not self.chart.audio)   # the record has its own drums
         self.game.metronome_mode = app.metronome_mode
         prog = None if cat == "hihat" else index + (0 if cat == "kick" else 2)   # songs bring their own music
@@ -929,10 +930,12 @@ class PlayScreen(Screen):
             self.retry()
         elif key == pygame.K_RETURN and g.finished:
             self.next_level()
-        elif key == pygame.K_LEFTBRACKET:
-            g.speed = self.app.speed = max(0.25, g.speed - 0.25)
-        elif key == pygame.K_RIGHTBRACKET:
-            g.speed = self.app.speed = min(4.0, g.speed + 0.25)
+        elif key in (pygame.K_LEFTBRACKET, pygame.K_RIGHTBRACKET):
+            # tempo: everything (notes, metronome, backing, the record) slows down or speeds up;
+            # the level restarts at the new tempo
+            step = 0.1 if key == pygame.K_RIGHTBRACKET else -0.1
+            self.app.rate = round(min(2.0, max(0.3, self.app.rate + step)), 2)
+            self.retry()
         elif key in (pygame.K_COMMA, pygame.K_PERIOD):
             g.offset_ms = self.app.offset_ms = g.offset_ms + (5 if key == pygame.K_PERIOD else -5)
             self.app.settings["offset_ms"] = self.app.offset_ms      # remembered across runs
@@ -1010,7 +1013,7 @@ def main(argv=None):
     ap.add_argument("--kit", help="kit file to load/save instead of ~/.config/drumhero/kit.json")
     ap.add_argument("--offset", type=float, default=0.0,
                     help="latency compensation in ms: your mean error when uncalibrated (positive = hits are treated as earlier); 0 = the saved value")
-    ap.add_argument("--speed", type=float, default=1.0, help="scroll speed multiplier")
+    ap.add_argument("--speed", type=float, default=1.0, help="tempo multiplier for every level (0.5 = half speed); [ and ] change it in play")
     ap.add_argument("--size", default="1280x720", help="window size WxH")
     ap.add_argument("--fullscreen", action="store_true", help="start in fullscreen (the saved default is on)")
     ap.add_argument("--windowed", action="store_true", help="start in a window, ignoring the saved setting")

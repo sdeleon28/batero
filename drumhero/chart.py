@@ -3,6 +3,7 @@ import json
 import os
 import statistics
 import sys
+import dataclasses
 from dataclasses import dataclass, field
 
 import mido
@@ -153,6 +154,19 @@ class Chart:
     sticking: list = None       # ["R", "L", ...] pattern shown as a strip (rudiments)
     accents: set = None         # indices within the sticking pattern that are accented
     dynamics: bool = False      # judge accents vs taps by velocity
+    rate: float = 1.0           # tempo multiplier this chart was scaled by (see at_rate)
+
+    def at_rate(self, rate: float):
+        """A copy of this chart played at `rate` times the tempo: note times, beat grid and
+        audio offset stretched, bpm scaled. rate 0.5 = half speed."""
+        rate = float(rate)
+        if rate == 1.0:
+            return self
+        notes = [dataclasses.replace(n, t=n.t / rate) for n in self.notes]
+        ch = dataclasses.replace(self, notes=notes, bpm=self.bpm * rate, rate=rate,
+                                 beats=[b / rate for b in self.beats] if self.beats else None,
+                                 audio_offset=self.audio_offset / rate)
+        return ch
 
     @property
     def length(self):

@@ -426,9 +426,22 @@ def menu_music_sound():
 MUSIC_GAIN = 0.85
 
 
-def load_audio_track(path, t0, gain=MUSIC_GAIN):
+def load_audio_track(path, t0, gain=MUSIC_GAIN, rate=1.0):
     """Decode an audio file (mp3/ogg/wav/flac via SDL_mixer) into a Track on the chart
-    timeline: audio time 0 happens at chart time t0. Needs the mixer initialised."""
+    timeline: audio time 0 happens at chart time t0. Needs the mixer initialised.
+    rate != 1 time-stretches the recording (rate 0.5 = half speed, pitch kept) with
+    librosa's phase vocoder; a few seconds of work for a full song."""
+    if rate != 1.0:
+        import librosa
+        y, _ = librosa.load(path, sr=SR, mono=False)
+        if y.ndim == 1:
+            y = np.stack([y, y])
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", FutureWarning)         # librosa 1.0 deprecation chatter
+            y = librosa.effects.time_stretch(y, rate=rate)
+        pcm = (np.clip(y, -1, 1) * 32767).astype(np.int16).T
+        return Track(np.ascontiguousarray(pcm), t0, gain)
     snd = pygame.mixer.Sound(path)
     arr = pygame.sndarray.array(snd)
     if arr.ndim == 1:
