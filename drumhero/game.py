@@ -1,5 +1,6 @@
 """Game state: the clock, judging hits, misses, guide track and stats. No drawing."""
 import csv
+import math
 import statistics
 import threading
 import time
@@ -29,7 +30,12 @@ def lead_in_for(bpm: float) -> float:
 
 
 class Game:
-    def __init__(self, chart, lanes, by_note, offset_ms=0.0, speed=1.0, sounds=None, guide=True):
+    def __init__(self, chart, lanes, by_note, offset_ms=0.0, speed=1.0, sounds=None, guide=True,
+                 backing=None, backing_len=0.0, backing_on=True):
+        self.backing = backing              # looping pygame Sound, rotated for the lead-in
+        self.backing_len = backing_len
+        self.backing_on = backing_on
+        self.backing_playing = False
         self.chart = chart
         self.notes = chart.notes
         self.lanes = lanes
@@ -45,6 +51,7 @@ class Game:
 
     # --- clock -------------------------------------------------------------
     def reset(self):
+        self.stop_backing()
         with self.lock:
             for n in self.notes:
                 n.state, n.judge, n.error_ms, n.sounded = "pending", None, None, False
@@ -78,6 +85,26 @@ class Game:
             else:
                 self.paused_total += time.perf_counter() - self.paused_at
                 self.paused_at = None
+        self.stop_backing()                 # after a resume it rejoins at the next loop boundary
+
+    def stop_backing(self):
+        if self.backing is not None and self.backing_playing:
+            self.backing.stop()
+        self.backing_playing = False
+
+    def _drive_backing(self, t):
+        """Start the loop with the count-in, keep it bar-aligned, stop it when the level ends."""
+        want = self.backing_on and not self.finished
+        if not want:
+            self.stop_backing()
+            return
+        if self.backing_playing:
+            return
+        # loop boundaries sit at t = -lead_in + k * backing_len
+        phase = (t + self.lead_in) % self.backing_len
+        if t >= -self.lead_in - 0.004 and (phase < 0.05 or phase > self.backing_len - 0.004):
+            self.backing.play(loops=-1)
+            self.backing_playing = True
 
     # --- input -------------------------------------------------------------
     def hit(self, note: int, velocity: int = 100, wall_t: float = None):
@@ -144,6 +171,8 @@ class Game:
                 self.cursor += 1
             if not self.finished and t > self.notes[-1].t + TAIL_S:
                 self.finished = True
+            if self.backing is not None:
+                self._drive_backing(t)
 
             if self.sounds:
                 # count-in clicks, one per beat, high click on the first

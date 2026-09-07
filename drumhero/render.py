@@ -188,7 +188,7 @@ class Renderer:
         surf.blit(f.text(f"P {counts['PERFECT']}  G {counts['GOOD']}  O {counts['OK']}  M {counts['MISS']}  S {counts['STRAY']}",
                          f.small, DIM), (12 * S, 70 * S))
         right = [f"{fps:5.0f} fps", f"offset {offset:+.0f} ms", f"speed {speed:.2f}x", f"{g.chart.bpm:.0f} bpm",
-                 f"guide {'on' if g.guide else 'off'}"]
+                 f"guide {'on' if g.guide else 'off'}", f"backing {'on' if g.backing_on else 'off'}" if g.backing else "no backing"]
         for i, s in enumerate(right):
             ts = f.text(s, f.small, DIM)
             surf.blit(ts, (self.w - ts.get_width() - 12 * S, (10 + i * 20) * S))

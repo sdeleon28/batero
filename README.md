@@ -48,7 +48,8 @@ On the results screen the snare goes to the next level, the hi-hat retries and
 the kick goes back to the list. Hits are ignored for the first second after a
 level ends so the last fill does not navigate. Each drum acts at most every
 220 ms, so a double trigger is one press. The keyboard works everywhere too:
-arrows, Enter, Esc, and keys 1 to 4 on the hub.
+arrows, Enter, Esc, and keys 1 to 4 on the hub. `h j k l` do the same as the
+arrows, with `l` for Enter and `h` for Esc, for one-handed use.
 
 ## First launch: set up your kit
 
@@ -128,12 +129,25 @@ timing errors; the mean is your latency, the deviation is you.
 | R             | restart the level                  |
 | Enter         | next level, on the results screen  |
 | G             | guide track on / off               |
+| B             | backing loop on / off              |
+| h j k l       | same as the arrows, Enter and Esc in menus |
 | [ / ]         | scroll speed                       |
 | , / .         | input offset -/+ 5 ms              |
 | 1..9, 0       | hit lanes from the keyboard        |
 
 `--no-sound` disables audio entirely, `--no-guide` starts with the guide track
 off. If the audio crackles, raise `MIXER_BUFFER` in `drumhero/sounds.py`.
+
+## Backing loop
+
+Built-in levels play over a synthesized backing loop so they feel like music:
+a bass on the eighths, a soft chord pad and a plucked arpeggio over a four-bar
+progression, rendered once at the level's tempo (about 50 ms) the way the drum
+samples are. It starts with the count-in and stays bar-aligned; after a pause
+it rejoins at the next loop boundary. Each level gets a different progression.
+Songs from MIDI files get no loop, since a made-up progression would clash with
+the tune. Toggle it with B during play or from Setup, or start with
+`--no-backing`.
 
 ## Fullscreen
 

@@ -19,7 +19,7 @@ from .chart import BEATS, EXERCISES, build_lanes, load_midi_chart
 from .game import Game
 from .kit import default_kit, describe, load_kit, save_kit
 from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, lerp
-from .sounds import SoundBank
+from .sounds import PROGRESSIONS, SoundBank, backing_sound
 
 TARGET_FPS = 240
 CAPTURE_S = 1.5           # wizard: keep collecting note numbers this long after the first hit
@@ -53,6 +53,8 @@ class App:
         self.first_run = kit is None
         self.set_kit(kit or default_kit())
         self.guide = not args.no_guide
+        self.backing_on = not args.no_backing
+        self.backings = {}         # (bpm, progression, lead_in) -> (Sound, length)
         self.offset_ms = args.offset
         self.speed = args.speed
         self.results = {}          # chart name -> stats of the best run this session
@@ -133,6 +135,15 @@ class App:
 
     def items_for(self, cat):
         return {"kick": EXERCISES, "snare": BEATS, "hihat": self.load_songs()}.get(cat, [])
+
+    def backing_for(self, chart, prog_index, lead_in):
+        """Synthesized loop for a built-in level, cached. None when audio is off."""
+        if not self.sounds.ok:
+            return None, 0.0
+        key = (round(chart.bpm, 3), prog_index % len(PROGRESSIONS), round(lead_in, 4))
+        if key not in self.backings:
+            self.backings[key] = backing_sound(chart.bpm, prog_index, lead_in_s=lead_in)
+        return self.backings[key]
 
     # --- MIDI ------------------------------------------------------------------
     def open_midi(self, wanted):
@@ -347,7 +358,7 @@ class HubScreen(Screen):
                 self.f.center(surf, describe(self.app.kit), self.f.small, color, y + ph - 26 * S, x + pw / 2)
             if not self.app.has_drum(cat) and self.app.midi_in:
                 self.f.center(surf, "no pad assigned", self.f.small, JUDGE_COLORS["MISS"], y + 60 * S, x + pw / 2)
-        self.f.center(surf, f"{self.midi_line()}   ·   keys 1-4 or arrows + Enter   ·   F11 fullscreen   ·   Esc quit",
+        self.f.center(surf, f"{self.midi_line()}   ·   keys 1-4, arrows or hjkl + Enter   ·   F11 fullscreen   ·   Esc quit",
                       self.f.small, DIM, self.h - 30 * S)
 
 
@@ -367,6 +378,7 @@ class ListScreen(Screen):
             return [("Set up kit", describe(self.app.kit)),
                     ("Soundcheck", "hit every pad, see where it lands and hear it"),
                     (f"Guide sounds: {'on' if self.app.guide else 'off'}", "hear the chart as it crosses the line"),
+                    (f"Backing loop: {'on' if self.app.backing_on else 'off'}", "bass, chords and arpeggio under the built-in levels"),
                     ("Quit", "")]
         return [(ch.name, f"{ch.bpm:.0f} bpm · {len(ch.notes):3d} notes · {ch.desc}") for ch in self.app.items_for(self.cat)]
 
@@ -383,6 +395,8 @@ class ListScreen(Screen):
                 self.app.go(SoundcheckScreen(self.app))
             elif self.sel == 2:
                 self.app.guide = not self.app.guide
+            elif self.sel == 3:
+                self.app.backing_on = not self.app.backing_on
             else:
                 return False
         elif self.items():
@@ -409,9 +423,9 @@ class ListScreen(Screen):
             self.move(1)
         elif key in (pygame.K_UP, pygame.K_k):
             self.move(-1)
-        elif key in (pygame.K_RETURN, pygame.K_SPACE):
+        elif key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_l):
             return self.accept()
-        elif key == pygame.K_ESCAPE:
+        elif key in (pygame.K_ESCAPE, pygame.K_h):
             self.back()
         return True
 
@@ -449,7 +463,7 @@ class ListScreen(Screen):
                 surf.blit(ts, (self.w * 0.88 - ts.get_width(), y + 4 * S))
             y += row_h
         self.legend(surf, [("hihat", "down"), ("crash", "up"), ("snare", "select"), ("kick", "back")],
-                    keys="arrows · Enter · Esc")
+                    keys="arrows or j k · Enter or l · Esc or h")
 
 
 # ---------------------------------------------------------------------------
@@ -682,8 +696,13 @@ class PlayScreen(Screen):
         self.cat, self.index = cat, index
         self.chart = app.items_for(cat)[index]
         self.lanes, self.by_note = build_lanes(self.chart, app.kit)
+        backing, blen = (None, 0.0)
+        if cat in ("kick", "snare"):                       # built-in levels only; songs bring their own music
+            from .game import lead_in_for
+            backing, blen = app.backing_for(self.chart, index + (0 if cat == "kick" else 2), lead_in_for(self.chart.bpm))
         self.game = Game(self.chart, self.lanes, self.by_note, offset_ms=app.offset_ms, speed=app.speed,
-                         sounds=app.sounds, guide=app.guide)
+                         sounds=app.sounds, guide=app.guide, backing=backing, backing_len=blen,
+                         backing_on=app.backing_on)
         self.renderer = Renderer(self.game, app.size, app.fonts)
         self.recorded = False
         self.finished_at = None
@@ -734,6 +753,8 @@ class PlayScreen(Screen):
             g.offset_ms = self.app.offset_ms = g.offset_ms + 5
         elif key == pygame.K_g:
             g.guide = self.app.guide = not g.guide
+        elif key == pygame.K_b:
+            g.backing_on = self.app.backing_on = not g.backing_on
         elif key in KEY_LANES and KEY_LANES[key] < len(self.lanes) and not g.finished:
             g.hit_lane(KEY_LANES[key], 100)
         return True
@@ -755,6 +776,7 @@ class PlayScreen(Screen):
             self.app.go(ListScreen(self.app, self.cat, self.index))
 
     def leave(self):
+        self.game.stop_backing()
         self.record()
         if self.app.args.log:
             self.game.write_csv(self.app.args.log)
@@ -796,6 +818,7 @@ def main(argv=None):
     ap.add_argument("--fullscreen", action="store_true", help="start in fullscreen (F11 or Cmd+F toggles it)")
     ap.add_argument("--no-sound", action="store_true", help="disable all audio")
     ap.add_argument("--no-guide", action="store_true", help="start with the guide track off")
+    ap.add_argument("--no-backing", action="store_true", help="start with the backing loop off")
     ap.add_argument("--log", help="write every judged hit of the last run to this CSV")
     args = ap.parse_args(argv)
     App(args).run()
