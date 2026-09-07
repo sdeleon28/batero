@@ -1,3 +1,4 @@
 pygame-ce
 mido
 python-rtmidi
+numpy
