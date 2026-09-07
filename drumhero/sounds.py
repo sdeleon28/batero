@@ -201,3 +201,174 @@ def backing_sound(bpm, prog_index=0, bars=4, lead_in_s=0.0):
     snd = pygame.sndarray.make_sound(stereo)
     snd.set_volume(BACKING_GAIN)
     return snd, length
+
+
+# ---------------------------------------------------------------------------
+# Metronome: round, conga-like hits, pre-rendered for the whole level so they
+# are sample-accurate and sit inside the mix instead of on top of it.
+# ---------------------------------------------------------------------------
+METRONOME_GAIN = 0.6
+METRO_LEVELS = {"low": 1.0, "mid": 0.72, "tap": 0.34}
+
+
+def conga(f=180.0, dur=0.35, drop=1.35, decay=9.0, noise=0.12, seed=7):
+    """A tuned hand-drum: sine with a quick pitch drop, soft saturation, a breath of noise."""
+    t = _t(dur)
+    freq = f * (1 + (drop - 1) * np.exp(-t * 90))
+    phase = 2 * math.pi * np.cumsum(freq) / SR
+    body = np.sin(phase) * np.exp(-t * decay)
+    attack = _noise(len(t), seed) * np.exp(-t * 350) * noise
+    x = np.tanh(1.6 * (body + attack)) * np.minimum(1.0, t / 0.001)
+    return x / (np.max(np.abs(x)) or 1.0)
+
+
+METRO_HITS = {
+    "low": lambda: conga(150.0, 0.40, 1.4, 8.0, 0.10, 11),   # downbeat: low conga
+    "mid": lambda: conga(215.0, 0.30, 1.3, 11.0, 0.12, 12),  # beats 2, 3, 4
+    "tap": lambda: conga(330.0, 0.12, 1.2, 32.0, 0.25, 13),  # subdivisions: muted tap
+}
+
+
+def _mix_events(events, total_s):
+    """events: [(time_s, mono array, gain)] -> mono float32 of total_s seconds, peak 0.9."""
+    out = np.zeros(int(total_s * SR) + SR)
+    for t0, sig, gain in events:
+        i = int(round(t0 * SR))
+        if i < 0 or i >= len(out):
+            continue
+        j = min(i + len(sig), len(out))
+        out[i:j] += sig[: j - i] * gain
+    peak = np.max(np.abs(out))
+    if peak > 0.9:
+        out *= 0.9 / peak
+    return out.astype(np.float32)
+
+
+def render_metronome(chart, lead_in_s, total_s, mode="full"):
+    """Congas for every bar from the count-in to total_s (chart time). mode: full / beats."""
+    beat = chart.beat
+    hits = {k: f() for k, f in METRO_HITS.items()}
+    events = []
+    first_bar = -int(round(lead_in_s / (4 * beat)))
+    last_bar = int(total_s / (4 * beat)) + 1
+    for bar in range(first_bar, last_bar):
+        sub = chart.subdivision_at(max(0.0, bar * 4 * beat))
+        for b in range(4):
+            t0 = (bar * 4 + b) * beat
+            events.append((t0 + lead_in_s, hits["low" if b == 0 else "mid"], METRO_LEVELS["low" if b == 0 else "mid"]))
+            if mode == "full":
+                for k in range(1, sub):
+                    events.append((t0 + k * beat / sub + lead_in_s, hits["tap"], METRO_LEVELS["tap"]))
+    return _mix_events(events, lead_in_s + total_s)
+
+
+def render_backing_track(bpm, prog_index, lead_in_s, total_s):
+    """The 4-bar loop tiled from the count-in to total_s, chord 1 landing on chart time 0."""
+    loop, length = make_backing(bpm, prog_index)
+    loop = np.roll(loop, int(round(lead_in_s * SR)))
+    n = int((lead_in_s + total_s) * SR) + SR
+    reps = n // len(loop) + 1
+    return np.tile(loop, reps)[:n]
+
+
+class Track:
+    """A pre-rendered mono track on the chart timeline, starting at t0 (usually -lead_in).
+    Playback can start from any point, which makes pause/resume and late joins exact."""
+
+    def __init__(self, data_f32, t0, gain=1.0):
+        pcm = (np.clip(data_f32, -1, 1) * 32767).astype(np.int16)
+        self.pcm = np.ascontiguousarray(np.column_stack([pcm, pcm]))
+        self.t0 = t0
+        self.gain = gain
+        self.sound = None
+        self.playing = False
+
+    @property
+    def end(self):
+        return self.t0 + len(self.pcm) / SR
+
+    def start_at(self, t):
+        self.stop()
+        i = int(max(0.0, t - self.t0) * SR)
+        if i >= len(self.pcm):
+            return
+        self.sound = pygame.sndarray.make_sound(np.ascontiguousarray(self.pcm[i:]))
+        self.sound.set_volume(self.gain)
+        self.sound.play()
+        self.playing = True
+
+    def stop(self):
+        if self.sound is not None:
+            self.sound.stop()
+        self.sound = None
+        self.playing = False
+
+
+# ---------------------------------------------------------------------------
+# Menu music: a slow ambient texture for the hub and lists. Soft chords that
+# drift, a sparse pentatonic pluck with a delay tail, a low hum underneath.
+# ---------------------------------------------------------------------------
+MENU_MUSIC_GAIN = 0.32
+MENU_CHORDS = [[57, 60, 64, 67], [55, 59, 62, 66], [53, 57, 60, 64], [52, 55, 59, 62]]   # Am7 Gmaj7 Fmaj7 Em7
+MENU_PLUCKS = [69, 72, 74, 76, 79, 81, 84]                                             # A minor pentatonic
+
+
+def make_menu_music(bar_s=4.0, bars=8, sr=SR):
+    """Loop of `bars` bars of `bar_s` seconds. Chords change every two bars."""
+    total = bars * bar_s
+    n = int(total * sr)
+    tail = int(2.0 * sr)
+    out = np.zeros(n + tail)
+
+    def add(start_s, sig, gain):
+        i = int(round(start_s * sr))
+        j = min(i + len(sig), len(out))
+        if i < j:
+            out[i:j] += sig[: j - i] * gain
+
+    rng = np.random.default_rng(21)
+    for b in range(bars):
+        chord = MENU_CHORDS[(b // 2) % len(MENU_CHORDS)]
+        t0 = b * bar_s
+        # pad, with a slow swell so chords breathe
+        tp = np.arange(int(bar_s * sr) + int(1.0 * sr)) / sr
+        pad = np.zeros_like(tp)
+        for m in chord:
+            f = _midi_hz(m)
+            pad += _saw(tp * f * 1.004) + _saw(tp * f * 0.996) + 0.6 * np.sin(2 * np.pi * f / 2 * tp)
+        env = np.minimum(1.0, tp / 0.9) * np.minimum(1.0, np.maximum(0.0, (bar_s + 1.0 - tp) / 1.0))
+        env *= 0.85 + 0.15 * np.sin(2 * np.pi * tp / bar_s * 0.5)
+        pad = np.convolve(pad * env, np.ones(160) / 160, mode="same")
+        add(t0, pad, 0.10)
+        # sparse plucks: a few per bar, mostly on the eighths, with two soft echoes
+        for e in range(8):
+            if rng.random() > 0.4:
+                continue
+            note = MENU_PLUCKS[rng.integers(len(MENU_PLUCKS))] + (12 if rng.random() < 0.2 else 0)
+            f = _midi_hz(note)
+            ta = np.arange(int(1.2 * sr)) / sr
+            sig = (np.sin(2 * np.pi * f * ta) + 0.25 * np.sin(4 * np.pi * f * ta)) * np.exp(-ta * 3.0) * np.minimum(1.0, ta / 0.003)
+            when = t0 + e * bar_s / 8
+            add(when, sig, 0.16)
+            add(when + 0.375, sig, 0.08)
+            add(when + 0.75, sig, 0.04)
+    # low hum on the chord root
+    t_all = np.arange(n + tail) / sr
+    for b in range(0, bars, 2):
+        f = _midi_hz(MENU_CHORDS[(b // 2) % len(MENU_CHORDS)][0] - 24)
+        seg = slice(int(b * bar_s * sr), int((b + 2) * bar_s * sr))
+        tt = t_all[seg] - b * bar_s
+        env = np.minimum(1.0, tt / 0.5) * np.minimum(1.0, np.maximum(0.0, (2 * bar_s - tt) / 0.5))
+        out[seg] += np.sin(2 * np.pi * f * tt) * env * 0.12
+    out[:tail] += out[n:n + tail]
+    out = out[:n]
+    out = out / (np.max(np.abs(out)) or 1.0) * 0.8
+    return out.astype(np.float32)
+
+
+def menu_music_sound():
+    data = make_menu_music()
+    pcm = (data * 32767).astype(np.int16)
+    snd = pygame.sndarray.make_sound(np.ascontiguousarray(np.column_stack([pcm, pcm])))
+    snd.set_volume(MENU_MUSIC_GAIN)
+    return snd

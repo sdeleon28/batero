@@ -19,7 +19,9 @@ from .chart import BEATS, EXERCISES, build_lanes, load_midi_chart
 from .game import Game
 from .kit import default_kit, describe, load_kit, save_kit
 from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, lerp
-from .sounds import PROGRESSIONS, SoundBank, backing_sound
+from .game import TAIL_S, lead_in_for
+from .sounds import (BACKING_GAIN, METRONOME_GAIN, PROGRESSIONS, SoundBank, Track, menu_music_sound,
+                     render_backing_track, render_metronome)
 
 TARGET_FPS = 240
 CAPTURE_S = 1.5           # wizard: keep collecting note numbers this long after the first hit
@@ -54,7 +56,10 @@ class App:
         self.set_kit(kit or default_kit())
         self.guide = not args.no_guide
         self.backing_on = not args.no_backing
-        self.backings = {}         # (bpm, progression, lead_in) -> (Sound, length)
+        self.metronome_mode = "off" if args.no_metronome else "full"    # full / beats / off
+        self.menu_music_on = not args.no_menu_music
+        self.menu_music = None
+        self.track_cache = {}
         self.offset_ms = args.offset
         self.speed = args.speed
         self.results = {}          # chart name -> stats of the best run this session
@@ -136,14 +141,39 @@ class App:
     def items_for(self, cat):
         return {"kick": EXERCISES, "snare": BEATS, "hihat": self.load_songs()}.get(cat, [])
 
-    def backing_for(self, chart, prog_index, lead_in):
-        """Synthesized loop for a built-in level, cached. None when audio is off."""
+    def tracks_for(self, chart, prog_index):
+        """Pre-rendered backing (built-in levels only, prog_index None = none) and metronome
+        for this chart, on its timeline from -lead_in. Cached per chart and metronome mode."""
         if not self.sounds.ok:
-            return None, 0.0
-        key = (round(chart.bpm, 3), prog_index % len(PROGRESSIONS), round(lead_in, 4))
-        if key not in self.backings:
-            self.backings[key] = backing_sound(chart.bpm, prog_index, lead_in_s=lead_in)
-        return self.backings[key]
+            return {}
+        lead_in = lead_in_for(chart.bpm)
+        total = chart.length + TAIL_S + 0.5
+        out = {}
+        if prog_index is not None:
+            key = ("backing", chart.name, round(chart.bpm, 3), prog_index)
+            if key not in self.track_cache:
+                self.track_cache[key] = Track(render_backing_track(chart.bpm, prog_index, lead_in, total), -lead_in, BACKING_GAIN)
+            out["backing"] = self.track_cache[key]
+        if self.metronome_mode != "off":
+            key = ("metro", chart.name, round(chart.bpm, 3), self.metronome_mode)
+            if key not in self.track_cache:
+                self.track_cache[key] = Track(render_metronome(chart, lead_in, total, self.metronome_mode), -lead_in, METRONOME_GAIN)
+            out["metronome"] = self.track_cache[key]
+        return out
+
+    # --- menu music ------------------------------------------------------------------
+    def update_menu_music(self):
+        """Ambient loop in every screen except play. Called on each screen change."""
+        if not self.sounds.ok:
+            return
+        want = self.menu_music_on and not isinstance(self.screen_obj, PlayScreen)
+        if want and self.menu_music is None:
+            self.menu_music = menu_music_sound()
+        if want:
+            if not (self.menu_music.get_num_channels() > 0):
+                self.menu_music.play(loops=-1, fade_ms=600)
+        elif self.menu_music is not None:
+            self.menu_music.fadeout(300)
 
     # --- MIDI ------------------------------------------------------------------
     def open_midi(self, wanted):
@@ -189,6 +219,7 @@ class App:
     # --- screens ---------------------------------------------------------------
     def go(self, screen):
         self.screen_obj = screen
+        self.update_menu_music()
 
     def run(self):
         self.go(SetupScreen(self, first_run=True) if self.first_run and self.midi_in else HubScreen(self))
@@ -379,6 +410,8 @@ class ListScreen(Screen):
                     ("Soundcheck", "hit every pad, see where it lands and hear it"),
                     (f"Guide sounds: {'on' if self.app.guide else 'off'}", "hear the chart as it crosses the line"),
                     (f"Backing loop: {'on' if self.app.backing_on else 'off'}", "bass, chords and arpeggio under the built-in levels"),
+                    (f"Metronome: {self.app.metronome_mode}", "congas: full follows the subdivision, beats only marks the beats"),
+                    (f"Menu music: {'on' if self.app.menu_music_on else 'off'}", "ambient texture outside the game"),
                     ("Quit", "")]
         return [(ch.name, f"{ch.bpm:.0f} bpm · {len(ch.notes):3d} notes · {ch.desc}") for ch in self.app.items_for(self.cat)]
 
@@ -397,6 +430,12 @@ class ListScreen(Screen):
                 self.app.guide = not self.app.guide
             elif self.sel == 3:
                 self.app.backing_on = not self.app.backing_on
+            elif self.sel == 4:
+                modes = ["full", "beats", "off"]
+                self.app.metronome_mode = modes[(modes.index(self.app.metronome_mode) + 1) % 3]
+            elif self.sel == 5:
+                self.app.menu_music_on = not self.app.menu_music_on
+                self.app.update_menu_music()
             else:
                 return False
         elif self.items():
@@ -696,13 +735,12 @@ class PlayScreen(Screen):
         self.cat, self.index = cat, index
         self.chart = app.items_for(cat)[index]
         self.lanes, self.by_note = build_lanes(self.chart, app.kit)
-        backing, blen = (None, 0.0)
-        if cat in ("kick", "snare"):                       # built-in levels only; songs bring their own music
-            from .game import lead_in_for
-            backing, blen = app.backing_for(self.chart, index + (0 if cat == "kick" else 2), lead_in_for(self.chart.bpm))
         self.game = Game(self.chart, self.lanes, self.by_note, offset_ms=app.offset_ms, speed=app.speed,
-                         sounds=app.sounds, guide=app.guide, backing=backing, backing_len=blen,
-                         backing_on=app.backing_on)
+                         sounds=app.sounds, guide=app.guide)
+        self.game.metronome_mode = app.metronome_mode
+        prog = None if cat == "hihat" else index + (0 if cat == "kick" else 2)   # songs bring their own music
+        for name, track in app.tracks_for(self.chart, prog).items():
+            self.game.set_track(name, track, enabled=(app.backing_on if name == "backing" else True))
         self.renderer = Renderer(self.game, app.size, app.fonts)
         self.recorded = False
         self.finished_at = None
@@ -754,7 +792,17 @@ class PlayScreen(Screen):
         elif key == pygame.K_g:
             g.guide = self.app.guide = not g.guide
         elif key == pygame.K_b:
-            g.backing_on = self.app.backing_on = not g.backing_on
+            self.app.backing_on = not self.app.backing_on
+            g.enable_track("backing", self.app.backing_on)
+        elif key == pygame.K_m:
+            modes = ["full", "beats", "off"]
+            self.app.metronome_mode = modes[(modes.index(self.app.metronome_mode) + 1) % 3]
+            g.metronome_mode = self.app.metronome_mode
+            if self.app.metronome_mode == "off":
+                g.enable_track("metronome", False)
+            else:
+                prog = None if self.cat == "hihat" else self.index + (0 if self.cat == "kick" else 2)
+                g.set_track("metronome", self.app.tracks_for(self.chart, prog)["metronome"], True)
         elif key in KEY_LANES and KEY_LANES[key] < len(self.lanes) and not g.finished:
             g.hit_lane(KEY_LANES[key], 100)
         return True
@@ -776,7 +824,7 @@ class PlayScreen(Screen):
             self.app.go(ListScreen(self.app, self.cat, self.index))
 
     def leave(self):
-        self.game.stop_backing()
+        self.game.stop_tracks()
         self.record()
         if self.app.args.log:
             self.game.write_csv(self.app.args.log)
@@ -819,6 +867,8 @@ def main(argv=None):
     ap.add_argument("--no-sound", action="store_true", help="disable all audio")
     ap.add_argument("--no-guide", action="store_true", help="start with the guide track off")
     ap.add_argument("--no-backing", action="store_true", help="start with the backing loop off")
+    ap.add_argument("--no-metronome", action="store_true", help="start with the metronome off")
+    ap.add_argument("--no-menu-music", action="store_true", help="no ambient music in the menus")
     ap.add_argument("--log", help="write every judged hit of the last run to this CSV")
     args = ap.parse_args(argv)
     App(args).run()

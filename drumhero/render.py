@@ -4,6 +4,7 @@ import time
 
 import pygame
 
+from .chart import COUNT_LABELS
 from .game import Game
 
 LOOKAHEAD_S = 2.0        # seconds of chart visible above the line at speed 1.0
@@ -178,6 +179,8 @@ class Renderer:
                 surf.blit(es, (self.w / 2 - es.get_width() / 2, self.h * 0.30 + 60 * S))
                 es.set_alpha(255)
 
+        self.metronome(surf, now)
+
         # HUD with a backing so it stays readable over notes
         backing = pygame.Surface((int(360 * S), int(100 * S)))
         backing.fill(BG)
@@ -188,7 +191,9 @@ class Renderer:
         surf.blit(f.text(f"P {counts['PERFECT']}  G {counts['GOOD']}  O {counts['OK']}  M {counts['MISS']}  S {counts['STRAY']}",
                          f.small, DIM), (12 * S, 70 * S))
         right = [f"{fps:5.0f} fps", f"offset {offset:+.0f} ms", f"speed {speed:.2f}x", f"{g.chart.bpm:.0f} bpm",
-                 f"guide {'on' if g.guide else 'off'}", f"backing {'on' if g.backing_on else 'off'}" if g.backing else "no backing"]
+                 f"guide {'on' if g.guide else 'off'}",
+                 f"backing {'on' if g.track_enabled('backing') else 'off'}" if 'backing' in g.tracks else "no backing",
+                 f"metronome {g.metronome_mode}"]
         for i, s in enumerate(right):
             ts = f.text(s, f.small, DIM)
             surf.blit(ts, (self.w - ts.get_width() - 12 * S, (10 + i * 20) * S))
@@ -202,6 +207,41 @@ class Renderer:
             f.center(surf, g.chart.desc, f.mid, DIM, self.h * 0.45 + 80 * S)
         if finished:
             self.results(surf)
+
+    def metronome(self, surf, t):
+        """Four beat squares, each split into the current subdivision, lit in time."""
+        g, f, S = self.game, self.f, self.s
+        sub = g.chart.subdivision_at(t)
+        labels = COUNT_LABELS.get(sub, [str(i + 1) for i in range(sub)])
+        size, gap = 74 * S, 10 * S
+        total = 4 * size + 3 * gap
+        x0, y0 = self.w / 2 - total / 2, 10 * S
+        panel = pygame.Surface((int(total + 40 * S), int(size + 44 * S)))
+        panel.fill(BG)
+        panel.set_alpha(215)
+        surf.blit(panel, (int(x0 - 20 * S), 0))
+        pos = t / g.beat                         # in beats, negative during the count-in
+        beat_i = int(math.floor(pos)) % 4
+        frac = pos - math.floor(pos)
+        sub_i = min(sub - 1, int(frac * sub))
+        prog = frac * sub - sub_i                # 0..1 inside the current cell
+        for b in range(4):
+            x = x0 + b * (size + gap)
+            rect = pygame.Rect(int(x), int(y0), int(size), int(size))
+            pygame.draw.rect(surf, LANE_BG, rect, border_radius=int(8 * S))
+            cw = size / sub
+            for k in range(sub):
+                cell = pygame.Rect(int(x + k * cw), int(y0), int(cw) + 1, int(size))
+                if b == beat_i and k == sub_i:
+                    base = (255, 255, 255) if k == 0 else ACCENT
+                    fill = lerp(base, LANE_BG, 0.25 + 0.6 * prog)
+                    pygame.draw.rect(surf, fill, cell.inflate(-2, -2), border_radius=int(6 * S))
+                label = str(b + 1) if k == 0 else labels[k]
+                color = (20, 20, 24) if (b == beat_i and k == sub_i and prog < 0.5) else (TEXT if k == 0 else DIM)
+                f.center(surf, label, f.small if sub > 2 else f.mid, color, y0 + size / 2, x + (k + 0.5) * cw)
+            pygame.draw.rect(surf, ACCENT if b == beat_i else (50, 50, 60), rect, 3 if b == beat_i else 1, border_radius=int(8 * S))
+        name = {1: "quarter notes", 2: "eighth notes", 3: "triplets", 4: "sixteenth notes"}.get(sub, f"{sub} per beat")
+        f.center(surf, name, f.small, DIM, y0 + size + 12 * S)
 
     def results(self, surf):
         g = self.game

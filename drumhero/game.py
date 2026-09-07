@@ -30,12 +30,8 @@ def lead_in_for(bpm: float) -> float:
 
 
 class Game:
-    def __init__(self, chart, lanes, by_note, offset_ms=0.0, speed=1.0, sounds=None, guide=True,
-                 backing=None, backing_len=0.0, backing_on=True):
-        self.backing = backing              # looping pygame Sound, rotated for the lead-in
-        self.backing_len = backing_len
-        self.backing_on = backing_on
-        self.backing_playing = False
+    def __init__(self, chart, lanes, by_note, offset_ms=0.0, speed=1.0, sounds=None, guide=True):
+        self.tracks = {}                    # name -> (Track, enabled); pre-rendered audio on the chart timeline
         self.chart = chart
         self.notes = chart.notes
         self.lanes = lanes
@@ -51,7 +47,7 @@ class Game:
 
     # --- clock -------------------------------------------------------------
     def reset(self):
-        self.stop_backing()
+        self.stop_tracks()
         with self.lock:
             for n in self.notes:
                 n.state, n.judge, n.error_ms, n.sounded = "pending", None, None, False
@@ -85,26 +81,38 @@ class Game:
             else:
                 self.paused_total += time.perf_counter() - self.paused_at
                 self.paused_at = None
-        self.stop_backing()                 # after a resume it rejoins at the next loop boundary
+        self.stop_tracks()                  # on resume they restart from the exact position
 
-    def stop_backing(self):
-        if self.backing is not None and self.backing_playing:
-            self.backing.stop()
-        self.backing_playing = False
+    # --- pre-rendered tracks (backing, metronome) --------------------------------
+    def set_track(self, name, track, enabled=True):
+        old = self.tracks.get(name)
+        if old:
+            old[0].stop()
+        self.tracks[name] = (track, enabled)
 
-    def _drive_backing(self, t):
-        """Start the loop with the count-in, keep it bar-aligned, stop it when the level ends."""
-        want = self.backing_on and not self.finished
-        if not want:
-            self.stop_backing()
-            return
-        if self.backing_playing:
-            return
-        # loop boundaries sit at t = -lead_in + k * backing_len
-        phase = (t + self.lead_in) % self.backing_len
-        if t >= -self.lead_in - 0.004 and (phase < 0.05 or phase > self.backing_len - 0.004):
-            self.backing.play(loops=-1)
-            self.backing_playing = True
+    def enable_track(self, name, enabled):
+        if name in self.tracks:
+            track, _ = self.tracks[name]
+            self.tracks[name] = (track, enabled)
+            if not enabled:
+                track.stop()
+
+    def track_enabled(self, name):
+        return name in self.tracks and self.tracks[name][1]
+
+    def stop_tracks(self):
+        for track, _ in self.tracks.values():
+            track.stop()
+
+    def _drive_tracks(self, t):
+        """Start each enabled track at its own t0 (the count-in), restart it after a pause
+        from the current time, and stop everything when the level is over."""
+        for track, enabled in self.tracks.values():
+            want = enabled and not self.finished and t < track.end
+            if want and not track.playing and t >= track.t0 - 0.004:
+                track.start_at(t)
+            elif not want and track.playing:
+                track.stop()
 
     # --- input -------------------------------------------------------------
     def hit(self, note: int, velocity: int = 100, wall_t: float = None):
@@ -171,16 +179,9 @@ class Game:
                 self.cursor += 1
             if not self.finished and t > self.notes[-1].t + TAIL_S:
                 self.finished = True
-            if self.backing is not None:
-                self._drive_backing(t)
+            self._drive_tracks(t)
 
             if self.sounds:
-                # count-in clicks, one per beat, high click on the first
-                if t < 0:
-                    beat_idx = int((t + self.lead_in) // self.beat)
-                    if beat_idx != self.last_click_beat:
-                        self.last_click_beat = beat_idx
-                        self.sounds.play("click_hi" if beat_idx % 4 == 0 else "click", 100, 0.6)
                 # guide track: the chart's own notes as they cross the line
                 while self.guide_cursor < len(self.notes) and self.notes[self.guide_cursor].t <= t:
                     n = self.notes[self.guide_cursor]

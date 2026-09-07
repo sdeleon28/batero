@@ -130,6 +130,7 @@ timing errors; the mean is your latency, the deviation is you.
 | Enter         | next level, on the results screen  |
 | G             | guide track on / off               |
 | B             | backing loop on / off              |
+| M             | metronome full / beats / off       |
 | h j k l       | same as the arrows, Enter and Esc in menus |
 | [ / ]         | scroll speed                       |
 | , / .         | input offset -/+ 5 ms              |
@@ -137,6 +138,40 @@ timing errors; the mean is your latency, the deviation is you.
 
 `--no-sound` disables audio entirely, `--no-guide` starts with the guide track
 off. If the audio crackles, raise `MIXER_BUFFER` in `drumhero/sounds.py`.
+
+## Metronome
+
+Every level has a metronome that follows the subdivision being practised, with
+a visual counter and a sound that sits inside the mix.
+
+**The convention.** A chart's subdivision is the coarsest grid that covers its
+note onsets: quarter notes, eighths, triplets or sixteenths. It is decided per
+four-bar phrase, so a song can move from eighths in the verse to sixteenths in
+a fill section and the metronome follows. Built-in levels infer it from their
+notes the same way; a level can force it with `subdivision=` in `_build`. MIDI
+songs get it automatically, no tagging needed. Humanized files are fine: an
+onset counts as on the grid within 12% of a step, and 95% of onsets must fit.
+
+**The counter.** Four squares at the top, one per beat, each split into the
+subdivision with the counting syllables: `1 e & a` for sixteenths, `1 &` for
+eighths, `1 trip let` for triplets. The current cell lights up, white on the
+beat and blue on the subdivisions, fading over the cell's duration. It runs
+through the count-in too.
+
+**The sound.** Congas rather than clicks: a low conga on the downbeat, a mid
+conga on beats 2 to 4, a soft muted tap on the subdivisions, all synthesized
+with a pitch drop and gentle saturation so they stay round over a long session.
+The whole metronome is pre-rendered for the level, sample-accurate, and started
+with the count-in; after a pause it restarts from the exact position. Modes:
+`full` (subdivisions), `beats` (beats only), `off`. Press M during play or
+change it in Setup; `--no-metronome` starts off.
+
+## Menu music
+
+Outside the game an ambient loop plays: drifting seventh chords, a sparse
+pentatonic pluck with echoes and a low hum, 32 seconds, synthesized at first
+use. It fades out when a level starts. Toggle in Setup or start with
+`--no-menu-music`.
 
 ## Backing loop
 

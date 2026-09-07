@@ -50,16 +50,85 @@ class Lane:
     notes: set = field(default_factory=set)   # input note numbers that hit this lane
 
 
+# Counting syllables per subdivision; the first one is replaced by the beat number.
+COUNT_LABELS = {1: ["1"], 2: ["1", "&"], 3: ["1", "trip", "let"], 4: ["1", "e", "&", "a"]}
+GRIDS = [1, 2, 3, 4]            # subdivisions per beat we recognise, coarsest first
+GRID_TOLERANCE = 0.12           # of a grid step
+GRID_COVERAGE = 0.95            # fraction of onsets that must sit on the grid
+PHRASE_BARS = 4                 # subdivision is decided per phrase of this many bars
+
+
 @dataclass
 class Chart:
     name: str
     notes: list
     bpm: float = 120.0
     desc: str = ""
+    segments: list = None       # [(start_bar, subdivision), ...] sorted; inferred when None
 
     @property
     def length(self):
         return self.notes[-1].t if self.notes else 0.0
+
+    @property
+    def beat(self):
+        return 60 / self.bpm
+
+    @property
+    def bars(self):
+        return int(self.length / (4 * self.beat)) + 1
+
+    def segment_list(self):
+        if self.segments is None:
+            self.segments = infer_segments(self.notes, self.bpm)
+        return self.segments
+
+    def subdivision_at(self, t: float) -> int:
+        """Subdivisions per beat for chart time t (negative t = count-in uses the first)."""
+        bar = int(t // (4 * self.beat))
+        sub = self.segment_list()[0][1]
+        for start, n in self.segment_list():
+            if start <= bar:
+                sub = n
+            else:
+                break
+        return sub
+
+
+def _grid_fits(positions, n):
+    """positions: onsets in beats within a phrase. True if nearly all sit on the 1/n grid."""
+    if not positions:
+        return True
+    ok = 0
+    for x in positions:
+        k = round(x * n)
+        if abs(x * n - k) <= GRID_TOLERANCE:
+            ok += 1
+    return ok / len(positions) >= GRID_COVERAGE
+
+
+def infer_segments(notes, bpm, phrase_bars=PHRASE_BARS):
+    """Per phrase, the coarsest grid that covers the onsets. Phrases without notes keep
+    the previous subdivision. Consecutive equal phrases merge into one segment."""
+    beat = 60 / bpm
+    phrase_len = phrase_bars * 4 * beat
+    if not notes:
+        return [(0, 1)]
+    phrases = int(notes[-1].t / phrase_len) + 1
+    buckets = [[] for _ in range(phrases)]
+    for n in notes:
+        i = min(phrases - 1, int(n.t / phrase_len))
+        buckets[i].append(n.t / beat)
+    segments, current = [], None
+    for i, pos in enumerate(buckets):
+        if pos:
+            sub = next((g for g in GRIDS if _grid_fits(pos, g)), GRIDS[-1])
+        else:
+            sub = current if current is not None else 1
+        if sub != current:
+            segments.append((i * phrase_bars, sub))
+            current = sub
+    return segments
 
 
 def key_for_note(num: int) -> str:
@@ -90,14 +159,15 @@ def load_midi_chart(path: str, channel: int = None) -> Chart:
 # Built-in levels. A pattern is a function bar -> [(beat, key, velocity), ...]
 # with beat counted from 0 within a 4/4 bar.
 # ---------------------------------------------------------------------------
-def _build(name, desc, bpm, bars, pattern) -> Chart:
+def _build(name, desc, bpm, bars, pattern, subdivision=None) -> Chart:
+    """subdivision: force the metronome grid (per beat); None = infer from the notes."""
     beat = 60 / bpm
     notes = []
     for bar in range(bars):
         for b, key, vel in pattern(bar):
             notes.append(ChartNote((bar * 4 + b) * beat, key, vel))
     notes.sort(key=lambda n: (n.t, n.key))
-    return Chart(name, notes, bpm, desc)
+    return Chart(name, notes, bpm, desc, [(0, subdivision)] if subdivision else None)
 
 
 def _kicks_on_beats(bar):
