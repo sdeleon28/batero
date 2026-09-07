@@ -16,6 +16,25 @@ COLORS = {
 # Fallback kit, General MIDI numbers, used until the wizard has run.
 DEFAULT_KIT = {"kick": [36, 35], "snare": [38, 40], "hihat": [42, 46, 44], "crash": [49, 57]}
 
+# Notes that come from the same pad depending on pedal position or zone. When the kit
+# wizard hears one of them, it assigns the whole family, so a hi-hat captured with the
+# pedal up still counts when it is closed.
+NOTE_FAMILIES = [
+    {42, 46, 22, 26},    # hi-hat with a stick: bow closed/open, edge closed/open (pedal chick 44 stays separate)
+    {49, 55},            # Roland crash 1: bow, edge
+    {57, 52},            # Roland crash 2 / china: bow, edge
+    {51, 53, 59},        # ride: bow, bell, edge
+]
+
+
+def expand_family(notes):
+    out = set(notes)
+    for fam in NOTE_FAMILIES:
+        if out & fam:
+            out |= fam
+    return sorted(out)
+
+
 # Chart notes from MIDI files are folded into instruments when they are the GM drum numbers.
 GM_TO_INSTRUMENT = {35: "kick", 36: "kick", 38: "snare", 40: "snare",
                     42: "hihat", 44: "hihat", 46: "hihat", 49: "crash", 57: "crash"}

@@ -26,6 +26,7 @@ from .sounds import (BACKING_GAIN, METRONOME_GAIN, PROGRESSIONS, SoundBank, Trac
 TARGET_FPS = 240
 CAPTURE_S = 1.5           # wizard: keep collecting note numbers this long after the first hit
 NAV_DEBOUNCE_S = 0.22     # one drum hit = one menu action, at most this often per drum
+NAV_MIN_VELOCITY = 45     # softer hits (sticks resting on the snare) never navigate
 RESULTS_GRACE_S = 1.0     # after a level ends, ignore drum hits this long before they navigate
 KEY_LANES = {pygame.K_1: 0, pygame.K_2: 1, pygame.K_3: 2, pygame.K_4: 3, pygame.K_5: 4,
              pygame.K_6: 5, pygame.K_7: 6, pygame.K_8: 7, pygame.K_9: 8, pygame.K_0: 9}
@@ -33,7 +34,7 @@ MODULE_HINTS = ("td-", "td1", "td2", "td5", "alesis", "nitro", "strike", "dtx", 
 WIZARD_PROMPTS = {
     "kick": "Hit the KICK a few times",
     "snare": "Hit the SNARE a few times",
-    "hihat": "Hit the HI-HAT a few times, edge and top",
+    "hihat": "Hit the HI-HAT a few times, edge and top, pedal up and down",
     "crash": "Hit the CRASH a few times",
 }
 
@@ -237,7 +238,7 @@ class App:
     def nav_hit(self, note, velocity):
         """A drum hit used as a button. Debounced, sounded, queued for the main thread."""
         inst = self.instrument_for(note)
-        if inst is None:
+        if inst is None or velocity < NAV_MIN_VELOCITY:
             return
         now = time.perf_counter()
         if now - self.last_nav.get(inst, 0) < NAV_DEBOUNCE_S:
@@ -584,7 +585,7 @@ class SetupScreen(Screen):
         kit = {}
         taken = set()
         for k in reversed(C.INSTRUMENTS):        # a number heard for two drums goes to the later one
-            kit[k] = [n for n in self.captured[k] if n not in taken]
+            kit[k] = [n for n in C.expand_family(self.captured[k]) if n not in taken]
             taken.update(kit[k])
         self.app.set_kit(kit)
         save_kit(kit, self.app.args.kit) if self.app.args.kit else save_kit(kit)
@@ -653,7 +654,9 @@ class SetupScreen(Screen):
         self.f.center(surf, WIZARD_PROMPTS[key], self.f.mid, TEXT, cy - r - 40 * S)
 
         if captured[key]:
-            self.f.center(surf, "got note " + ", ".join(map(str, captured[key])), self.f.mid, JUDGE_COLORS["PERFECT"], cy + r + 40 * S)
+            fam = [n for n in C.expand_family(captured[key]) if n not in captured[key]]
+            got = "got note " + ", ".join(map(str, captured[key])) + (f"  (+ {', '.join(map(str, fam))} same pad)" if fam else "")
+            self.f.center(surf, got, self.f.mid, JUDGE_COLORS["PERFECT"], cy + r + 40 * S)
             if flash:
                 self.f.center(surf, f"last: note {flash[1]} · velocity {flash[2]}", self.f.small, DIM, cy + r + 70 * S)
             if capture_start is not None:

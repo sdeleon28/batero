@@ -47,7 +47,8 @@ screen shows which does what, lighting up when you hit it:
 On the results screen the snare goes to the next level, the hi-hat retries and
 the kick goes back to the list. Hits are ignored for the first second after a
 level ends so the last fill does not navigate. Each drum acts at most every
-220 ms, so a double trigger is one press. The keyboard works everywhere too:
+220 ms, so a double trigger is one press, and hits softer than velocity 45
+never navigate, so resting the sticks on the snare does nothing. The keyboard works everywhere too:
 arrows, Enter, Esc, and keys 1 to 4 on the hub. `h j k l` do the same as the
 arrows, with `l` for Enter and `h` for Esc, for one-handed use.
 
@@ -63,6 +64,10 @@ velocity of each hit.
 - Enter moves on early, S skips a drum you do not have, Backspace redoes the
   previous one, Esc cancels.
 - A number heard for two drums goes to the later one.
+- Notes that come from the same pad in another state are added automatically:
+  hear a hi-hat with the pedal up (46, or 26 on the edge) and the closed and
+  pedal notes (42, 44, 22) come along, so it counts closed too. Same for
+  crash and ride bow/edge/bell pairs.
 - The kit is saved to `~/.config/drumhero/kit.json` (`--kit` picks another
   file). Rerun the wizard any time from the menu with "Set up kit".
 
