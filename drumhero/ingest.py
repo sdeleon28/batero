@@ -92,7 +92,7 @@ def track_beats(audio_path, bpm_hint=None, offset_hint=None):
     4. Linear fit over anchored beats: if the residual std is under CONSTANT_STD_MS the
        song was played to a click and the grid is the fitted constant tempo over the
        whole track; otherwise the grid follows the anchored beats with a light smoothing.
-    5. Octave guard: a grid faster than 1.5x the tempo estimate is decimated.
+    5. Octave guard against the tempo hint (song.json "bpm", approximate is enough).
     The first downbeat is the beat nearest offset_hint when given, else the beat nearest
     the first strong onset (most recordings start on a downbeat; pickups need the hint)."""
     import librosa
@@ -143,14 +143,17 @@ def track_beats(audio_path, bpm_hint=None, offset_hint=None):
             beats, bpm, mode = np.concatenate([[knots[0]], knots[0] + np.cumsum(sm)]), 60.0 / float(np.median(sm)), \
                 f"variable tempo (residual {std:.1f} ms)"
 
-    while bpm > 1.5 * hint and len(beats) > 16:          # tracked the eighths: keep the stronger half
-        idx = [np.clip(np.round(beats[k::2] * ffps).astype(int), 0, len(fine) - 1) for k in (0, 1)]
-        k = int(np.argmax([fine[ix].sum() for ix in idx]))
+    # Octave guard. Audio alone cannot settle it (bass on the eighths makes offbeats look
+    # like beats in any band), so the tempo hint decides: halve a grid faster than 1.5x
+    # the hint, double one slower than 1/1.5. Always put an approximate bpm in song.json.
+    beats = np.asarray(beats)
+    while bpm > 1.5 * hint and len(beats) > 16:
+        ix = [np.clip(np.round(beats[k::2] * ffps).astype(int), 0, len(fine) - 1) for k in (0, 1)]
+        k = int(np.argmax([fine[i_].sum() for i_ in ix]))          # keep the stronger half
         beats, bpm = beats[k::2], bpm / 2
-    while bpm < hint / 1.5 and len(beats) > 8:            # tracked the half notes: insert midpoints
+    while bpm < hint / 1.5 and len(beats) > 8:
         beats = np.sort(np.concatenate([beats, (beats[:-1] + beats[1:]) / 2]))
         bpm *= 2
-
     if offset_hint is None:
         peaks = librosa.onset.onset_detect(onset_envelope=onset, sr=sr, units="frames")
         strong = [f for f in peaks if onset[f] >= 0.35 * onset.max()]
@@ -226,8 +229,8 @@ def ingest(folder, bpm=None, offset=None):
     grid = write_chart(os.path.join(folder, "chart.mid"), beats, phase, events, bars_needed)
     meta["offset"] = round(beats[phase], 4)
     meta["tracked_bpm"] = round(60.0 / statistics.median(np.diff(grid)), 2)
-    json.dump(meta, open(meta_path, "w"), indent=2)
     meta["tempo_mode"] = mode
+    json.dump(meta, open(meta_path, "w"), indent=2)
     json.dump({"beats": [round(b, 4) for b in beats], "downbeat_index": phase, "tempo": tempo, "mode": mode},
               open(os.path.join(folder, "beats.json"), "w"))
     print(f"{meta.get('title', folder)}: {len(beats)} beats tracked, {mode}, {meta['tracked_bpm']} bpm, "
