@@ -17,7 +17,7 @@ import pygame
 from . import chart as C
 from .chart import BEATS, EXERCISES, build_lanes, load_midi_chart, load_song_folder
 from .game import Game
-from .kit import default_kit, describe, load_kit, load_settings, save_kit, save_settings
+from .kit import default_kit, describe, describe_pads, load_kit, load_settings, save_kit, save_settings
 from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, draw_hihat_state, lerp
 from .game import TAIL_S, lead_in_for
 from .ghost import GhostFilter
@@ -32,12 +32,6 @@ RESULTS_GRACE_S = 1.0     # after a level ends, ignore drum hits this long befor
 KEY_LANES = {pygame.K_1: 0, pygame.K_2: 1, pygame.K_3: 2, pygame.K_4: 3, pygame.K_5: 4,
              pygame.K_6: 5, pygame.K_7: 6, pygame.K_8: 7, pygame.K_9: 8, pygame.K_0: 9}
 MODULE_HINTS = ("td-", "td1", "td2", "td5", "alesis", "nitro", "strike", "dtx", "roland", "drum")
-WIZARD_PROMPTS = {
-    "kick": "Hit the KICK a few times",
-    "snare": "Hit the SNARE a few times",
-    "hihat": "Hit the HI-HAT a few times, edge and top, pedal up and down",
-    "crash": "Hit the CRASH a few times",
-}
 
 # What each drum does inside a list. The hub uses the drums as section buttons instead.
 NAV = {"snare": "accept", "kick": "back", "hihat": "next", "crash": "prev"}
@@ -150,17 +144,22 @@ class App:
 
     # --- kit / content -----------------------------------------------------------
     def set_kit(self, kit):
+        """kit: {zone key: [note numbers]}. A number in two zones goes to the earlier zone."""
         self.kit = kit
-        self.note_to_inst = {}
-        for inst in reversed(C.INSTRUMENTS):
-            for n in kit.get(inst, []):
-                self.note_to_inst[n] = inst
+        self.note_to_zone = {}
+        for zk in reversed(C.ZONE_KEYS):
+            for n in kit.get(zk, []):
+                self.note_to_zone[n] = zk
+
+    def zone_for(self, note):
+        return self.note_to_zone.get(note)
 
     def instrument_for(self, note):
-        return self.note_to_inst.get(note)
+        zk = self.note_to_zone.get(note)
+        return C.ZONE[zk].instrument if zk else None
 
     def has_drum(self, inst):
-        return bool(self.midi_in) and bool(self.kit.get(inst))
+        return bool(self.midi_in) and bool(C.kit_notes(self.kit, inst))
 
     def load_songs(self):
         if self.songs is None:
@@ -586,21 +585,22 @@ class ListScreen(Screen):
 
 # ---------------------------------------------------------------------------
 class SetupScreen(Screen):
-    """Onboarding wizard: hit each drum in turn; every distinct note number heard is assigned."""
+    """Onboarding wizard: one step per zone of the kit (snare head, snare rim, ride bell...).
+    Every distinct note number heard during a step is assigned to that zone."""
 
     def __init__(self, app, first_run=False):
         super().__init__(app)
         self.first_run = first_run
         self.lock = threading.Lock()
         self.step = 0
-        self.captured = {k: [] for k in C.INSTRUMENTS}
+        self.captured = {k: [] for k in C.ZONE_KEYS}
         self.capture_start = None
         self.flash = None              # (wall_t, note, velocity)
         self.done_at = None
 
     @property
     def key(self):
-        return C.INSTRUMENTS[self.step] if self.step < len(C.INSTRUMENTS) else None
+        return C.ZONE_KEYS[self.step] if self.step < len(C.ZONE_KEYS) else None
 
     def on_note(self, note, velocity):       # drums are being captured here, never navigation
         with self.lock:
@@ -613,18 +613,18 @@ class SetupScreen(Screen):
             if note not in self.captured[key]:
                 self.captured[key].append(note)
             self.flash = (now, note, velocity)
-        self.app.sounds.play(key, velocity)
+        self.app.sounds.play(C.ZONE[key].instrument, velocity)
 
     def advance(self):
         self.capture_start = None
         self.step += 1
-        if self.step >= len(C.INSTRUMENTS):
+        if self.step >= len(C.ZONE_KEYS):
             self.finish()
 
     def finish(self):
         kit = {}
         taken = set()
-        for k in reversed(C.INSTRUMENTS):        # a number heard for two drums goes to the later one
+        for k in reversed(C.ZONE_KEYS):        # a number heard for two zones goes to the later one
             kit[k] = [n for n in C.expand_family(self.captured[k]) if n not in taken]
             taken.update(kit[k])
         self.app.set_kit(kit)
@@ -663,63 +663,89 @@ class SetupScreen(Screen):
             capture_start, flash, done_at = self.capture_start, self.flash, self.done_at
         now = time.perf_counter()
         S = self.s
-        self.f.center(surf, "Set up your kit", self.f.large, TEXT, 60 * S)
+        self.f.center(surf, "Set up your kit", self.f.large, TEXT, 44 * S)
         if not self.app.midi_in:
             self.f.center(surf, "No MIDI input connected. Start with --port NAME, or press Esc and play with keys 1-4.",
                           self.f.small, JUDGE_COLORS["MISS"], self.h - 76 * S)
-            self.f.center(surf, "Keys 1-4 here stand in for a pad and assign the default General MIDI numbers.",
+            self.f.center(surf, "Any number key here stands in for the pad and assigns its factory note number.",
                           self.f.small, DIM, self.h - 54 * S)
 
-        for i, k in enumerate(C.INSTRUMENTS):
-            x = self.w / 2 + (i - 1.5) * 150 * S
-            state_color = C.COLORS[k] if (i < step or done_at) else (ACCENT if i == step else DIM)
-            pygame.draw.circle(surf, state_color, (int(x), int(120 * S)), int(10 * S), 0 if (i < step or done_at) else 2)
-            self.f.center(surf, C.LABELS[k], self.f.small, state_color, 145 * S, x)
-            got = captured[k]
-            self.f.center(surf, "/".join(map(str, got)) if got else ("skipped" if i < step else ""), self.f.small, DIM, 165 * S, x)
+        # left: every zone with its state
+        x0, y0, row = 40 * S, 92 * S, 31 * S
+        last_pad = None
+        y = y0
+        for i, zk in enumerate(C.ZONE_KEYS):
+            z = C.ZONE[zk]
+            if z.pad != last_pad:
+                if last_pad is not None:
+                    y += 6 * S
+                last_pad = z.pad
+            color = C.COLORS[z.instrument]
+            got = captured[zk]
+            if done_at is not None or i < step:
+                dot, tcol = (color if got else DIM), (TEXT if got else DIM)
+                note_txt = "/".join(map(str, got)) if got else "skipped"
+            elif i == step:
+                dot, tcol = ACCENT, ACCENT
+                note_txt = "/".join(map(str, got)) if got else "..."
+            else:
+                dot, tcol, note_txt = DIM, DIM, ""
+            cy = y + row / 2
+            if i == step and done_at is None:
+                pygame.draw.rect(surf, LANE_BG, (x0 - 14 * S, y, 360 * S, row), border_radius=int(8 * S))
+            pygame.draw.circle(surf, dot, (int(x0), int(cy)), int(6 * S), 0 if (got or i == step) else 2)
+            surf.blit(self.f.text(z.label, self.f.small, tcol), (x0 + 16 * S, cy - 10 * S))
+            surf.blit(self.f.text(note_txt, self.f.small, DIM if i != step else ACCENT), (x0 + 200 * S, cy - 10 * S))
+            y += row
 
         if done_at is not None:
-            self.f.center(surf, "Kit saved", self.f.big, JUDGE_COLORS["PERFECT"], self.h * 0.45)
-            self.f.center(surf, describe(self.app.kit), self.f.small, DIM, self.h * 0.45 + 60 * S)
+            self.f.center(surf, "Kit saved", self.f.big, JUDGE_COLORS["PERFECT"], self.h * 0.42, self.w * 0.65)
+            self.f.center(surf, describe(self.app.kit), self.f.small, DIM, self.h * 0.42 + 60 * S, self.w * 0.65)
             return
 
-        color = C.COLORS[key]
-        cx, cy = self.w / 2, self.h * 0.5
-        r = 110 * S
+        z = C.ZONE[key]
+        color = C.COLORS[z.instrument]
+        cx, cy = self.w * 0.65, self.h * 0.47
+        r = 96 * S
+        k = 0.0
         if flash and now - flash[0] < 0.25:
             k = 1 - (now - flash[0]) / 0.25
             pygame.draw.circle(surf, lerp(LANE_BG, color, k), (int(cx), int(cy)), int(r + 40 * S * (1 - k)))
         pygame.draw.circle(surf, color, (int(cx), int(cy)), int(r), max(2, int(4 * S)))
-        self.f.center(surf, C.LABELS[key].upper(), self.f.big, color, cy)
-        self.f.center(surf, WIZARD_PROMPTS[key], self.f.mid, TEXT, cy - r - 40 * S)
+        self.f.center(surf, z.pad.upper(), self.f.large, lerp(color, BG, k), cy - 16 * S, cx)   # dark on the flash
+        self.f.center(surf, z.part.upper() if z.part else "", self.f.mid, lerp(TEXT, BG, k), cy + 24 * S, cx)
+        self.f.center(surf, f"step {step + 1} of {len(C.ZONE_KEYS)}", self.f.small, DIM, cy - r - 62 * S, cx)
+        self.f.center(surf, z.prompt, self.f.mid, TEXT, cy - r - 34 * S, cx)
 
         if captured[key]:
             fam = [n for n in C.expand_family(captured[key]) if n not in captured[key]]
-            got = "got note " + ", ".join(map(str, captured[key])) + (f"  (+ {', '.join(map(str, fam))} same pad)" if fam else "")
-            self.f.center(surf, got, self.f.mid, JUDGE_COLORS["PERFECT"], cy + r + 40 * S)
+            got = "got note " + ", ".join(map(str, captured[key])) + (f"  (+ {', '.join(map(str, fam))} same zone)" if fam else "")
+            self.f.center(surf, got, self.f.mid, JUDGE_COLORS["PERFECT"], cy + r + 36 * S, cx)
             if flash:
-                self.f.center(surf, f"last: note {flash[1]} · velocity {flash[2]}", self.f.small, DIM, cy + r + 70 * S)
+                self.f.center(surf, f"last: note {flash[1]} · velocity {flash[2]}", self.f.small, DIM, cy + r + 66 * S, cx)
             if capture_start is not None:
                 frac = max(0.0, 1 - (now - capture_start) / CAPTURE_S)
                 bw = 300 * S
-                pygame.draw.rect(surf, LANE_BG, (cx - bw / 2, cy + r + 95 * S, bw, 6 * S))
-                pygame.draw.rect(surf, color, (cx - bw / 2, cy + r + 95 * S, bw * frac, 6 * S))
-                self.f.center(surf, "keep hitting, moving on...", self.f.small, DIM, cy + r + 118 * S)
+                pygame.draw.rect(surf, LANE_BG, (cx - bw / 2, cy + r + 91 * S, bw, 6 * S))
+                pygame.draw.rect(surf, color, (cx - bw / 2, cy + r + 91 * S, bw * frac, 6 * S))
+                self.f.center(surf, "keep hitting, moving on...", self.f.small, DIM, cy + r + 114 * S, cx)
         else:
-            self.f.center(surf, "waiting...", self.f.mid, DIM, cy + r + 40 * S)
-        self.f.center(surf, "Enter next · S skip this drum · Backspace redo previous · Esc cancel", self.f.small, DIM, self.h - 28 * S)
+            self.f.center(surf, "waiting...", self.f.mid, DIM, cy + r + 36 * S, cx)
+        self.f.center(surf, "Enter next · S skip a zone you don't have · Backspace redo previous · Esc cancel",
+                      self.f.small, DIM, self.h - 28 * S)
 
 
 # ---------------------------------------------------------------------------
 class SoundcheckScreen(Screen):
-    """Hit every pad: it lights up, plays its sound and shows the note number and velocity.
-    Once every assigned drum has been heard, the snare continues and the kick redoes the wizard."""
+    """Hit every zone: its row lights up, plays the pad's sound and shows the note number
+    and velocity. Once every assigned zone has been heard, the snare continues and the
+    kick redoes the wizard."""
 
     def __init__(self, app, first_run=False):
         super().__init__(app)
         self.first_run = first_run
         self.lock = threading.Lock()
-        self.heard = {k: None for k in C.INSTRUMENTS}     # instrument -> (wall_t, note, velocity)
+        self.heard = {k: None for k in C.ZONE_KEYS}       # zone -> (wall_t, note, velocity)
         self.unknown = None                                # (wall_t, note, velocity) for unassigned pads
         self.ghost = None                                  # (wall_t, note, velocity, why) for dropped notes
 
@@ -728,20 +754,21 @@ class SoundcheckScreen(Screen):
             self.ghost = (time.perf_counter(), note, velocity, why)
 
     def needed(self):
-        return [k for k in C.INSTRUMENTS if self.app.kit.get(k)]
+        return [k for k in C.ZONE_KEYS if self.app.kit.get(k)]
 
     def all_heard(self):
         return all(self.heard[k] for k in self.needed())
 
     def on_note(self, note, velocity):
-        inst = self.app.instrument_for(note)
+        zk = self.app.zone_for(note)
         now = time.perf_counter()
         with self.lock:
-            if inst is None:
+            if zk is None:
                 self.unknown = (now, note, velocity)
                 return
+            inst = C.ZONE[zk].instrument
             navigate = self.all_heard() and NAV.get(inst) in ("accept", "back")
-            self.heard[inst] = (now, note, velocity)
+            self.heard[zk] = (now, note, velocity)
         if navigate:
             self.app.nav_hit(note, velocity)
         else:
@@ -760,9 +787,9 @@ class SoundcheckScreen(Screen):
             self.done()
         elif key == pygame.K_BACKSPACE:
             self.app.go(SetupScreen(self.app, first_run=self.first_run))
-        elif key in KEY_LANES and KEY_LANES[key] < 4:
+        elif key in KEY_LANES and KEY_LANES[key] < len(C.INSTRUMENTS):
             inst = C.INSTRUMENTS[KEY_LANES[key]]
-            notes = self.app.kit.get(inst) or C.DEFAULT_KIT[inst]
+            notes = C.kit_notes(self.app.kit, inst) or C.DEFAULT_KIT[C.INSTRUMENT_ZONES[inst][0]]
             self.on_note(notes[0], 100)
         return True
 
@@ -777,48 +804,64 @@ class SoundcheckScreen(Screen):
             ghost = self.ghost
         now = time.perf_counter()
         S = self.s
+        kit = self.app.kit
         ready = self.all_heard()
-        self.f.center(surf, "Soundcheck", self.f.large, TEXT, 60 * S)
-        self.f.center(surf, "hit every pad: it should light up its drum and sound like it", self.f.small, DIM, 96 * S)
+        self.f.center(surf, "Soundcheck", self.f.large, TEXT, 44 * S)
+        self.f.center(surf, "hit every zone: it should light up and sound like it", self.f.small, DIM, 82 * S)
 
-        n = len(C.INSTRUMENTS)
-        cy, r = self.h * 0.47, 82 * S
-        for i, inst in enumerate(C.INSTRUMENTS):
-            cx = self.w / 2 + (i - (n - 1) / 2) * 250 * S
-            color = C.COLORS[inst]
-            assigned = bool(self.app.kit.get(inst))
-            h = heard[inst]
-            k = max(0.0, 1 - (now - h[0]) / 0.3) if h else 0.0
-            vel = h[2] / 127 if h else 0
-            if k > 0:
-                pygame.draw.circle(surf, lerp(LANE_BG, color, 0.5 * k), (int(cx), int(cy)), int(r + (30 + 40 * vel) * S * (1 - k)))
-            pygame.draw.circle(surf, lerp(LANE_BG, color, 0.25 + 0.75 * k) if assigned else LANE_BG, (int(cx), int(cy)), int(r))
-            pygame.draw.circle(surf, color if assigned else (60, 60, 70), (int(cx), int(cy)), int(r), max(2, int(4 * S)))
-            self.f.center(surf, C.LABELS[inst].upper(), self.f.mid, TEXT if assigned else DIM, cy, cx)
-            notes = "/".join(map(str, sorted(self.app.kit.get(inst, [])))) or "not assigned"
-            self.f.center(surf, notes, self.f.small, DIM, cy + r + 24 * S, cx)
-            if h:
-                self.f.center(surf, f"note {h[1]} · vel {h[2]}", self.f.small, color, cy + r + 46 * S, cx)
-                self.f.center(surf, "✓", self.f.mid, JUDGE_COLORS["PERFECT"], cy - r - 24 * S, cx)
-            elif assigned:
-                self.f.center(surf, "waiting", self.f.small, DIM, cy + r + 46 * S, cx)
+        cols, side, gap = 4, 40 * S, 14 * S
+        cw = (self.w - 2 * side - (cols - 1) * gap) / cols
+        row, head = 24 * S, 34 * S
+        top = 104 * S
+        card_h = head + 3 * row + 10 * S
+        for i, (pad, zones) in enumerate(C.PADS):
+            col, r_ = i % cols, i // cols
+            x, y = side + col * (cw + gap), top + r_ * (card_h + gap)
+            color = C.COLORS[C.ZONE[zones[0]].instrument]
+            assigned = any(kit.get(zk) for zk in zones)
+            hot = max((max(0.0, 1 - (now - heard[zk][0]) / 0.3) for zk in zones if heard[zk]), default=0.0)
+            rect = pygame.Rect(int(x), int(y), int(cw), int(card_h))
+            pygame.draw.rect(surf, lerp(lerp(LANE_BG, color, 0.10 if assigned else 0.0), color, 0.35 * hot), rect, border_radius=int(12 * S))
+            pygame.draw.rect(surf, color if assigned else (60, 60, 70), rect, max(1, int(2 * S)), border_radius=int(12 * S))
+            pygame.draw.circle(surf, color if assigned else (60, 60, 70), (int(x + 18 * S), int(y + head / 2)), int(7 * S))
+            surf.blit(self.f.text(pad, self.f.mid, TEXT if assigned else DIM), (x + 32 * S, y + head / 2 - 13 * S))
+            if all(heard[zk] for zk in zones if kit.get(zk)) and assigned:
+                surf.blit(self.f.text("✓", self.f.mid, JUDGE_COLORS["PERFECT"]), (x + cw - 30 * S, y + head / 2 - 13 * S))
+            for j, zk in enumerate(zones):
+                z = C.ZONE[zk]
+                ry = y + head + j * row
+                notes = kit.get(zk, [])
+                h = heard[zk]
+                k = max(0.0, 1 - (now - h[0]) / 0.3) if h else 0.0
+                if k > 0:
+                    pygame.draw.rect(surf, lerp(LANE_BG, color, 0.6 * k), (x + 6 * S, ry, cw - 12 * S, row), border_radius=int(6 * S))
+                label = f"{z.part or 'pad':<6}{'/'.join(map(str, notes)) if notes else '-'}"
+                surf.blit(self.f.text(label, self.f.small, TEXT if notes else DIM), (x + 14 * S, ry + 3 * S))
+                if h:
+                    right = f"✓ {h[1]} v{h[2]}" if now - h[0] < 2.0 else "✓"
+                    ts = self.f.text(right, self.f.small, color)
+                else:
+                    ts = self.f.text("waiting" if notes else "", self.f.small, DIM)
+                surf.blit(ts, (x + cw - 14 * S - ts.get_width(), ry + 3 * S))
 
+        bottom = top + 2 * card_h + gap
+        if C.kit_notes(kit, "hihat"):
+            draw_hihat_state(surf, self.f, self.app.ghosts, self.w / 2, bottom + 52 * S, S)
+
+        my = self.h * 0.84
         if unknown and now - unknown[0] < 2.5:
-            self.f.center(surf, f"note {unknown[1]} is not assigned to any drum (vel {unknown[2]})",
-                          self.f.mid, JUDGE_COLORS["MISS"], self.h * 0.78)
-            self.f.center(surf, "if that pad should count, redo the setup and hit it during its drum", self.f.small, DIM, self.h * 0.78 + 30 * S)
-
-        if ghost and now - ghost[0] < 1.5:
-            self.f.center(surf, f"ignored note {ghost[1]} vel {ghost[2]}: {ghost[3]}", self.f.small, DIM, self.h * 0.78 + 56 * S)
-        if self.app.kit.get("hihat"):
-            i = C.INSTRUMENTS.index("hihat")
-            draw_hihat_state(surf, self.f, self.app.ghosts, self.w / 2 + (i - (n - 1) / 2) * 250 * S, cy + r + 110 * S, S)
+            self.f.center(surf, f"note {unknown[1]} is not assigned to any zone (vel {unknown[2]})",
+                          self.f.mid, JUDGE_COLORS["MISS"], my - 30 * S)
+            self.f.center(surf, "if that pad should count, redo the setup and hit it during its zone", self.f.small, DIM, my)
+        elif ghost and now - ghost[0] < 1.5:
+            self.f.center(surf, f"ignored note {ghost[1]} vel {ghost[2]}: {ghost[3]}", self.f.small, DIM, my)
+        elif ready:
+            self.f.center(surf, "All zones heard.", self.f.mid, JUDGE_COLORS["PERFECT"], my - 30 * S)
 
         if ready:
-            self.f.center(surf, "All pads heard.", self.f.mid, JUDGE_COLORS["PERFECT"], self.h * 0.78 - 30 * S if not unknown or now - unknown[0] >= 2.5 else self.h * 0.70)
             self.legend(surf, [("snare", "continue"), ("kick", "redo setup")], keys="Enter continue · Backspace redo setup")
         else:
-            self.f.center(surf, "Enter skip · Backspace redo setup · keys 1-4 stand in for the pads", self.f.small, DIM, self.h - 28 * S)
+            self.f.center(surf, "Enter skip · Backspace redo setup · keys 1-7 stand in for the pads", self.f.small, DIM, self.h - 28 * S)
 
 
 # ---------------------------------------------------------------------------

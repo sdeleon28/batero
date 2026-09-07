@@ -36,7 +36,7 @@ The hub shows four colored sections, one per drum. Strike the drum to open it:
 | kick   | Exercises | one drum at a time, slow               |
 | snare  | Beats     | full grooves                           |
 | hi-hat | Songs     | MIDI files from `songs/` or the CLI    |
-| crash  | Setup     | kit wizard, guide sounds, quit         |
+| crash  | Setup     | kit wizard, soundcheck, sounds, quit   |
 
 Inside a section the drums are buttons, and the legend at the bottom of every
 screen shows which does what, lighting up when you hit it:
@@ -54,53 +54,48 @@ arrows, with `l` for Enter and `h` for Esc, for one-handed use.
 
 ## First launch: set up your kit
 
-The first time a MIDI input is connected the wizard runs. It asks for the kick,
-the snare, the hi-hat and the crash, one at a time. Hit each drum a few times:
-every distinct note number heard in the next 1.5 seconds is assigned to that
-drum, so for the hi-hat hit the top and the edge, and stomp the pedal if you
-want chicks to count. The pad on screen flashes and shows the note number and
-velocity of each hit.
+The first time a MIDI input is connected the wizard runs. It walks through every
+zone of a TD-17 kit, one step each, head or bow before rim or edge:
 
-- Enter moves on early, S skips a drum you do not have, Backspace redoes the
+| pad | zones |
+|---|---|
+| Kick | pad |
+| Snare | head, rim |
+| Hi-hat | bow, edge, pedal (the chick) |
+| Crash L / Crash R | bow, edge |
+| Rack tom / Floor tom | head, rim |
+| Ride | bow, edge, bell |
+
+Hit the zone a few times: every distinct note number heard in the next 1.5
+seconds is assigned to it. The pad on screen flashes and shows the note number
+and velocity of each hit; the list on the left shows what every zone got.
+
+- Enter moves on early, S skips a zone you do not have, Backspace redoes the
   previous one, Esc cancels.
-- A number heard for two drums goes to the later one.
-- Notes that come from the same pad in another state are added automatically:
-  hear a hi-hat with the pedal up (46, or 26 on the edge) and the closed and
-  pedal notes (42, 44, 22) come along, so it counts closed too. Same for
-  crash and ride bow/edge/bell pairs.
+- A number heard in two steps goes to the later one, so a rimshot that leaks
+  into the "snare head" step still ends up as "snare rim".
+- The hi-hat's open and closed notes come in pairs: hear 46 (bow, pedal up) and
+  42 comes along; hear 22 (edge, pedal down) and 26 comes along. So one strike
+  per zone is enough, whatever the pedal was doing.
 - The kit is saved to `~/.config/drumhero/kit.json` (`--kit` picks another
-  file). Rerun the wizard any time from the menu with "Set up kit".
+  file), one list of note numbers per zone. Kits saved by earlier versions are
+  spread over the zones by their factory numbers. Rerun the wizard any time from
+  the menu with "Set up kit".
 
-The hi-hat pedal position (CC4) is ignored for now; every hi-hat note counts
-as a hi-hat hit.
-
-## Hi-hat ghost filter
-
-Working the hi-hat pedal makes a Roland module send stick notes nobody played:
-a soft one just before the chick, a loud splash a few milliseconds after it,
-and a settling hit while the pedal is still moving. `drumhero/ghost.py` drops
-them the way hhmapper does: hi-hat notes below velocity 25, within 60 ms after
-a chick, or while the pedal moved 20 or more CC4 steps in the last 50 ms.
-Anything below velocity 8 is dropped on every pad. The soundcheck shows what
-was ignored and why; the play HUD counts ghosts.
-
-The full description of the gesture, the measured ghost notes and the filter
-rules is the "hi-hat gesture" section of `CLAUDE.md`, kept identical in the
-hhmapper repo, so both projects treat the hi-hat the same way.
-
-**Hi-hat state on screen.** Whenever a level has a hi-hat lane, and in the
-soundcheck, two cymbals in the top right show the pedal live: the gap follows
-CC4, the label reads TIGHT, MID or OPEN with the raw value, and the last stroke
-shows its openness and zone (bow or edge) with note and velocity. Ignored
-ghost notes appear there too, with the reason.
+Lessons so far only use kick, snare, hi-hat and crash; a chart's hi-hat notes
+are satisfied by any hi-hat zone, crash notes by either crash. The other zones
+are stored now so later lessons (rimshots, ride bell, toms) can use them, and
+MIDI files that carry toms or ride get lanes bound to those pads.
 
 ## Soundcheck
 
-After the wizard, and any time from Setup, the soundcheck screen shows the four
-pads. Hit each one: it lights up, plays its sound and shows the note number and
-velocity it sent. A pad that is not assigned to any drum is called out in red
-with its note number so you can redo the setup. Once every assigned drum has
-been heard, the snare continues to the hub and the kick goes back to the wizard.
+After the wizard, and any time from Setup, the soundcheck screen shows the eight
+pads with their zones. Hit each zone: its row lights up, the pad plays its sound
+and the row shows the note number and velocity it sent. A note that is not
+assigned to any zone is called out in red with its number so you can redo the
+setup. The hi-hat widget under the cards shows the pedal openness and the last
+stroke. Once every assigned zone has been heard, the snare continues to the hub
+and the kick goes back to the wizard.
 
 ## Levels
 

@@ -49,6 +49,26 @@ def crash():
     return (x + shimmer) * np.exp(-t * 2.4) * (1 - np.exp(-t * 200))
 
 
+def tom(f0=170.0, dur=0.45, seed=5):
+    t = _t(dur)
+    freq = f0 * (1 + 0.6 * np.exp(-t * 30))              # short pitch bend down
+    phase = 2 * math.pi * np.cumsum(freq) / SR
+    body = np.sin(phase) * np.exp(-t * 7)
+    attack = _noise(len(t), seed) * np.exp(-t * 60) * 0.3
+    return body + attack
+
+
+def floor_tom():
+    return tom(105.0, 0.6, seed=8)
+
+
+def ride():
+    t = _t(1.2)
+    x = np.diff(_noise(len(t), 6), prepend=0.0)          # bright wash
+    ping = np.sin(2 * math.pi * 3200 * t) * np.exp(-t * 12) * 0.5 + np.sin(2 * math.pi * 4700 * t) * np.exp(-t * 9) * 0.3
+    return x * np.exp(-t * 4) * 0.5 + ping
+
+
 def click(high=False):
     t = _t(0.03)
     return np.sin(2 * math.pi * (1600 if high else 1000) * t) * np.exp(-t * 120)
@@ -110,6 +130,7 @@ class SoundBank:
         self.sounds = {
             "kick": _to_sound(kick()), "snare": _to_sound(snare()),
             "hihat": _to_sound(hihat()), "crash": _to_sound(crash()),
+            "tom1": _to_sound(tom()), "floor": _to_sound(floor_tom()), "ride": _to_sound(ride()),
             "click": _to_sound(click()), "click_hi": _to_sound(click(high=True)),
         }
 

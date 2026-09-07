@@ -7,26 +7,81 @@ from dataclasses import dataclass, field
 
 import mido
 
-# Instruments the onboarding wizard asks for, in order.
-INSTRUMENTS = ["kick", "snare", "hihat", "crash"]
-LABELS = {"kick": "Kick", "snare": "Snare", "hihat": "Hi-Hat", "crash": "Crash"}
+# --- the kit -------------------------------------------------------------------------
+# A zone is one strikeable part of the TD-17 (snare head, snare rim, ride bell, ...).
+# The wizard asks for every zone in this order, so the saved kit knows the whole kit even
+# though lessons only use a few instruments so far. Head/bow zones come before rim/edge
+# zones on purpose: a note heard in two steps goes to the later one.
+@dataclass(frozen=True)
+class Zone:
+    key: str
+    label: str          # "Snare rim"
+    pad: str            # the physical pad: "Snare"
+    part: str           # "head" / "rim" / "bow" / "edge" / "bell" / "pedal"
+    instrument: str     # chart key these hits count for
+    prompt: str         # wizard instruction
+    defaults: tuple     # General MIDI / TD-17 factory note numbers
+
+
+ZONES = [
+    Zone("kick", "Kick", "Kick", "", "kick", "Hit the KICK a few times", (36, 35)),
+    Zone("snare", "Snare head", "Snare", "head", "snare", "Hit the SNARE head a few times", (38,)),
+    Zone("snare_rim", "Snare rim", "Snare", "rim", "snare", "Hit the SNARE RIM: rimshots and cross-stick", (40, 37)),
+    Zone("hihat", "Hi-hat bow", "Hi-hat", "bow", "hihat", "Hit the HI-HAT on top (bow), pedal up and down", (42, 46)),
+    Zone("hihat_edge", "Hi-hat edge", "Hi-hat", "edge", "hihat", "Hit the HI-HAT EDGE, pedal up and down", (22, 26)),
+    Zone("hihat_pedal", "Hi-hat pedal", "Hi-hat", "pedal", "hihat", "Stomp the HI-HAT PEDAL a few times (chick)", (44,)),
+    Zone("crash", "Crash L bow", "Crash L", "bow", "crash", "Hit the LEFT CRASH on the bow", (49,)),
+    Zone("crash_edge", "Crash L edge", "Crash L", "edge", "crash", "Hit the LEFT CRASH on the edge", (55,)),
+    Zone("crash2", "Crash R bow", "Crash R", "bow", "crash", "Hit the RIGHT CRASH on the bow", (57,)),
+    Zone("crash2_edge", "Crash R edge", "Crash R", "edge", "crash", "Hit the RIGHT CRASH on the edge", (52,)),
+    Zone("tom1", "Rack tom head", "Rack tom", "head", "tom1", "Hit the RACK TOM head", (48,)),
+    Zone("tom1_rim", "Rack tom rim", "Rack tom", "rim", "tom1", "Hit the RACK TOM RIM", (50,)),
+    Zone("floor", "Floor tom head", "Floor tom", "head", "floor", "Hit the FLOOR TOM head", (43, 45)),
+    Zone("floor_rim", "Floor tom rim", "Floor tom", "rim", "floor", "Hit the FLOOR TOM RIM", (58, 47)),
+    Zone("ride", "Ride bow", "Ride", "bow", "ride", "Hit the RIDE on the bow", (51,)),
+    Zone("ride_edge", "Ride edge", "Ride", "edge", "ride", "Hit the RIDE on the edge", (59,)),
+    Zone("ride_bell", "Ride bell", "Ride", "bell", "ride", "Hit the RIDE BELL", (53,)),
+]
+ZONE = {z.key: z for z in ZONES}
+ZONE_KEYS = [z.key for z in ZONES]
+PADS = []                       # [(pad name, [zone keys]), ...] in wizard order
+for _z in ZONES:
+    if not PADS or PADS[-1][0] != _z.pad:
+        PADS.append((_z.pad, []))
+    PADS[-1][1].append(_z.key)
+
+# Instruments: what charts refer to. The first four also drive the menus.
+INSTRUMENTS = ["kick", "snare", "hihat", "crash", "tom1", "floor", "ride"]
+LABELS = {"kick": "Kick", "snare": "Snare", "hihat": "Hi-Hat", "crash": "Crash",
+          "tom1": "Rack tom", "floor": "Floor tom", "ride": "Ride"}
 COLORS = {
     "kick": (245, 90, 90),
     "snare": (250, 170, 60),
     "hihat": (245, 230, 80),
     "crash": (110, 220, 110),
+    "tom1": (80, 200, 230),
+    "floor": (100, 130, 250),
+    "ride": (190, 110, 240),
 }
-# Fallback kit, General MIDI numbers, used until the wizard has run.
-DEFAULT_KIT = {"kick": [36, 35], "snare": [38, 40], "hihat": [42, 46, 44], "crash": [49, 57]}
+INSTRUMENT_ZONES = {inst: [z.key for z in ZONES if z.instrument == inst] for inst in INSTRUMENTS}
+# Fallback kit, General MIDI / TD-17 factory numbers, used until the wizard has run.
+DEFAULT_KIT = {z.key: list(z.defaults) for z in ZONES}
 
-# Notes that come from the same pad depending on pedal position or zone. When the kit
-# wizard hears one of them, it assigns the whole family, so a hi-hat captured with the
-# pedal up still counts when it is closed.
+
+def kit_notes(kit: dict, instrument: str):
+    """Every input note number of an instrument across its zones."""
+    out = set()
+    for zk in INSTRUMENT_ZONES.get(instrument, []):
+        out.update(kit.get(zk, []))
+    return sorted(out)
+
+
+# Notes that come from the same zone depending on pedal position. When the kit wizard
+# hears one of them, it assigns the pair, so a hi-hat captured with the pedal up still
+# counts when it is closed.
 NOTE_FAMILIES = [
-    {42, 46, 22, 26},    # hi-hat with a stick: bow closed/open, edge closed/open (pedal chick 44 stays separate)
-    {49, 55},            # Roland crash 1: bow, edge
-    {57, 52},            # Roland crash 2 / china: bow, edge
-    {51, 53, 59},        # ride: bow, bell, edge
+    {42, 46},    # hi-hat bow: closed / open
+    {22, 26},    # hi-hat edge: closed / open
 ]
 
 
@@ -39,16 +94,17 @@ def expand_family(notes):
 
 
 # Chart notes from MIDI files are folded into instruments when they are the GM drum numbers.
-GM_TO_INSTRUMENT = {35: "kick", 36: "kick", 38: "snare", 40: "snare",
-                    42: "hihat", 44: "hihat", 46: "hihat", 49: "crash", 57: "crash"}
+GM_TO_INSTRUMENT = {35: "kick", 36: "kick", 37: "snare", 38: "snare", 40: "snare",
+                    22: "hihat", 26: "hihat", 42: "hihat", 44: "hihat", 46: "hihat",
+                    49: "crash", 52: "crash", 55: "crash", 57: "crash",
+                    47: "tom1", 48: "tom1", 50: "tom1", 41: "floor", 43: "floor", 45: "floor", 58: "floor",
+                    51: "ride", 53: "ride", 59: "ride"}
 GM_DRUM_NAMES = {
     37: "Side Stick", 39: "Clap", 41: "Floor Tom 2", 43: "Floor Tom", 45: "Low Tom", 47: "Mid Tom",
     48: "High Tom 2", 50: "High Tom", 51: "Ride", 52: "China", 53: "Ride Bell", 54: "Tambourine",
     55: "Splash", 56: "Cowbell", 58: "Vibraslap", 59: "Ride 2",
 }
-EXTRA_PALETTE = [
-    (80, 200, 230), (100, 130, 250), (190, 110, 240), (240, 120, 190), (140, 200, 160), (200, 200, 200),
-]
+EXTRA_PALETTE = [(240, 120, 190), (140, 200, 160), (200, 200, 200), (230, 200, 120)]
 
 
 @dataclass
@@ -392,7 +448,7 @@ def build_lanes(chart: Chart, kit: dict):
     lanes, by_note, extra = [], {}, 0
     for i, key in enumerate(ordered):
         if key in INSTRUMENTS:
-            lane = Lane(i, key, LABELS[key], COLORS[key], set(kit.get(key, [])))
+            lane = Lane(i, key, LABELS[key], COLORS[key], set(kit_notes(kit, key)))
         else:
             num = int(key[1:])
             lane = Lane(i, key, GM_DRUM_NAMES.get(num, f"note {num}"), EXTRA_PALETTE[extra % len(EXTRA_PALETTE)], {num})
