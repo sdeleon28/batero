@@ -6,7 +6,7 @@ from .chart import DEFAULT_KIT, INSTRUMENT_ZONES, PADS, ZONE, ZONE_KEYS
 
 KIT_PATH = os.path.expanduser("~/.config/drumhero/kit.json")
 SETTINGS_PATH = os.path.expanduser("~/.config/drumhero/settings.json")
-DEFAULT_SETTINGS = {"audio_device": None, "fullscreen": True}
+DEFAULT_SETTINGS = {"audio_device": None, "fullscreen": True, "midi_trace": None}
 
 
 def load_settings(path=SETTINGS_PATH):

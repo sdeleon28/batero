@@ -69,6 +69,10 @@ class App:
         self.fullscreen = False
         self.drum_queue = deque()  # navigation hits, handed to the screen on the main thread
         self.ghosts = GhostFilter()  # drops the hi-hat notes the pedal produces on its own
+        self.midi_trace = None       # one line per note-on, for latency measurements (--midi-trace or settings)
+        trace = getattr(args, "midi_trace", None) or self.settings.get("midi_trace")
+        if trace:
+            self.midi_trace = open(os.path.expanduser(trace), "a")
         self.last_nav = {}
         self.legend_flash = {}     # instrument -> wall time of its last navigation hit
 
@@ -258,6 +262,7 @@ class App:
             print("No MIDI input: keyboard only. Inputs: " + (", ".join(names) or "none"))
 
     def on_midi(self, msg):
+        t_cb = time.perf_counter()
         if msg.type == "control_change":
             self.ghosts.control_change(msg.control, msg.value)
         elif msg.type == "note_on" and msg.velocity > 0:
@@ -267,8 +272,14 @@ class App:
             why = self.ghosts.reason(msg.note, msg.velocity)
             if why is not None:
                 scr.on_ghost(msg.note, msg.velocity, why)
+                result = why
             else:
-                scr.on_note(msg.note, msg.velocity)
+                result = scr.on_note(msg.note, msg.velocity)
+            if self.midi_trace is not None:
+                # wall clock at the callback, note, velocity, outcome, microseconds spent judging
+                self.midi_trace.write(f"{time.time():.6f} {msg.note} {msg.velocity} {result or '-'} "
+                                      f"{(time.perf_counter() - t_cb) * 1e6:.0f}\n")
+                self.midi_trace.flush()
 
     def nav_hit(self, note, velocity):
         """A drum hit used as a button. Debounced, sounded, queued for the main thread."""
@@ -891,8 +902,9 @@ class PlayScreen(Screen):
     def on_note(self, note, velocity):        # MIDI thread: judge immediately while playing
         if self.nav_ready():
             self.app.nav_hit(note, velocity)
-        else:
-            self.game.hit(note, velocity)
+            return "nav"
+        j = self.game.hit(note, velocity)
+        return f"{j}" if j else "unmapped"
 
     def on_drum(self, inst):
         if not self.nav_ready():
@@ -1008,6 +1020,8 @@ def main(argv=None):
     ap.add_argument("--no-metronome", action="store_true", help="start with the metronome off")
     ap.add_argument("--no-menu-music", action="store_true", help="no ambient music in the menus")
     ap.add_argument("--log", help="write every judged hit of the last run to this CSV")
+    ap.add_argument("--midi-trace", metavar="FILE",
+                    help="append one line per note-on (wall time, note, velocity, outcome, judge µs) for latency measurements")
     args = ap.parse_args(argv)
     App(args).run()
 
