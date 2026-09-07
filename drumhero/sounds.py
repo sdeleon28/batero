@@ -86,14 +86,14 @@ class SoundBank:
         self.device = None
         if not enabled:
             return
-        if pygame.mixer.get_init():
-            pygame.mixer.quit()
         name = None
         if device:
-            names = output_devices()
+            names = output_devices()            # needs SDL audio up: list before quitting the mixer
             name = next((n for n in names if device.lower() in n.lower()), None)
             if name is None:
                 print(f"audio device '{device}' not found, using the default. Available: {', '.join(names) or 'none'}")
+        if pygame.mixer.get_init():
+            pygame.mixer.quit()
         try:
             pygame.mixer.pre_init(SR, -16, 2, MIXER_BUFFER)
             if name:
