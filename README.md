@@ -19,13 +19,36 @@ python3 -m venv .venv
 ```
 .venv/bin/python -m drumhero                      # auto-picks a port that looks like a drum module
 .venv/bin/python -m drumhero --port TD-17         # pick the MIDI input explicitly
-.venv/bin/python -m drumhero song.mid             # add a MIDI file as an extra level
-.venv/bin/python -m drumhero song.mid --channel 10
+.venv/bin/python -m drumhero song.mid             # add MIDI files to the Songs section
+.venv/bin/python -m drumhero --songs ~/mids       # scan another folder (default: ./songs)
 .venv/bin/python -m drumhero --log hits.csv       # dump every judged hit of the last run
 ```
 
 Without a MIDI input you can play with the keyboard: keys `1`..`9`, `0` hit
 lanes 1..10.
+
+## Navigating with the drums
+
+The hub shows four colored sections, one per drum. Strike the drum to open it:
+
+| drum   | section   | what is in it                          |
+|--------|-----------|----------------------------------------|
+| kick   | Exercises | one drum at a time, slow               |
+| snare  | Beats     | full grooves                           |
+| hi-hat | Songs     | MIDI files from `songs/` or the CLI    |
+| crash  | Setup     | kit wizard, guide sounds, quit         |
+
+Inside a section the drums are buttons, and the legend at the bottom of every
+screen shows which does what, lighting up when you hit it:
+
+- **hi-hat** moves down, **crash** moves up
+- **snare** accepts, **kick** goes back
+
+On the results screen the snare goes to the next level, the hi-hat retries and
+the kick goes back to the list. Hits are ignored for the first second after a
+level ends so the last fill does not navigate. Each drum acts at most every
+220 ms, so a double trigger is one press. The keyboard works everywhere too:
+arrows, Enter, Esc, and keys 1 to 4 on the hub.
 
 ## First launch: set up your kit
 
@@ -47,22 +70,15 @@ as a hi-hat hit.
 
 ## Levels
 
-The first levels are warm-ups, one drum at a time, at slow tempos:
+Exercises are warm-ups, one or two drums at slow tempos: kick on the beat,
+snare on the beat, snare on 2 and 4, hi-hat on the beat, crash on the beat,
+kick and snare, alternating, hi-hat eighths. Beats are full grooves from a
+basic beat at 85 bpm up to a rock beat at 130.
 
-1. Kick on every beat, 70 bpm
-2. Snare on 2 and 4, 70 bpm
-3. Kick and snare, 80 bpm
-4. Hi-hat on every beat, 80 bpm
-5. Basic beat, 85 bpm
-6. Eighth-note hats, 95 bpm
-7. Crash on the one, 100 bpm
-8. Rock beat, 110 bpm
-9. Rock beat at 130 bpm
-
-A MIDI file given on the command line shows up as the last level. Its General
-MIDI drum numbers fold into the four instruments (36 kick, 38 snare, 42/44/46
-hi-hat, 49/57 crash); any other note number gets a lane of its own, matched by
-raw number.
+Songs are MIDI files from the `songs/` folder next to this README, or given on
+the command line. Their General MIDI drum numbers fold into the four
+instruments (36 kick, 38 snare, 42/44/46 hi-hat, 49/57 crash); any other note
+number gets a lane of its own, matched by raw number.
 
 Each level starts with a one-bar count-in with clicks. The level select shows
 your best accuracy and mean timing for the session.
@@ -98,7 +114,7 @@ timing errors; the mean is your latency, the deviation is you.
 | key           | action                             |
 |---------------|------------------------------------|
 | arrows, Enter | navigate menus                     |
-| Esc           | back / menu                        |
+| Esc           | back                               |
 | Space         | pause / resume                     |
 | R             | restart the level                  |
 | Enter         | next level, on the results screen  |

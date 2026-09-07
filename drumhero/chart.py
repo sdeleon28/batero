@@ -140,17 +140,41 @@ def _rock_beat(bar):
     return out
 
 
-LEVELS = [
-    _build("1. Kick", "Kick on every beat. Get a feel for the line.", 70, 8, _kicks_on_beats),
-    _build("2. Snare", "Snare on 2 and 4.", 70, 8, _snare_2_4),
-    _build("3. Kick and snare", "Kick on 1 and 3, snare on 2 and 4.", 80, 8, _kick_snare),
-    _build("4. Hi-hat", "Hi-hat on every beat.", 80, 8, _hats_quarters),
-    _build("5. Basic beat", "Kick, snare and quarter-note hats together.", 85, 8, _basic_beat),
-    _build("6. Eighth-note hats", "Same beat, hats on the eighths.", 95, 12, _eighth_beat),
-    _build("7. Crash on the one", "Crash at the start of every four bars.", 100, 16, _crash_beat),
-    _build("8. Rock beat", "Kick and snare variations every few bars.", 110, 16, _rock_beat),
-    _build("9. Rock beat, faster", "The same beat at 130.", 130, 16, _rock_beat),
+def _snares_on_beats(bar):
+    return [(b, "snare", 110) for b in range(4)]
+
+
+def _kick_snare_alternating(bar):
+    return [(0, "kick", 110), (1, "snare", 110), (2, "kick", 110), (3, "snare", 110)]
+
+
+def _hats_eighths(bar):
+    return [(e / 2, "hihat", 85 if e % 2 == 0 else 70) for e in range(8)]
+
+
+def _crash_quarters(bar):
+    return [(b, "crash", 110) for b in range(4)]
+
+
+# Exercises: one or two drums, slow. Beats: full grooves.
+EXERCISES = [
+    _build("Kick on the beat", "Kick on every beat. Get a feel for the line.", 70, 8, _kicks_on_beats),
+    _build("Snare on the beat", "Snare on every beat.", 70, 8, _snares_on_beats),
+    _build("Snare on 2 and 4", "Only the backbeat.", 70, 8, _snare_2_4),
+    _build("Hi-hat on the beat", "Hi-hat on every beat.", 80, 8, _hats_quarters),
+    _build("Crash on the beat", "Crash on every beat, let it ring.", 70, 4, _crash_quarters),
+    _build("Kick and snare", "Kick on 1 and 3, snare on 2 and 4.", 80, 8, _kick_snare),
+    _build("Alternating", "Kick, snare, kick, snare.", 85, 8, _kick_snare_alternating),
+    _build("Hi-hat eighths", "Hi-hat on every eighth note.", 90, 8, _hats_eighths),
 ]
+BEATS = [
+    _build("Basic beat", "Kick, snare and quarter-note hats together.", 85, 8, _basic_beat),
+    _build("Eighth-note hats", "Same beat, hats on the eighths.", 95, 12, _eighth_beat),
+    _build("Crash on the one", "Crash at the start of every four bars.", 100, 16, _crash_beat),
+    _build("Rock beat", "Kick and snare variations every few bars.", 110, 16, _rock_beat),
+    _build("Rock beat, faster", "The same beat at 130.", 130, 16, _rock_beat),
+]
+LEVELS = EXERCISES + BEATS
 
 
 # ---------------------------------------------------------------------------

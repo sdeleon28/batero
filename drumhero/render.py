@@ -201,7 +201,7 @@ class Renderer:
         box = pygame.Surface((560, 320))
         box.fill((10, 10, 14))
         box.set_alpha(250)
-        cy = self.h * 0.45
+        cy = self.h * 0.42
         surf.blit(box, (self.w / 2 - 280, cy - 160))
         y = cy - 125
         for s, font, color in [
@@ -210,6 +210,6 @@ class Renderer:
             (f"max combo {g.max_combo}   score {g.score}", self.f.mid, TEXT),
             (f"timing: mean {st['mean_ms']:+.1f} ms, std {st['std_ms']:.1f} ms", self.f.mid, TEXT),
             (f"{st['early']} early · {st['late']} late · {g.counts['STRAY']} stray", self.f.small, DIM),
-            ("Enter next level · R retry · Esc menu", self.f.small, ACCENT),
+            ("Enter next · R retry · Esc back", self.f.small, DIM),
         ]:
             y += self.f.center(surf, s, font, color, y) + 12
