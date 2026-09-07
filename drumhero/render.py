@@ -185,6 +185,8 @@ class Renderer:
             pygame.draw.rect(surf, color, rect, border_radius=int(6 * S))
             if n.velocity >= 100:
                 pygame.draw.rect(surf, (255, 255, 255), rect, 2, border_radius=int(6 * S))
+            if n.hand and n.state != "miss":
+                f.center(surf, n.hand, f.small, (20, 20, 24), y, x + w / 2)
 
         # flashes: ring at the line + error number, drawn the frame after the hit arrives
         latest = None
@@ -225,7 +227,7 @@ class Renderer:
         # HUD with a backing so it stays readable over notes
         backing = pygame.Surface((int(360 * S), int(100 * S)))
         backing.fill(BG)
-        backing.set_alpha(200)
+        backing.set_alpha(235)
         surf.blit(backing, (0, 0))
         surf.blit(f.text(g.chart.name, f.mid, ACCENT), (12 * S, 8 * S))
         surf.blit(f.text(f"score {score}   combo {combo}", f.mid, TEXT), (12 * S, 38 * S))
@@ -263,7 +265,7 @@ class Renderer:
         panel.fill(BG)
         panel.set_alpha(215)
         surf.blit(panel, (int(x0 - 20 * S), 0))
-        pos = t / g.beat                         # in beats, negative during the count-in
+        pos = g.chart.beat_pos(t)                # in beats, negative during the count-in
         beat_i = int(math.floor(pos)) % 4
         frac = pos - math.floor(pos)
         sub_i = min(sub - 1, int(frac * sub))
@@ -285,6 +287,26 @@ class Renderer:
             pygame.draw.rect(surf, ACCENT if b == beat_i else (50, 50, 60), rect, 3 if b == beat_i else 1, border_radius=int(8 * S))
         name = {1: "quarter notes", 2: "eighth notes", 3: "triplets", 4: "sixteenth notes"}.get(sub, f"{sub} per beat")
         f.center(surf, name, f.small, DIM, y0 + size + 12 * S)
+        if g.chart.sticking:
+            self.sticking_strip(surf, pos, sub, y0 + size + 34 * S)
+
+    def sticking_strip(self, surf, pos, sub, y):
+        """The rudiment's hand pattern, the stroke being played lit up."""
+        f, S = self.f, self.s
+        pattern = self.game.chart.sticking
+        n = len(pattern)
+        idx = int(math.floor(pos * sub)) % n if pos >= 0 else -1
+        cw = 26 * S
+        x0 = self.w / 2 - n * cw / 2
+        for i, hand in enumerate(pattern):
+            cx = x0 + (i + 0.5) * cw
+            hot = i == idx
+            color = (255, 255, 255) if hot else ((245, 90, 90) if hand == "R" else (80, 200, 230))
+            if hot:
+                pygame.draw.circle(surf, lerp(LANE_BG, color, 0.5), (int(cx), int(y)), int(12 * S))
+            f.center(surf, hand, f.mid, color, y, cx)
+            if i % (n // max(1, n // 4) if n >= 4 else n) == 0 and i > 0:
+                pygame.draw.line(surf, (60, 60, 70), (int(cx - cw / 2), int(y - 12 * S)), (int(cx - cw / 2), int(y + 12 * S)))
 
     def results(self, surf):
         g = self.game

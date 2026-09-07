@@ -15,14 +15,14 @@ import mido
 import pygame
 
 from . import chart as C
-from .chart import BEATS, EXERCISES, build_lanes, load_midi_chart
+from .chart import BEATS, EXERCISES, build_lanes, load_midi_chart, load_song_folder
 from .game import Game
 from .kit import default_kit, describe, load_kit, load_settings, save_kit, save_settings
 from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, draw_hihat_state, lerp
 from .game import TAIL_S, lead_in_for
 from .ghost import GhostFilter
-from .sounds import (BACKING_GAIN, METRONOME_GAIN, PROGRESSIONS, SoundBank, Track, menu_music_sound,
-                     output_devices, render_backing_track, render_metronome)
+from .sounds import (BACKING_GAIN, METRONOME_GAIN, PROGRESSIONS, SoundBank, Track, load_audio_track,
+                     menu_music_sound, output_devices, render_backing_track, render_metronome)
 
 TARGET_FPS = 240
 CAPTURE_S = 1.5           # wizard: keep collecting note numbers this long after the first hit
@@ -157,17 +157,25 @@ class App:
         if self.songs is None:
             self.songs = []
             paths = list(self.args.midi or [])
-            for d in [self.args.songs or SONGS_DIR]:
-                paths += sorted(glob.glob(os.path.join(d, "*.mid")) + glob.glob(os.path.join(d, "*.midi")))
+            d = self.args.songs or SONGS_DIR
+            paths += sorted(glob.glob(os.path.join(d, "*", "song.json")))          # ingested songs
+            paths += sorted(glob.glob(os.path.join(d, "*.mid")) + glob.glob(os.path.join(d, "*.midi")))
             seen = set()
             for p in paths:
                 if p in seen:
                     continue
                 seen.add(p)
                 try:
-                    ch = load_midi_chart(p, None if self.args.channel is None else self.args.channel - 1)
-                except SystemExit as e:
-                    print(e)
+                    if p.endswith("song.json"):
+                        folder = os.path.dirname(p)
+                        if not os.path.exists(os.path.join(folder, "chart.mid")):
+                            print(f"{folder}: no chart.mid yet, run: python -m drumhero.ingest {folder}")
+                            continue
+                        ch = load_song_folder(folder)
+                    else:
+                        ch = load_midi_chart(p, None if self.args.channel is None else self.args.channel - 1)
+                except (SystemExit, OSError, ValueError) as e:
+                    print(f"{p}: {e}")
                     continue
                 self.songs.append(ch)
         return self.songs
@@ -193,6 +201,16 @@ class App:
             if key not in self.track_cache:
                 self.track_cache[key] = Track(render_metronome(chart, lead_in, total, self.metronome_mode), -lead_in, METRONOME_GAIN)
             out["metronome"] = self.track_cache[key]
+        if chart.audio:
+            key = ("music", chart.audio)
+            if key not in self.track_cache:
+                try:
+                    self.track_cache[key] = load_audio_track(chart.audio, -chart.audio_offset)
+                except (pygame.error, OSError) as e:
+                    print(f"{chart.audio}: {e}")
+                    self.track_cache[key] = None
+            if self.track_cache[key] is not None:
+                out["music"] = self.track_cache[key]
         return out
 
     # --- menu music ------------------------------------------------------------------
@@ -460,7 +478,7 @@ class ListScreen(Screen):
                     (f"Audio output: {self.app.sounds.device or 'system default'}", "select cycles through the outputs, saved"),
                     (f"Start fullscreen: {'on' if self.app.settings.get('fullscreen', True) else 'off'}", "F11 or Cmd+F toggles any time, saved"),
                     ("Quit", "")]
-        return [(ch.name, f"{ch.bpm:.0f} bpm · {len(ch.notes):3d} notes · {ch.desc}") for ch in self.app.items_for(self.cat)]
+        return [(ch.name, f"{ch.bpm:.0f} bpm · {len(ch.notes):3d} notes · {ch.desc}" + ("  ♪ audio" if ch.audio else "")) for ch in self.app.items_for(self.cat)]
 
     def move(self, d):
         n = len(self.items())
@@ -802,7 +820,7 @@ class PlayScreen(Screen):
         self.chart = app.items_for(cat)[index]
         self.lanes, self.by_note = build_lanes(self.chart, app.kit)
         self.game = Game(self.chart, self.lanes, self.by_note, offset_ms=app.offset_ms, speed=app.speed,
-                         sounds=app.sounds, guide=app.guide)
+                         sounds=app.sounds, guide=app.guide and not self.chart.audio)   # the record has its own drums
         self.game.metronome_mode = app.metronome_mode
         prog = None if cat == "hihat" else index + (0 if cat == "kick" else 2)   # songs bring their own music
         for name, track in app.tracks_for(self.chart, prog).items():

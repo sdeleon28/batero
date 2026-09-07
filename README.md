@@ -109,10 +109,47 @@ snare on the beat, snare on 2 and 4, hi-hat on the beat, crash on the beat,
 kick and snare, alternating, hi-hat eighths. Beats are full grooves from a
 basic beat at 85 bpm up to a rock beat at 130.
 
-Songs are MIDI files from the `songs/` folder next to this README, or given on
-the command line. Their General MIDI drum numbers fold into the four
-instruments (36 kick, 38 snare, 42/44/46 hi-hat, 49/57 crash); any other note
-number gets a lane of its own, matched by raw number.
+Exercises also hold the rudiments, practice-pad style on the snare: single
+strokes in eighths and sixteenths, paradiddle at 70 and 90, paradiddle split
+between hi-hat and snare, triplets, R L L triplets, double paradiddle,
+paradiddle-diddle, doubles. Each note carries its hand (R or L), the strip
+under the metronome shows the whole sticking with the stroke being played lit
+up, and accented strokes get the white outline.
+
+Songs are folders in `songs/` made by the ingest pipeline (see below), or plain
+MIDI files dropped in `songs/` or given on the command line. General MIDI drum
+numbers fold into the four instruments (36 kick, 38 snare, 42/44/46 hi-hat,
+49/57 crash); any other note number gets a lane of its own, matched by raw
+number. A song with audio plays the recording along with the chart, on the
+recording's own beat grid, with the guide sounds off since the record already
+has drums.
+
+## Adding a song: the sourcing pipeline
+
+1. Make `songs/<name>/` and drop the recording there as `audio.mp3` (or wav,
+   ogg, flac). Recordings are yours; they are git-ignored.
+2. Write `songs/<name>/song.json`: title, artist, a bpm hint, and the form as a
+   list of sections with a bar count and a drum pattern each (`rest`, `hats`,
+   `kick_snare`, `rock`, `rock_pickup`, `rock_quarters`, `halftime`,
+   `eighth_kick`), plus `crash` and `fill` flags. This is the step to do with
+   Claude: describe the song and let it draft the form.
+3. Run the ingest:
+
+   ```
+   .venv/bin/python -m drumhero.ingest songs/<name>
+   ```
+
+   It tracks the beats with librosa, takes the beat nearest the first strong
+   onset as the first downbeat (set `offset_hint` in song.json, in seconds, if
+   the song starts with a pickup), lays the sections on that grid and writes
+   `chart.mid` with a tempo change on every beat, so the chart follows the
+   recording even where it drifts. It also writes `beats.json` and fills in
+   `offset` in song.json.
+4. Play it from Songs. If a section is a bar too long or short, fix the number
+   in song.json and run the ingest again.
+
+`songs/i-wont-back-down/` has the form for Tom Petty's song written from
+memory as a starting point; add the recording and ingest it.
 
 Each level starts with a one-bar count-in with clicks. The level select shows
 your best accuracy and mean timing for the session.

@@ -269,20 +269,20 @@ def _mix_events(events, total_s):
 
 
 def render_metronome(chart, lead_in_s, total_s, mode="full"):
-    """Congas for every bar from the count-in to total_s (chart time). mode: full / beats."""
-    beat = chart.beat
+    """Congas for every bar from the count-in to total_s (chart time), on the chart's own
+    beat grid (constant tempo or a song's tracked beats). mode: full / beats."""
     hits = {k: f() for k, f in METRO_HITS.items()}
     events = []
-    first_bar = -int(round(lead_in_s / (4 * beat)))
-    last_bar = int(total_s / (4 * beat)) + 1
-    for bar in range(first_bar, last_bar):
-        sub = chart.subdivision_at(max(0.0, bar * 4 * beat))
-        for b in range(4):
-            t0 = (bar * 4 + b) * beat
-            events.append((t0 + lead_in_s, hits["low" if b == 0 else "mid"], METRO_LEVELS["low" if b == 0 else "mid"]))
-            if mode == "full":
-                for k in range(1, sub):
-                    events.append((t0 + k * beat / sub + lead_in_s, hits["tap"], METRO_LEVELS["tap"]))
+    first_beat = int(round(chart.beat_pos(-lead_in_s)))
+    last_beat = int(chart.beat_pos(total_s)) + 1
+    for i in range(first_beat, last_beat):
+        t0 = chart.beat_time(i)
+        b = i % 4
+        sub = chart.subdivision_at(max(0.0, t0))
+        events.append((t0 + lead_in_s, hits["low" if b == 0 else "mid"], METRO_LEVELS["low" if b == 0 else "mid"]))
+        if mode == "full":
+            for k in range(1, sub):
+                events.append((chart.beat_time(i + k / sub) + lead_in_s, hits["tap"], METRO_LEVELS["tap"]))
     return _mix_events(events, lead_in_s + total_s)
 
 
@@ -296,12 +296,16 @@ def render_backing_track(bpm, prog_index, lead_in_s, total_s):
 
 
 class Track:
-    """A pre-rendered mono track on the chart timeline, starting at t0 (usually -lead_in).
-    Playback can start from any point, which makes pause/resume and late joins exact."""
+    """A pre-rendered track on the chart timeline, starting at t0 (usually -lead_in).
+    Playback can start from any point, which makes pause/resume and late joins exact.
+    data: mono float32 in -1..1, or stereo int16 (n, 2) straight from a decoded file."""
 
-    def __init__(self, data_f32, t0, gain=1.0):
-        pcm = (np.clip(data_f32, -1, 1) * 32767).astype(np.int16)
-        self.pcm = np.ascontiguousarray(np.column_stack([pcm, pcm]))
+    def __init__(self, data, t0, gain=1.0):
+        if data.dtype == np.int16 and data.ndim == 2:
+            self.pcm = np.ascontiguousarray(data)
+        else:
+            pcm = (np.clip(data, -1, 1) * 32767).astype(np.int16)
+            self.pcm = np.ascontiguousarray(np.column_stack([pcm, pcm]))
         self.t0 = t0
         self.gain = gain
         self.sound = None
@@ -396,3 +400,18 @@ def menu_music_sound():
     snd = pygame.sndarray.make_sound(np.ascontiguousarray(np.column_stack([pcm, pcm])))
     snd.set_volume(MENU_MUSIC_GAIN)
     return snd
+
+
+MUSIC_GAIN = 0.85
+
+
+def load_audio_track(path, t0, gain=MUSIC_GAIN):
+    """Decode an audio file (mp3/ogg/wav/flac via SDL_mixer) into a Track on the chart
+    timeline: audio time 0 happens at chart time t0. Needs the mixer initialised."""
+    snd = pygame.mixer.Sound(path)
+    arr = pygame.sndarray.array(snd)
+    if arr.ndim == 1:
+        arr = np.column_stack([arr, arr])
+    if arr.dtype != np.int16:
+        arr = (np.clip(arr.astype(np.float32) / max(1.0, float(np.max(np.abs(arr)))), -1, 1) * 32767).astype(np.int16)
+    return Track(arr, t0, gain)
