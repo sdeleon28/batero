@@ -149,6 +149,21 @@ Songs from MIDI files get no loop, since a made-up progression would clash with
 the tune. Toggle it with B during play or from Setup, or start with
 `--no-backing`.
 
+## Install as a Mac app
+
+```
+.venv/bin/python install_app.py
+```
+
+builds `/Applications/drumhero.app` so the Dock, Spotlight, rcmd and other app
+switchers see drumhero as an installed application with its own name and icon,
+and you can give it a shortcut. The bundle's executable is a copy of the venv's
+base Python, and a tiny venv config inside the bundle points it at this repo,
+so nothing but the interpreter is copied: edits to the code take effect on the
+next launch. Run the installer again after moving the repo or recreating
+`.venv`. Output goes to `~/Library/Logs/drumhero.log`. Pass a folder to install
+somewhere else, for example `~/Applications`.
+
 ## Fullscreen
 
 The window is resizable, so on macOS it has the green traffic-light button
