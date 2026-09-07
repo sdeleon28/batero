@@ -20,6 +20,19 @@ PEDAL_MOTION_CC = 20         # hi-hat notes are ghosts if the pedal moved at lea
 PEDAL_MOTION_MS = 50         # ...within this many milliseconds before the note
 ANY_MIN_VELOCITY = 8         # below this nothing counts, on any pad
 
+PEDAL_CLOSED_CC = 90         # fully closed on this pedal (0 = fully open)
+TIGHT_MIN = 80               # closedness >= this -> tight
+OPEN_MAX = 10                # closedness <= this -> open; between -> mid
+EDGE_NOTES = {22, 26}
+
+
+def openness_label(cc):
+    if cc >= TIGHT_MIN:
+        return "tight"
+    if cc <= OPEN_MAX:
+        return "open"
+    return "mid"
+
 
 class GhostFilter:
     """Feed every MIDI message; ask reason(note, velocity) for note-ons. Thread-safe enough
@@ -30,11 +43,15 @@ class GhostFilter:
         self.last_chick_t = None
         self.filtered = 0
         self.last_reason = None
+        self.pedal_cc = PEDAL_CLOSED_CC  # assume closed until the pedal speaks
+        self.last_stroke = None          # (t, note, velocity, zone, openness) of the last real hi-hat stroke
+        self.last_ghost = None           # (t, note, velocity, why)
 
     def control_change(self, control, value, t=None):
         if control != PEDAL_CC:
             return
         t = time.perf_counter() if t is None else t
+        self.pedal_cc = value
         self.cc_trail.append((t, value))
 
     def pedal_motion(self, t):
@@ -53,18 +70,20 @@ class GhostFilter:
             self.last_chick_t = t
             return None
         if velocity < ANY_MIN_VELOCITY:
-            return self._flag("too soft")
+            return self._flag("too soft", t, note, velocity)
         if note not in HIHAT_STICK_NOTES:
             return None
         if velocity < HIHAT_MIN_VELOCITY:
-            return self._flag("soft hi-hat")
+            return self._flag("soft hi-hat", t, note, velocity)
         if self.last_chick_t is not None and (t - self.last_chick_t) * 1000 <= CHICK_SPLASH_MS:
-            return self._flag("chick splash")
+            return self._flag("chick splash", t, note, velocity)
         if self.pedal_motion(t) >= PEDAL_MOTION_CC:
-            return self._flag("pedal moving")
+            return self._flag("pedal moving", t, note, velocity)
+        self.last_stroke = (t, note, velocity, "edge" if note in EDGE_NOTES else "bow", openness_label(self.pedal_cc))
         return None
 
-    def _flag(self, why):
+    def _flag(self, why, t=None, note=None, velocity=None):
         self.filtered += 1
         self.last_reason = why
+        self.last_ghost = (time.perf_counter() if t is None else t, note, velocity, why)
         return why

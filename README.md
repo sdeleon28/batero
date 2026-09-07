@@ -84,6 +84,16 @@ a chick, or while the pedal moved 20 or more CC4 steps in the last 50 ms.
 Anything below velocity 8 is dropped on every pad. The soundcheck shows what
 was ignored and why; the play HUD counts ghosts.
 
+The full description of the gesture, the measured ghost notes and the filter
+rules is the "hi-hat gesture" section of `CLAUDE.md`, kept identical in the
+hhmapper repo, so both projects treat the hi-hat the same way.
+
+**Hi-hat state on screen.** Whenever a level has a hi-hat lane, and in the
+soundcheck, two cymbals in the top right show the pedal live: the gap follows
+CC4, the label reads TIGHT, MID or OPEN with the raw value, and the last stroke
+shows its openness and zone (bow or edge) with note and velocity. Ignored
+ghost notes appear there too, with the reason.
+
 ## Soundcheck
 
 After the wizard, and any time from Setup, the soundcheck screen shows the four

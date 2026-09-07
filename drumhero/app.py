@@ -18,7 +18,7 @@ from . import chart as C
 from .chart import BEATS, EXERCISES, build_lanes, load_midi_chart
 from .game import Game
 from .kit import default_kit, describe, load_kit, load_settings, save_kit, save_settings
-from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, lerp
+from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, draw_hihat_state, lerp
 from .game import TAIL_S, lead_in_for
 from .ghost import GhostFilter
 from .sounds import (BACKING_GAIN, METRONOME_GAIN, PROGRESSIONS, SoundBank, Track, menu_music_sound,
@@ -783,6 +783,9 @@ class SoundcheckScreen(Screen):
 
         if ghost and now - ghost[0] < 1.5:
             self.f.center(surf, f"ignored note {ghost[1]} vel {ghost[2]}: {ghost[3]}", self.f.small, DIM, self.h * 0.78 + 56 * S)
+        if self.app.kit.get("hihat"):
+            i = C.INSTRUMENTS.index("hihat")
+            draw_hihat_state(surf, self.f, self.app.ghosts, self.w / 2 + (i - (n - 1) / 2) * 250 * S, cy + r + 110 * S, S)
 
         if ready:
             self.f.center(surf, "All pads heard.", self.f.mid, JUDGE_COLORS["PERFECT"], self.h * 0.78 - 30 * S if not unknown or now - unknown[0] >= 2.5 else self.h * 0.70)

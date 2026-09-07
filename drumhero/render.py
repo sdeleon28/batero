@@ -6,6 +6,7 @@ import pygame
 
 from .chart import COUNT_LABELS
 from .game import Game
+from .ghost import PEDAL_CLOSED_CC, openness_label
 
 LOOKAHEAD_S = 2.0        # seconds of chart visible above the line at speed 1.0
 FLASH_S = 0.18           # duration of the hit flash
@@ -36,6 +37,43 @@ JUDGE_COLORS = {
 def lerp(a, b, k):
     k = max(0.0, min(1.0, k))
     return tuple(int(a[i] + (b[i] - a[i]) * k) for i in range(3))
+
+
+OPENNESS_COLORS = {"tight": (245, 90, 90), "mid": (250, 200, 60), "open": (110, 220, 110)}
+
+
+def draw_hihat_state(surf, fonts, ghosts, cx, cy, S=1.0, color=(245, 230, 80)):
+    """Two cymbals whose gap follows CC4, the openness class, the last stroke's zone.
+    (cx, cy) is the centre of the widget; it is about 120 x 110 px at S = 1."""
+    if ghosts is None:
+        return
+    cc = ghosts.pedal_cc
+    closed = max(0.0, min(1.0, cc / PEDAL_CLOSED_CC))
+    label = openness_label(cc)
+    ocol = OPENNESS_COLORS[label]
+    now = time.perf_counter()
+    w, hh = 88 * S, 12 * S
+    gap = (2 + 26 * (1 - closed)) * S
+    top_y = cy - gap / 2 - hh
+    bot_y = cy + gap / 2
+    flash = 0.0
+    if ghosts.last_stroke and now - ghosts.last_stroke[0] < 0.25:
+        flash = 1 - (now - ghosts.last_stroke[0]) / 0.25
+    rim = lerp(color, (255, 255, 255), flash)
+    pygame.draw.ellipse(surf, lerp(LANE_BG, color, 0.55), (cx - w / 2, top_y, w, hh))
+    pygame.draw.ellipse(surf, rim, (cx - w / 2, top_y, w, hh), max(1, int(2 * S)))
+    pygame.draw.ellipse(surf, lerp(LANE_BG, color, 0.35), (cx - w / 2, bot_y, w, hh))
+    pygame.draw.ellipse(surf, color, (cx - w / 2, bot_y, w, hh), max(1, int(2 * S)))
+    pygame.draw.line(surf, DIM, (cx, top_y - 10 * S), (cx, bot_y + hh + 6 * S), max(1, int(2 * S)))
+    fonts.center(surf, f"{label.upper()}  {cc}", fonts.small, ocol, bot_y + hh + 20 * S, cx)
+    if ghosts.last_stroke and now - ghosts.last_stroke[0] < 1.5:
+        _, note, vel, zone, op = ghosts.last_stroke
+        fonts.center(surf, f"{op} {zone} {note} v{vel}", fonts.small, lerp(TEXT, BG, (now - ghosts.last_stroke[0]) / 1.5),
+                     bot_y + hh + 38 * S, cx)
+    elif ghosts.last_ghost and now - ghosts.last_ghost[0] < 1.5:
+        _, note, vel, why = ghosts.last_ghost
+        fonts.center(surf, f"ignored {note} v{vel}: {why}", fonts.small, lerp(DIM, BG, (now - ghosts.last_ghost[0]) / 1.5),
+                     bot_y + hh + 38 * S, cx)
 
 
 class Fonts:
@@ -181,6 +219,8 @@ class Renderer:
                 es.set_alpha(255)
 
         self.metronome(surf, now)
+        if any(l.key == "hihat" for l in g.lanes):
+            draw_hihat_state(surf, f, self.ghosts, self.w - 110 * S, 200 * S, S)
 
         # HUD with a backing so it stays readable over notes
         backing = pygame.Surface((int(360 * S), int(100 * S)))
