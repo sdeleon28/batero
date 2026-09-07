@@ -6,6 +6,8 @@ played. Measured on 2026-09-06 while stomping:
   - 3..5 ms AFTER the chick: note 46 at velocity 60..78 with the pedal moving fast
   - up to ~250 ms after: note 42 at velocity 30..36 while the pedal settles
 The softest real hi-hat stroke seen was velocity 23.
+Measured 2026-09-07 hitting the edge with the pedal closed: about 1 stroke in 10 is
+followed 73..175 ms later by a bow note (42) at 6..45 % of the stroke's velocity.
 """
 import time
 from collections import deque
@@ -19,6 +21,8 @@ CHICK_SPLASH_MS = 60         # hi-hat notes this soon after a chick are ghosts
 PEDAL_MOTION_CC = 20         # hi-hat notes are ghosts if the pedal moved at least this much...
 PEDAL_MOTION_MS = 50         # ...within this many milliseconds before the note
 ANY_MIN_VELOCITY = 8         # below this nothing counts, on any pad
+ZONE_CROSSTALK_MS = 100      # a stroke on one zone makes the other zone fire late (measured 73 ms)...
+ZONE_CROSSTALK_RATIO = 0.5   # ...at a fraction of the velocity; within the window and under the ratio it is a ghost
 
 PEDAL_CLOSED_CC = 90         # fully closed on this pedal (0 = fully open)
 TIGHT_MIN = 80               # closedness >= this -> tight
@@ -79,7 +83,11 @@ class GhostFilter:
             return self._flag("chick splash", t, note, velocity)
         if self.pedal_motion(t) >= PEDAL_MOTION_CC:
             return self._flag("pedal moving", t, note, velocity)
-        self.last_stroke = (t, note, velocity, "edge" if note in EDGE_NOTES else "bow", openness_label(self.pedal_cc))
+        zone = "edge" if note in EDGE_NOTES else "bow"
+        ls = self.last_stroke
+        if ls and ls[3] != zone and (t - ls[0]) * 1000 <= ZONE_CROSSTALK_MS and velocity <= ZONE_CROSSTALK_RATIO * ls[2]:
+            return self._flag("zone crosstalk", t, note, velocity)
+        self.last_stroke = (t, note, velocity, zone, openness_label(self.pedal_cc))
         return None
 
     def _flag(self, why, t=None, note=None, velocity=None):
