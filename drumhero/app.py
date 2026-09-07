@@ -315,6 +315,7 @@ class ListScreen(Screen):
     def items(self):
         if self.cat == "crash":
             return [("Set up kit", describe(self.app.kit)),
+                    ("Soundcheck", "hit every pad, see where it lands and hear it"),
                     (f"Guide sounds: {'on' if self.app.guide else 'off'}", "hear the chart as it crosses the line"),
                     ("Quit", "")]
         return [(ch.name, f"{ch.bpm:.0f} bpm · {len(ch.notes):3d} notes · {ch.desc}") for ch in self.app.items_for(self.cat)]
@@ -329,6 +330,8 @@ class ListScreen(Screen):
             if self.sel == 0:
                 self.app.go(SetupScreen(self.app))
             elif self.sel == 1:
+                self.app.go(SoundcheckScreen(self.app))
+            elif self.sel == 2:
                 self.app.guide = not self.app.guide
             else:
                 return False
@@ -468,7 +471,7 @@ class SetupScreen(Screen):
                     time.perf_counter() - self.capture_start >= CAPTURE_S:
                 self.advance()
         if self.done_at is not None and time.perf_counter() - self.done_at > 1.2:
-            self.app.go(HubScreen(self.app, 0 if self.first_run else 3))
+            self.app.go(SoundcheckScreen(self.app, first_run=self.first_run))
 
     def draw(self, surf, fps):
         surf.fill(BG)
@@ -519,6 +522,104 @@ class SetupScreen(Screen):
         else:
             self.f.center(surf, "waiting...", self.f.mid, DIM, cy + r + 40)
         self.f.center(surf, "Enter next · S skip this drum · Backspace redo previous · Esc cancel", self.f.small, DIM, self.h - 28)
+
+
+# ---------------------------------------------------------------------------
+class SoundcheckScreen(Screen):
+    """Hit every pad: it lights up, plays its sound and shows the note number and velocity.
+    Once every assigned drum has been heard, the snare continues and the kick redoes the wizard."""
+
+    def __init__(self, app, first_run=False):
+        super().__init__(app)
+        self.first_run = first_run
+        self.lock = threading.Lock()
+        self.heard = {k: None for k in C.INSTRUMENTS}     # instrument -> (wall_t, note, velocity)
+        self.unknown = None                                # (wall_t, note, velocity) for unassigned pads
+
+    def needed(self):
+        return [k for k in C.INSTRUMENTS if self.app.kit.get(k)]
+
+    def all_heard(self):
+        return all(self.heard[k] for k in self.needed())
+
+    def on_note(self, note, velocity):
+        inst = self.app.instrument_for(note)
+        now = time.perf_counter()
+        with self.lock:
+            if inst is None:
+                self.unknown = (now, note, velocity)
+                return
+            navigate = self.all_heard() and NAV.get(inst) in ("accept", "back")
+            self.heard[inst] = (now, note, velocity)
+        if navigate:
+            self.app.nav_hit(note, velocity)
+        else:
+            self.app.sounds.play(inst, velocity)
+
+    def on_drum(self, inst):
+        action = NAV.get(inst)
+        if action == "accept":
+            self.done()
+        elif action == "back":
+            self.app.go(SetupScreen(self.app, first_run=self.first_run))
+        return True
+
+    def on_key(self, key):
+        if key in (pygame.K_RETURN, pygame.K_ESCAPE):
+            self.done()
+        elif key == pygame.K_BACKSPACE:
+            self.app.go(SetupScreen(self.app, first_run=self.first_run))
+        elif key in KEY_LANES and KEY_LANES[key] < 4:
+            inst = C.INSTRUMENTS[KEY_LANES[key]]
+            notes = self.app.kit.get(inst) or C.DEFAULT_KIT[inst]
+            self.on_note(notes[0], 100)
+        return True
+
+    def done(self):
+        self.app.go(HubScreen(self.app, 0 if self.first_run else 3))
+
+    def draw(self, surf, fps):
+        surf.fill(BG)
+        with self.lock:
+            heard = dict(self.heard)
+            unknown = self.unknown
+        now = time.perf_counter()
+        ready = self.all_heard()
+        self.f.center(surf, "Soundcheck", self.f.large, TEXT, 60)
+        self.f.center(surf, "hit every pad: it should light up its drum and sound like it", self.f.small, DIM, 96)
+
+        n = len(C.INSTRUMENTS)
+        cy, r = self.h * 0.47, 82
+        for i, inst in enumerate(C.INSTRUMENTS):
+            cx = self.w / 2 + (i - (n - 1) / 2) * 250
+            color = C.COLORS[inst]
+            assigned = bool(self.app.kit.get(inst))
+            h = heard[inst]
+            k = max(0.0, 1 - (now - h[0]) / 0.3) if h else 0.0
+            vel = h[2] / 127 if h else 0
+            if k > 0:
+                pygame.draw.circle(surf, lerp(LANE_BG, color, 0.5 * k), (int(cx), int(cy)), int(r + (30 + 40 * vel) * (1 - k)))
+            pygame.draw.circle(surf, lerp(LANE_BG, color, 0.25 + 0.75 * k) if assigned else LANE_BG, (int(cx), int(cy)), r)
+            pygame.draw.circle(surf, color if assigned else (60, 60, 70), (int(cx), int(cy)), r, 4)
+            self.f.center(surf, C.LABELS[inst].upper(), self.f.mid, TEXT if assigned else DIM, cy, cx)
+            notes = "/".join(map(str, sorted(self.app.kit.get(inst, [])))) or "not assigned"
+            self.f.center(surf, notes, self.f.small, DIM, cy + r + 24, cx)
+            if h:
+                self.f.center(surf, f"note {h[1]} · vel {h[2]}", self.f.small, color, cy + r + 46, cx)
+                self.f.center(surf, "✓", self.f.mid, JUDGE_COLORS["PERFECT"], cy - r - 24, cx)
+            elif assigned:
+                self.f.center(surf, "waiting", self.f.small, DIM, cy + r + 46, cx)
+
+        if unknown and now - unknown[0] < 2.5:
+            self.f.center(surf, f"note {unknown[1]} is not assigned to any drum (vel {unknown[2]})",
+                          self.f.mid, JUDGE_COLORS["MISS"], self.h * 0.78)
+            self.f.center(surf, "if that pad should count, redo the setup and hit it during its drum", self.f.small, DIM, self.h * 0.78 + 30)
+
+        if ready:
+            self.f.center(surf, "All pads heard.", self.f.mid, JUDGE_COLORS["PERFECT"], self.h * 0.78 - 30 if not unknown or now - unknown[0] >= 2.5 else self.h * 0.70)
+            self.legend(surf, [("snare", "continue"), ("kick", "redo setup")], keys="Enter continue · Backspace redo setup")
+        else:
+            self.f.center(surf, "Enter skip · Backspace redo setup · keys 1-4 stand in for the pads", self.f.small, DIM, self.h - 28)
 
 
 # ---------------------------------------------------------------------------

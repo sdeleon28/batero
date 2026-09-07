@@ -68,6 +68,14 @@ velocity of each hit.
 The hi-hat pedal position (CC4) is ignored for now; every hi-hat note counts
 as a hi-hat hit.
 
+## Soundcheck
+
+After the wizard, and any time from Setup, the soundcheck screen shows the four
+pads. Hit each one: it lights up, plays its sound and shows the note number and
+velocity it sent. A pad that is not assigned to any drum is called out in red
+with its note number so you can redo the setup. Once every assigned drum has
+been heard, the snare continues to the hub and the kick goes back to the wizard.
+
 ## Levels
 
 Exercises are warm-ups, one or two drums at slow tempos: kick on the beat,
