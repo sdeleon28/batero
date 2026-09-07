@@ -74,6 +74,16 @@ velocity of each hit.
 The hi-hat pedal position (CC4) is ignored for now; every hi-hat note counts
 as a hi-hat hit.
 
+## Hi-hat ghost filter
+
+Working the hi-hat pedal makes a Roland module send stick notes nobody played:
+a soft one just before the chick, a loud splash a few milliseconds after it,
+and a settling hit while the pedal is still moving. `drumhero/ghost.py` drops
+them the way hhmapper does: hi-hat notes below velocity 25, within 60 ms after
+a chick, or while the pedal moved 20 or more CC4 steps in the last 50 ms.
+Anything below velocity 8 is dropped on every pad. The soundcheck shows what
+was ignored and why; the play HUD counts ghosts.
+
 ## Soundcheck
 
 After the wizard, and any time from Setup, the soundcheck screen shows the four

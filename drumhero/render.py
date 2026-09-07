@@ -71,7 +71,8 @@ class Fonts:
 
 
 class Renderer:
-    def __init__(self, game: Game, size, fonts: Fonts):
+    def __init__(self, game: Game, size, fonts: Fonts, ghosts=None):
+        self.ghosts = ghosts
         self.game = game
         self.w, self.h = size
         self.f = fonts
@@ -188,8 +189,10 @@ class Renderer:
         surf.blit(backing, (0, 0))
         surf.blit(f.text(g.chart.name, f.mid, ACCENT), (12 * S, 8 * S))
         surf.blit(f.text(f"score {score}   combo {combo}", f.mid, TEXT), (12 * S, 38 * S))
-        surf.blit(f.text(f"P {counts['PERFECT']}  G {counts['GOOD']}  O {counts['OK']}  M {counts['MISS']}  S {counts['STRAY']}",
-                         f.small, DIM), (12 * S, 70 * S))
+        line = f"P {counts['PERFECT']}  G {counts['GOOD']}  O {counts['OK']}  M {counts['MISS']}  S {counts['STRAY']}"
+        if self.ghosts is not None and self.ghosts.filtered:
+            line += f"  ghosts {self.ghosts.filtered}"
+        surf.blit(f.text(line, f.small, DIM), (12 * S, 70 * S))
         right = [f"{fps:5.0f} fps", f"offset {offset:+.0f} ms", f"speed {speed:.2f}x", f"{g.chart.bpm:.0f} bpm",
                  f"guide {'on' if g.guide else 'off'}",
                  f"backing {'on' if g.track_enabled('backing') else 'off'}" if 'backing' in g.tracks else "no backing",

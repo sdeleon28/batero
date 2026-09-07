@@ -20,6 +20,7 @@ from .game import Game
 from .kit import default_kit, describe, load_kit, load_settings, save_kit, save_settings
 from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, lerp
 from .game import TAIL_S, lead_in_for
+from .ghost import GhostFilter
 from .sounds import (BACKING_GAIN, METRONOME_GAIN, PROGRESSIONS, SoundBank, Track, menu_music_sound,
                      output_devices, render_backing_track, render_metronome)
 
@@ -72,6 +73,7 @@ class App:
         self.midi_in = None
         self.screen_obj = None
         self.drum_queue = deque()  # navigation hits, handed to the screen on the main thread
+        self.ghosts = GhostFilter()  # drops the hi-hat notes the pedal produces on its own
         self.last_nav = {}
         self.legend_flash = {}     # instrument -> wall time of its last navigation hit
 
@@ -230,9 +232,16 @@ class App:
             print("No MIDI input: keyboard only. Inputs: " + (", ".join(names) or "none"))
 
     def on_midi(self, msg):
-        if msg.type == "note_on" and msg.velocity > 0:
+        if msg.type == "control_change":
+            self.ghosts.control_change(msg.control, msg.value)
+        elif msg.type == "note_on" and msg.velocity > 0:
             scr = self.screen_obj
-            if scr is not None:
+            if scr is None:
+                return
+            why = self.ghosts.reason(msg.note, msg.velocity)
+            if why is not None:
+                scr.on_ghost(msg.note, msg.velocity, why)
+            else:
                 scr.on_note(msg.note, msg.velocity)
 
     def nav_hit(self, note, velocity):
@@ -308,6 +317,10 @@ class Screen:
     def on_note(self, note, velocity):
         """MIDI thread. Default: the hit is a button press."""
         self.app.nav_hit(note, velocity)
+
+    def on_ghost(self, note, velocity, why):
+        """MIDI thread. A note the ghost filter dropped; screens may show it."""
+        pass
 
     def on_drum(self, inst):
         """Main thread. Return False to quit."""
@@ -681,6 +694,11 @@ class SoundcheckScreen(Screen):
         self.lock = threading.Lock()
         self.heard = {k: None for k in C.INSTRUMENTS}     # instrument -> (wall_t, note, velocity)
         self.unknown = None                                # (wall_t, note, velocity) for unassigned pads
+        self.ghost = None                                  # (wall_t, note, velocity, why) for dropped notes
+
+    def on_ghost(self, note, velocity, why):
+        with self.lock:
+            self.ghost = (time.perf_counter(), note, velocity, why)
 
     def needed(self):
         return [k for k in C.INSTRUMENTS if self.app.kit.get(k)]
@@ -729,6 +747,7 @@ class SoundcheckScreen(Screen):
         with self.lock:
             heard = dict(self.heard)
             unknown = self.unknown
+            ghost = self.ghost
         now = time.perf_counter()
         S = self.s
         ready = self.all_heard()
@@ -762,6 +781,9 @@ class SoundcheckScreen(Screen):
                           self.f.mid, JUDGE_COLORS["MISS"], self.h * 0.78)
             self.f.center(surf, "if that pad should count, redo the setup and hit it during its drum", self.f.small, DIM, self.h * 0.78 + 30 * S)
 
+        if ghost and now - ghost[0] < 1.5:
+            self.f.center(surf, f"ignored note {ghost[1]} vel {ghost[2]}: {ghost[3]}", self.f.small, DIM, self.h * 0.78 + 56 * S)
+
         if ready:
             self.f.center(surf, "All pads heard.", self.f.mid, JUDGE_COLORS["PERFECT"], self.h * 0.78 - 30 * S if not unknown or now - unknown[0] >= 2.5 else self.h * 0.70)
             self.legend(surf, [("snare", "continue"), ("kick", "redo setup")], keys="Enter continue · Backspace redo setup")
@@ -782,13 +804,13 @@ class PlayScreen(Screen):
         prog = None if cat == "hihat" else index + (0 if cat == "kick" else 2)   # songs bring their own music
         for name, track in app.tracks_for(self.chart, prog).items():
             self.game.set_track(name, track, enabled=(app.backing_on if name == "backing" else True))
-        self.renderer = Renderer(self.game, app.size, app.fonts)
+        self.renderer = Renderer(self.game, app.size, app.fonts, app.ghosts)
         self.recorded = False
         self.finished_at = None
         self.game.reset()
 
     def on_resize(self):
-        self.renderer = Renderer(self.game, self.app.size, self.app.fonts)
+        self.renderer = Renderer(self.game, self.app.size, self.app.fonts, self.app.ghosts)
 
     def nav_ready(self):
         return self.finished_at is not None and time.perf_counter() - self.finished_at > RESULTS_GRACE_S
