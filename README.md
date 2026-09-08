@@ -208,6 +208,32 @@ a level ends the backing stops and a jingle plays for the star count: a sag for
 none or one, a plain cadence for two, a bright one for three, a rising fanfare
 for four, and for five the full victory fanfare with drums.
 
+## Recording a take (V)
+
+Press V anywhere (or "Recording" in Setup) to start a take, V again to stop.
+The take becomes one edited file in `~/Movies/drumhero/`: the game's picture,
+the sound card's output, and the camera picture-in-picture in the corner.
+
+- **Picture**: the game hands a copy of its own frame to a writer thread 30
+  times a second, piped into ffmpeg (H.264 by VideoToolbox). No screen
+  recording permission and no display to choose; the main loop only pays for
+  one blit.
+- **Sound**: the interface's own input, two channels of it (defaults: device
+  "X18/XR18", channels 17 and 18). On the XR18 set USB sends 17/18 to Main L/R
+  in X-AIR Edit and those channels carry exactly the mix you monitor, the game
+  and Bitwig included. `python -m drumhero.capture` records two seconds and
+  shows the level of every channel so you can confirm the routing.
+- **Camera**: the first avfoundation video device whose name contains the
+  `capture_camera` setting ("iPhone": Continuity Camera or Camo) is recorded by
+  ffmpeg to its own file and overlaid at stop, aligned by wall clock. The first
+  time, macOS asks the app for camera permission; without a camera the take is
+  picture and sound only.
+- At stop a compose pass runs in the background ("rendering take..." bottom
+  right); parts are kept next to the result if it fails.
+
+Settings: `capture_audio_device`, `capture_audio_channels`, `capture_camera`,
+`capture_pip` (camera height as a fraction of the picture, 0.28).
+
 ## Run logs and auditing
 
 Every level you play is written, when it ends, to
@@ -274,6 +300,7 @@ timing errors; the mean is your latency, the deviation is you.
 | [ / ]         | tempo -/+ 10 % (restarts the level) |
 | , / .         | input offset -/+ 5 ms              |
 | D             | drum sounds on/off (saved)         |
+| V             | start / stop a take (video + mix)  |
 | 1..9, 0       | hit lanes from the keyboard        |
 
 `--no-sound` disables audio entirely, `--no-guide` starts with the guide track

@@ -20,6 +20,7 @@ from .game import Game
 from .kit import (default_kit, describe, describe_pads, load_kit, load_progress, load_settings, save_kit,
                   save_progress, save_settings)
 from .runlog import RunLog
+from .capture import Recorder
 from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, draw_hihat_state, draw_stars, lerp
 from .game import TAIL_S, lead_in_for
 from . import ghost as GH
@@ -73,6 +74,7 @@ class App:
         self.drum_queue = deque()  # navigation hits, handed to the screen on the main thread
         self.ghosts = GhostFilter()  # drops the hi-hat notes the pedal produces on its own
         self.runlog = RunLog()       # every level is written to ~/Library/Logs/drumhero/runs when it ends
+        self.recorder = Recorder(self.settings)   # V: take of the game, the interface's mix and the camera
         self.midi_trace = None       # one line per note-on, for latency measurements (--midi-trace or settings)
         trace = getattr(args, "midi_trace", None) or self.settings.get("midi_trace")
         if trace:
@@ -314,6 +316,32 @@ class App:
         self.drum_queue.append(inst)
 
     # --- screens ---------------------------------------------------------------
+    def toggle_recording(self):
+        if self.recorder.active:
+            path = self.recorder.stop()
+            print(f"recording stopped, composing {path}")
+        else:
+            name = self.screen_obj.chart.name if isinstance(self.screen_obj, PlayScreen) else "take"
+            if self.recorder.start(self.size, name):
+                print("recording started")
+            else:
+                print(f"recording could not start: {self.recorder.error}")
+
+    def draw_recording_status(self):
+        status = self.recorder.status
+        if not status:
+            return
+        S = self.scale
+        f = self.fonts
+        rec = self.recorder.active
+        color = (235, 70, 70) if rec else (DIM if not self.recorder.error else JUDGE_COLORS["MISS"])
+        ts = f.text(status, f.small, color)
+        x = self.size[0] - ts.get_width() - 16 * S
+        y = self.size[1] - ts.get_height() - 8 * S
+        if rec and int(time.perf_counter() * 2) % 2 == 0:
+            pygame.draw.circle(self.surface, color, (int(x - 12 * S), int(y + ts.get_height() / 2)), int(5 * S))
+        self.surface.blit(ts, (x, y))
+
     def go(self, screen):
         self.screen_obj = screen
         self.update_menu_music()
@@ -331,6 +359,8 @@ class App:
                 elif ev.type == pygame.KEYDOWN:
                     if ev.key == pygame.K_F11 or (ev.key == pygame.K_f and ev.mod & (pygame.KMOD_META | pygame.KMOD_CTRL)):
                         self.toggle_fullscreen()
+                    elif ev.key == pygame.K_v:
+                        self.toggle_recording()
                     elif self.screen_obj.on_key(ev.key) is False:
                         running = False
             while self.drum_queue:
@@ -338,10 +368,17 @@ class App:
                     running = False
             self.screen_obj.update()
             self.screen_obj.draw(self.surface, clock.get_fps())
+            self.recorder.push(self.surface)              # a copy 30 times a second while recording
+            self.draw_recording_status()
             pygame.display.flip()
             clock.tick(TARGET_FPS)
         if self.midi_in:
             self.midi_in.close()
+        if self.recorder.active:
+            self.recorder.stop()
+        if self.recorder.composing is not None:
+            print("finishing the take...")
+            self.recorder.composing[0].join(timeout=300)
         pygame.quit()
 
 
@@ -517,6 +554,8 @@ class ListScreen(Screen):
                     (f"Menu music: {'on' if self.app.menu_music_on else 'off'}", "ambient texture outside the game"),
                     (f"Audio output: {self.app.sounds.device or 'system default'}", "select cycles through the outputs, saved"),
                     (f"Start fullscreen: {'on' if self.app.settings.get('fullscreen', True) else 'off'}", "F11 or Cmd+F toggles any time, saved"),
+                    ("Recording (V)", f"audio {self.app.recorder.settings['capture_audio_device']} ch {self.app.recorder.settings['capture_audio_channels']}"
+                                      f" · camera '{self.app.recorder.settings['capture_camera']}' · ~/Movies/drumhero"),
                     ("Quit", "")]
         return [(ch.name, f"{ch.bpm:.0f} bpm · {len(ch.notes):3d} notes · {ch.desc}" + ("  ♪ audio" if ch.audio else "")) for ch in self.app.items_for(self.cat)]
 
@@ -561,6 +600,8 @@ class ListScreen(Screen):
             elif self.sel == 8:
                 self.app.settings["fullscreen"] = not self.app.settings.get("fullscreen", True)
                 save_settings(self.app.settings)
+            elif self.sel == 9:
+                self.app.toggle_recording()
             else:
                 return False
         elif self.items():
