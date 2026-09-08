@@ -122,7 +122,7 @@ LOUD" are called out under the judgement, and a velocity in the band between
 the thresholds is neither. The thresholds come from measured paradiddles on the
 TD-17 snare: accents 88..124 (median 112), taps 29..84 (median 66). The hi-hat
 pad reads much hotter (taps 64..96, accents 120..127), so on the hi-hat a tap is
-100 or less and an accent 112 or more.
+104 or less and an accent 116 or more.
 
 The HUD counts accents and taps and shows the contrast: median accent velocity
 divided by median tap velocity over the last strokes, with the target (1.4x)

@@ -17,7 +17,7 @@ ACCENT_MIN = 88          # an accented note hit at least this hard counts as an 
 TAP_MAX = 84             # an unaccented note hit at most this hard counts as a tap; between: neither
 # The hi-hat pad reads much hotter than the snare (2026-09-07, 196 judged hi-hat hits in
 # rudiments: taps 64..96, accents 120..127, median 106), so it gets its own band.
-DYN_THRESHOLDS = {"hihat": (112, 100)}     # instrument -> (accent min, tap max); others use the defaults
+DYN_THRESHOLDS = {"hihat": (116, 104)}     # instrument -> (accent min, tap max); others use the defaults
 CONTRAST_TARGET = 1.4    # median accent velocity / median tap velocity to aim for
 DYN_BONUS = 30           # score for the right dynamic on a hit note
 TAIL_S = 2.0             # seconds after the last note before the results
