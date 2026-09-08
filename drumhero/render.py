@@ -45,6 +45,35 @@ def lerp(a, b, k):
 OPENNESS_COLORS = {"tight": (245, 90, 90), "mid": (250, 200, 60), "open": (110, 220, 110)}
 
 
+STAR = (250, 200, 60)
+STAR_OFF = (60, 60, 72)
+
+
+def draw_stars(surf, fonts, stars, right_x, y, S, size="small", pop=None):
+    """Five stars ending at right_x, `stars` of them lit. pop: seconds since the stars
+    appeared (the lit ones scale in one after another). Returns the width drawn."""
+    r = (7 if size == "small" else 16) * S
+    gap = (6 if size == "small" else 14) * S
+    w = 5 * (2 * r) + 4 * gap
+    x0 = right_x - w
+    for i in range(5):
+        cx = x0 + r + i * (2 * r + gap)
+        lit = i < stars
+        k = 1.0
+        if pop is not None and lit:
+            k = max(0.0, min(1.0, (pop - 0.25 * i) / 0.25))
+            k = 1.0 + 0.6 * math.sin(math.pi * k) if k < 1 else 1.0
+            if pop - 0.25 * i < 0:
+                lit = False
+        pts = []
+        for j in range(10):
+            ang = -math.pi / 2 + j * math.pi / 5
+            rad = r * k if j % 2 == 0 else r * k * 0.45
+            pts.append((cx + rad * math.cos(ang), y + r + rad * math.sin(ang)))
+        pygame.draw.polygon(surf, STAR if lit else STAR_OFF, pts)
+    return w
+
+
 def draw_hihat_state(surf, fonts, ghosts, cx, cy, S=1.0, color=(245, 230, 80)):
     """Two cymbals whose gap follows CC4, the openness class, the last stroke's zone.
     (cx, cy) is the centre of the widget; it is about 120 x 110 px at S = 1."""
@@ -128,6 +157,7 @@ class Renderer:
         self.note_h = int(NOTE_H * self.s)
         self.glow_h = int(GLOW_H * self.s)
         self.pps = (self.line_y - 60 * self.s) / LOOKAHEAD_S     # pixels per second at speed 1.0
+        self.finished_at = None                                  # set by the play screen for the star animation
 
     def y_for(self, note_t, now):
         return self.line_y - (note_t - now) * self.pps * self.game.speed
@@ -367,7 +397,8 @@ class Renderer:
         S = self.s
         lines = [
             ("RESULTS", self.f.big, TEXT),
-            (f"{st['hit']}/{st['notes']} notes  ·  {st['accuracy'] * 100:.1f}%", self.f.mid, TEXT),
+            (None, None, None),                                       # the stars go here
+            (f"{st['hit']}/{st['notes']} notes  ·  {st['accuracy'] * 100:.1f}%  ·  grade {st['grade']:.0f}", self.f.mid, TEXT),
             (f"max combo {g.max_combo}   score {g.score}", self.f.mid, TEXT),
             (f"timing: mean {st['mean_ms']:+.1f} ms, std {st['std_ms']:.1f} ms", self.f.mid, TEXT),
             (f"{st['early']} early · {st['late']} late · {g.counts['STRAY']} stray", self.f.small, DIM),
@@ -380,12 +411,18 @@ class Renderer:
                           f"accents {st['accents_ok']}/{st['accents']} · taps {st['taps_ok']}/{st['taps']}",
                           self.f.mid, JUDGE_COLORS["PERFECT"] if ok else JUDGE_COLORS["OK"]))
         lines.append(("Enter next · R retry · Esc back", self.f.small, DIM))
-        bh = 320 + (40 if g.chart.dynamics else 0)
+        bh = 370 + (40 if g.chart.dynamics else 0)
         box = pygame.Surface((int(600 * S), int(bh * S)))
         box.fill((10, 10, 14))
         box.set_alpha(250)
         cy = self.h * 0.42
         surf.blit(box, (self.w / 2 - 300 * S, cy - bh / 2 * S))
         y = cy - (bh / 2 - 35) * S
+        pop = None if self.finished_at is None else time.perf_counter() - self.finished_at
         for s, font, color in lines:
+            if s is None:
+                w = 5 * 32 * S + 4 * 14 * S
+                draw_stars(surf, self.f, st["stars"], self.w / 2 + w / 2, y - 6 * S, S, size="big", pop=pop)
+                y += 52 * S
+                continue
             y += self.f.center(surf, s, font, color, y) + 12 * S

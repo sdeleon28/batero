@@ -17,9 +17,10 @@ import pygame
 from . import chart as C
 from .chart import BEATS, EXERCISES, build_lanes, load_midi_chart, load_song_folder
 from .game import Game
-from .kit import default_kit, describe, describe_pads, load_kit, load_settings, save_kit, save_settings
+from .kit import (default_kit, describe, describe_pads, load_kit, load_progress, load_settings, save_kit,
+                  save_progress, save_settings)
 from .runlog import RunLog
-from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, draw_hihat_state, lerp
+from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, draw_hihat_state, draw_stars, lerp
 from .game import TAIL_S, lead_in_for
 from . import ghost as GH
 from .ghost import GhostFilter
@@ -63,7 +64,7 @@ class App:
         self.track_cache = {}
         self.offset_ms = args.offset if args.offset else float(self.settings.get("offset_ms") or 0.0)
         self.rate = args.speed          # tempo multiplier for levels, 1.0 = as written
-        self.results = {}          # chart name -> stats of the best run this session
+        self.results = load_progress()   # chart name -> best stats so far (stars, grade...), saved
         self.songs = None          # loaded lazily
         self.midi_name = None
         self.midi_in = None
@@ -480,8 +481,9 @@ class HubScreen(Screen):
             self.f.center(surf, title, self.f.big, TEXT, y + ph / 2 - 6 * S, x + pw / 2)
             self.f.center(surf, sub, self.f.small, DIM, y + ph / 2 + 36 * S, x + pw / 2)
             if cat in ("kick", "snare"):
-                n = len(self.app.items_for(cat))
-                self.f.center(surf, f"{n} levels", self.f.small, color, y + ph - 26 * S, x + pw / 2)
+                items = self.app.items_for(cat)
+                got = sum(self.app.results.get(ch.name, {}).get("stars", 0) for ch in items)
+                self.f.center(surf, f"{len(items)} levels  ·  ★ {got} / {5 * len(items)}", self.f.small, color, y + ph - 26 * S, x + pw / 2)
             elif cat == "hihat":
                 n = len(self.app.songs) if self.app.songs is not None else None
                 self.f.center(surf, f"{n} songs" if n is not None else "songs/ folder", self.f.small, color, y + ph - 26 * S, x + pw / 2)
@@ -620,10 +622,10 @@ class ListScreen(Screen):
             best = self.app.results.get(name)
             right = self.w * 0.88
             if best:
-                s = f"best {best['accuracy'] * 100:.0f}%  mean {best['mean_ms']:+.0f} ms"
-                ts = self.f.text(s, self.f.small, JUDGE_COLORS["PERFECT"] if best["accuracy"] >= 0.9 else JUDGE_COLORS["GOOD"])
+                ts = self.f.text(f"{best['accuracy'] * 100:.0f}%", self.f.small, DIM)
                 surf.blit(ts, (right - ts.get_width(), y + 4 * S))
-                right -= ts.get_width() + 16 * S
+                right -= ts.get_width() + 12 * S
+                right -= draw_stars(surf, self.f, best.get("stars", 0), right, y + 2 * S, S, size="small") + 16 * S
             surf.blit(self.f.text(self.fit(sub, right - (x + 370 * S)), self.f.small, DIM), (x + 370 * S, y + 4 * S))
             y += row_h
         if items:
@@ -942,6 +944,7 @@ class PlayScreen(Screen):
 
     def on_resize(self):
         self.renderer = Renderer(self.game, self.app.size, self.app.fonts, self.app.ghosts)
+        self.renderer.finished_at = self.finished_at
 
     def nav_ready(self):
         return self.finished_at is not None and time.perf_counter() - self.finished_at > RESULTS_GRACE_S
@@ -1039,8 +1042,11 @@ class PlayScreen(Screen):
             return
         st = self.game.stats()
         best = self.app.results.get(self.chart.name)
-        if best is None or st["accuracy"] > best["accuracy"]:
-            self.app.results[self.chart.name] = st
+        if best is None or st["grade"] > best.get("grade", -1):
+            keep = {k: st[k] for k in ("stars", "grade", "accuracy", "mean_ms", "std_ms", "hit", "notes")}
+            keep["when"] = time.time()
+            self.app.results[self.chart.name] = keep
+            save_progress(self.app.results)
         self.recorded = True
 
     def update(self):
@@ -1049,6 +1055,9 @@ class PlayScreen(Screen):
             self.record()
             if self.finished_at is None:
                 self.finished_at = time.perf_counter()
+                self.renderer.finished_at = self.finished_at
+                self.game.stop_tracks()                       # the jingle takes over from the backing
+                self.app.sounds.play_jingle(self.game.stats()["stars"])
 
     def draw(self, surf, fps):
         self.renderer.draw(surf, fps)

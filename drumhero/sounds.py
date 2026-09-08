@@ -87,6 +87,90 @@ def _to_sound(x):
     return pygame.sndarray.make_sound(np.ascontiguousarray(stereo))
 
 
+# ---------------------------------------------------------------------------
+# End-of-level jingles, one per star count. Five stars is the victory fanfare.
+# ---------------------------------------------------------------------------
+def _tone_env(f, dur, kind="brass", sr=SR):
+    t = _t(dur)
+    if kind == "brass":
+        raw = _saw(t * f) + 0.6 * _saw(t * f * 1.004) + 0.3 * _saw(t * f * 0.5)
+        sig = np.convolve(np.tanh(1.6 * raw), np.ones(6) / 6, mode="same")
+        env = np.minimum(1.0, t / 0.03) * np.minimum(1.0, np.maximum(0.0, (dur - t) / 0.06)) * (0.7 + 0.3 * np.exp(-t * 3))
+    elif kind == "bell":
+        sig = np.sin(2 * np.pi * f * t) + 0.4 * np.sin(2 * np.pi * f * 2.76 * t) * np.exp(-t * 6)
+        env = np.minimum(1.0, t / 0.003) * np.exp(-t * 3)
+    elif kind == "pluck":
+        sig = np.sin(2 * np.pi * f * t) + 0.3 * np.sin(6 * np.pi * f * t)
+        env = np.minimum(1.0, t / 0.002) * np.exp(-t * 9)
+    else:  # organ / soft
+        sig = sum(a * np.sin(2 * np.pi * f * h * t) for h, a in ((1, 1), (2, 0.5), (3, 0.25)))
+        env = np.minimum(1.0, t / 0.02) * np.minimum(1.0, np.maximum(0.0, (dur - t) / 0.1))
+    return sig * env
+
+
+def _midi(n):
+    return 440.0 * 2 ** ((n - 69) / 12)
+
+
+def jingle(stars, sr=SR):
+    """Mono float32. 0..1 star: a short sag; 2: a plain cadence; 3: a bright cadence; 4: a
+    rising fanfare; 5: the full victory fanfare with drums."""
+    events = []                                     # (time, signal, gain)
+
+    def note(t0, midi, dur, kind="brass", gain=0.3):
+        events.append((t0, _tone_env(_midi(midi), dur, kind), gain))
+
+    def chord(t0, midis, dur, kind="brass", gain=0.22):
+        for m in midis:
+            note(t0, m, dur, kind, gain)
+
+    if stars <= 1:
+        note(0.0, 64, 0.45, "soft", 0.35); note(0.4, 62, 0.45, "soft", 0.35); note(0.8, 58, 1.2, "soft", 0.35)
+        events.append((0.8, kick(), 0.5))
+        total = 2.2
+    elif stars == 2:
+        chord(0.0, [60, 64, 67], 0.5, "soft"); chord(0.5, [59, 62, 67], 0.5, "soft"); chord(1.0, [60, 64, 67], 1.2, "soft")
+        total = 2.4
+    elif stars == 3:
+        for i, m in enumerate([67, 72, 76]):
+            note(i * 0.14, m, 0.3, "pluck", 0.35)
+        chord(0.42, [72, 76, 79], 1.4, "bell", 0.3)
+        chord(0.42, [48, 55], 1.4, "soft", 0.25)
+        total = 2.0
+    elif stars == 4:
+        for i, m in enumerate([60, 64, 67, 72]):
+            note(i * 0.12, m, 0.25, "brass", 0.3)
+        chord(0.5, [72, 76, 79, 84], 1.6, "brass", 0.2)
+        chord(0.5, [48, 55], 1.6, "soft", 0.3)
+        events.append((0.5, crash(), 0.5)); events.append((0.5, kick(), 0.6))
+        total = 2.4
+    else:
+        # victory fanfare: triplet pickup, held note, ascending run, big chord with tremolo
+        for i in range(3):
+            note(i * 0.11, 67, 0.12, "brass", 0.32)
+            events.append((i * 0.11, snare(), 0.25))
+        note(0.33, 67, 0.55, "brass", 0.32); note(0.33, 55, 0.55, "soft", 0.3)
+        events.append((0.33, kick(), 0.8)); events.append((0.33, crash(), 0.6))
+        for i, m in enumerate([63, 65, 67, 70, 72, 74]):
+            note(0.9 + i * 0.09, m, 0.16, "brass", 0.28)
+        note(1.45, 75, 0.5, "brass", 0.32); note(1.45, 51, 0.5, "soft", 0.3)
+        events.append((1.45, kick(), 0.8)); events.append((1.45, crash(seed=9, dur=1.3), 0.5))
+        for i, m in enumerate([67, 70, 72, 75, 79]):
+            note(2.0 + i * 0.08, m, 0.14, "brass", 0.28)
+        # final chord with tremolo, a bell on top, timpani hits
+        for k in range(6):
+            chord(2.45 + k * 0.5, [72, 75, 79, 84], 0.55, "brass", 0.16 * (1.0 if k < 5 else 1.3))
+            note(2.45 + k * 0.5, 48 if k % 2 == 0 else 55, 0.5, "soft", 0.3)
+            events.append((2.45 + k * 0.5, kick(), 0.7))
+        chord(2.45, [91, 96], 3.5, "bell", 0.12)
+        events.append((2.45, crash(), 0.6)); events.append((4.95, crash(seed=9, dur=1.6), 0.6))
+        chord(4.95, [72, 76, 79, 84], 2.4, "brass", 0.18)
+        note(4.95, 48, 2.4, "soft", 0.32)
+        total = 7.6
+    out = _mix_events(events, total)
+    return out.astype(np.float32)
+
+
 def output_devices():
     """Names of the audio output devices SDL can open."""
     try:
@@ -135,6 +219,17 @@ class SoundBank:
             "crash2": _to_sound(crash(seed=9, dur=1.3)),
             "click": _to_sound(click()), "click_hi": _to_sound(click(high=True)),
         }
+
+    def play_jingle(self, stars):
+        """The end-of-level jingle for a star count; rendered on first use, then cached."""
+        if not self.ok:
+            return
+        key = f"jingle{stars}"
+        if key not in self.sounds:
+            self.sounds[key] = _to_sound(jingle(stars))
+        ch = self.sounds[key].play()
+        if ch is not None:
+            ch.set_volume(0.9)
 
     def _get(self, key):
         s = self.sounds.get(key)

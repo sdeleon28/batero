@@ -20,6 +20,21 @@ TAP_MAX = 84             # an unaccented note hit at most this hard counts as a 
 DYN_THRESHOLDS = {"hihat": (116, 104)}     # instrument -> (accent min, tap max); others use the defaults
 CONTRAST_TARGET = 1.4    # median accent velocity / median tap velocity to aim for
 DYN_BONUS = 30           # score for the right dynamic on a hit note
+# Stars: a 0..100 grade from accuracy (half), hit quality (PERFECT 1, GOOD 0.6, OK 0.3) and
+# dynamics (or quality again when the chart has none), minus strays, cut at these grades.
+STAR_GRADES = [30, 50, 70, 85, 94]
+
+
+def grade_for(st):
+    """0..100 from a stats dict (accuracy, quality, dyn_rate, stray_rate)."""
+    dyn = st.get("dyn_rate")
+    g = 100 * (0.5 * st["accuracy"] + 0.3 * st["quality"] + 0.2 * (dyn if dyn is not None else st["quality"]))
+    g -= 200 * st["stray_rate"]                      # 5 strays per 100 notes cost 10 points
+    return max(0.0, min(100.0, g))
+
+
+def stars_for(grade):
+    return sum(1 for g in STAR_GRADES if grade >= g)
 TAIL_S = 2.0             # seconds after the last note before the results
 
 
@@ -248,6 +263,13 @@ class Game:
             "late": sum(1 for e in errs if e > 0),
         }
         out.update(self.dynamics(len(self.notes)))
+        c = self.counts
+        out["quality"] = (c["PERFECT"] + 0.6 * c["GOOD"] + 0.3 * c["OK"]) / total if total else 0.0
+        out["stray_rate"] = c["STRAY"] / total if total else 0.0
+        judged = out.get("accents_ok", 0) + out.get("taps_ok", 0) + out.get("soft", 0) + out.get("loud", 0)
+        out["dyn_rate"] = (out["accents_ok"] + out["taps_ok"]) / judged if self.chart.dynamics and judged else None
+        out["grade"] = grade_for(out)
+        out["stars"] = stars_for(out["grade"])
         return out
 
     def dynamics(self, last_n=None):

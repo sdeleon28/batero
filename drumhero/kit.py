@@ -25,6 +25,24 @@ def save_settings(settings, path=SETTINGS_PATH):
         json.dump(settings, f, indent=2)
 
 
+PROGRESS_PATH = os.path.expanduser("~/.config/drumhero/progress.json")
+
+
+def load_progress(path=PROGRESS_PATH):
+    """chart name -> best stats so far (stars, grade, accuracy, mean_ms, ...)."""
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_progress(progress, path=PROGRESS_PATH):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        json.dump(progress, f, indent=1)
+
+
 def load_kit(path=KIT_PATH):
     """The saved kit {zone key: [note numbers]}, or None if the wizard has never run."""
     try:

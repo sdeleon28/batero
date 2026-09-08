@@ -196,6 +196,18 @@ pending note in its lane; a note can only be hit once.
 
 The error shown is `hit time - note time`: negative is early, positive is late.
 
+## Stars
+
+Every run gets a grade from 0 to 100: half from accuracy (notes hit), a third
+from hit quality (PERFECT counts 1, GOOD 0.6, OK 0.3), a fifth from dynamics
+on levels that judge them (otherwise quality again), minus two points per
+stray in a hundred notes. Grades 30, 50, 70, 85 and 94 earn one to five stars.
+The best grade per level is saved to `~/.config/drumhero/progress.json` and its
+stars show next to the level in the lists, with totals on the hub cards. When
+a level ends the backing stops and a jingle plays for the star count: a sag for
+none or one, a plain cadence for two, a bright one for three, a rising fanfare
+for four, and for five the full victory fanfare with drums.
+
 ## Run logs and auditing
 
 Every level you play is written, when it ends, to
