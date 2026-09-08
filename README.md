@@ -180,6 +180,14 @@ pending note in its lane; a note can only be hit once.
 
 The error shown is `hit time - note time`: negative is early, positive is late.
 
+## Drum sounds off: play through Bitwig
+
+"Drum sounds" in Setup (or D while playing) silences the game's own kit: hits,
+guide and menu navigation stop making sound, while the metronome, backing and
+menu music stay. Use it when the TD-17 module or Bitwig with GetGood Drums
+(fed by the sibling hhmapper) is the drum sound, so nothing plays twice. Saved
+in settings.
+
 ## Tempo
 
 `[` and `]` slow the level down or speed it up in steps of 10 % (0.3x to 2x)
@@ -221,6 +229,7 @@ timing errors; the mean is your latency, the deviation is you.
 | h j k l       | same as the arrows, Enter and Esc in menus |
 | [ / ]         | tempo -/+ 10 % (restarts the level) |
 | , / .         | input offset -/+ 5 ms              |
+| D             | drum sounds on/off (saved)         |
 | 1..9, 0       | hit lanes from the keyboard        |
 
 `--no-sound` disables audio entirely, `--no-guide` starts with the guide track

@@ -77,7 +77,8 @@ class App:
         self.legend_flash = {}     # instrument -> wall time of its last navigation hit
 
         pygame.init()
-        self.sounds = SoundBank(enabled=not args.no_sound, device=self.settings.get("audio_device"))
+        self.sounds = SoundBank(enabled=not args.no_sound, device=self.settings.get("audio_device"),
+                                drums=self.settings.get("drum_sounds", True))
         w, h = (int(v) for v in args.size.lower().split("x"))
         # RESIZABLE gives the window macOS's green fullscreen button (native Spaces fullscreen).
         self.surface = pygame.display.set_mode((w, h), pygame.RESIZABLE)
@@ -109,6 +110,14 @@ class App:
         if isinstance(self.screen_obj, PlayScreen):
             self.screen_obj.game.sounds = self.sounds
         self.update_menu_music()
+
+    def set_drum_sounds(self, on):
+        """The kit's own hit, guide and navigation sounds. Off when the module or a DAW
+        (Bitwig with GetGood Drums through hhmapper) makes the drum sound; the metronome,
+        backing and menu music stay."""
+        self.sounds.drums = on
+        self.settings["drum_sounds"] = on
+        save_settings(self.settings)
 
     def cycle_audio_device(self):
         names = [None] + output_devices()
@@ -490,6 +499,7 @@ class ListScreen(Screen):
         if self.cat == "crash":
             return [("Set up kit", describe(self.app.kit)),
                     ("Soundcheck", "hit every pad, see where it lands and hear it"),
+                    (f"Drum sounds: {'on' if self.app.sounds.drums else 'off'}", "off: the kit is silent here, the module or Bitwig makes the sound"),
                     (f"Guide sounds: {'on' if self.app.guide else 'off'}", "hear the chart as it crosses the line"),
                     (f"Backing loop: {'on' if self.app.backing_on else 'off'}", "bass, chords and arpeggio under the built-in levels"),
                     (f"Metronome: {self.app.metronome_mode}", "congas: full follows the subdivision, beats only marks the beats"),
@@ -511,18 +521,20 @@ class ListScreen(Screen):
             elif self.sel == 1:
                 self.app.go(SoundcheckScreen(self.app))
             elif self.sel == 2:
-                self.app.guide = not self.app.guide
+                self.app.set_drum_sounds(not self.app.sounds.drums)
             elif self.sel == 3:
-                self.app.backing_on = not self.app.backing_on
+                self.app.guide = not self.app.guide
             elif self.sel == 4:
+                self.app.backing_on = not self.app.backing_on
+            elif self.sel == 5:
                 modes = ["full", "beats", "off"]
                 self.app.metronome_mode = modes[(modes.index(self.app.metronome_mode) + 1) % 3]
-            elif self.sel == 5:
+            elif self.sel == 6:
                 self.app.menu_music_on = not self.app.menu_music_on
                 self.app.update_menu_music()
-            elif self.sel == 6:
-                self.app.cycle_audio_device()
             elif self.sel == 7:
+                self.app.cycle_audio_device()
+            elif self.sel == 8:
                 self.app.settings["fullscreen"] = not self.app.settings.get("fullscreen", True)
                 save_settings(self.app.settings)
             else:
@@ -942,6 +954,8 @@ class PlayScreen(Screen):
             save_settings(self.app.settings)
         elif key == pygame.K_g:
             g.guide = self.app.guide = not g.guide
+        elif key == pygame.K_d:
+            self.app.set_drum_sounds(not self.app.sounds.drums)
         elif key == pygame.K_b:
             self.app.backing_on = not self.app.backing_on
             g.enable_track("backing", self.app.backing_on)

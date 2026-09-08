@@ -100,10 +100,11 @@ class SoundBank:
     """Builds the sounds once and plays them by chart key ("kick", "n45", ...).
     device: output device name (substring match), None = system default."""
 
-    def __init__(self, enabled=True, device=None):
+    def __init__(self, enabled=True, device=None, drums=True):
         self.ok = False
         self.sounds = {}
         self.device = None
+        self.drums = drums          # False: the kit is silent (the module or a DAW makes the drum sound)
         if not enabled:
             return
         name = None
@@ -141,7 +142,7 @@ class SoundBank:
         return s
 
     def play(self, key, velocity=100, gain=1.0):
-        if not self.ok:
+        if not self.ok or (not self.drums and key not in ("click", "click_hi")):
             return
         s = self._get(key)
         if s is None:

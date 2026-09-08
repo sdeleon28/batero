@@ -263,7 +263,7 @@ class Renderer:
         right = [f"{fps:5.0f} fps", f"offset {offset:+.0f} ms",
                  f"tempo {g.chart.rate:.2f}x" if g.chart.rate != 1.0 else "tempo 1x",
                  f"{g.chart.bpm:.0f} bpm" + (f" (of {g.chart.bpm / g.chart.rate:.0f})" if g.chart.rate != 1.0 else ""),
-                 f"guide {'on' if g.guide else 'off'}",
+                 f"guide {'on' if g.guide else 'off'}" + ("" if g.sounds is None or g.sounds.drums else "  ·  drums off"),
                  f"backing {'on' if g.track_enabled('backing') else 'off'}" if 'backing' in g.tracks else "no backing",
                  f"metronome {g.metronome_mode}"]
         for i, s in enumerate(right):
