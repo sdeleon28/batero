@@ -125,6 +125,8 @@ class Game:
 
     # --- pre-rendered tracks (backing, metronome) --------------------------------
     def set_track(self, name, track, enabled=True):
+        from .sounds import TRACK_CHANNELS
+        track.channel = TRACK_CHANNELS.get(name)
         old = self.tracks.get(name)
         if old:
             old[0].stop()

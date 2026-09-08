@@ -6,6 +6,12 @@ import pygame
 
 SR = 44100
 MIXER_BUFFER = 256          # small buffer for low latency; raise it if audio crackles
+# Mixer channels: the first few are reserved so a burst of hit and guide sounds can never
+# leave the menu music or a level's tracks without a channel.
+NUM_CHANNELS = 32
+MENU_CHANNEL = 0
+TRACK_CHANNELS = {"backing": 1, "metronome": 2, "music": 3}
+RESERVED = 4
 
 
 def _t(seconds):
@@ -172,10 +178,15 @@ def jingle(stars, sr=SR):
 
 
 def output_devices():
-    """Names of the audio output devices SDL can open."""
+    """Names of the audio output devices SDL can open. SDL only lists them once its audio
+    subsystem is up, so open the mixer on the default device first when nothing is open."""
     try:
         from pygame._sdl2 import audio
-        return list(audio.get_audio_device_names(False))
+        names = list(audio.get_audio_device_names(False))
+        if not names and not pygame.mixer.get_init():
+            pygame.mixer.init()
+            names = list(audio.get_audio_device_names(False))
+        return names
     except Exception:
         return []
 
@@ -205,7 +216,8 @@ class SoundBank:
                 pygame.mixer.init(devicename=name)
             else:
                 pygame.mixer.init()
-            pygame.mixer.set_num_channels(24)
+            pygame.mixer.set_num_channels(NUM_CHANNELS)
+            pygame.mixer.set_reserved(RESERVED)
         except pygame.error as e:
             print(f"audio disabled: {e}")
             return
@@ -706,7 +718,8 @@ class Track:
     Playback can start from any point, which makes pause/resume and late joins exact.
     data: mono float32 in -1..1, or stereo int16 (n, 2) straight from a decoded file."""
 
-    def __init__(self, data, t0, gain=1.0):
+    def __init__(self, data, t0, gain=1.0, channel=None):
+        self.channel = channel        # reserved mixer channel index, or None for any free one
         if data.dtype == np.int16 and data.ndim == 2:
             self.pcm = np.ascontiguousarray(data)
         else:
@@ -728,7 +741,10 @@ class Track:
             return
         self.sound = pygame.sndarray.make_sound(np.ascontiguousarray(self.pcm[i:]))
         self.sound.set_volume(self.gain)
-        self.sound.play()
+        if self.channel is not None:
+            pygame.mixer.Channel(self.channel).play(self.sound)
+        else:
+            self.sound.play()
         self.playing = True
 
     def stop(self):

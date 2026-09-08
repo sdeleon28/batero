@@ -31,7 +31,7 @@ from .game import TAIL_S, lead_in_for
 from . import ghost as GH
 from .ghost import GhostFilter
 from .sounds import (BACKING_GAIN, METRONOME_GAIN, PROGRESSIONS, SoundBank, Track, load_audio_track,
-                     menu_music_sound, output_devices, render_backing_track, render_metronome)
+                     menu_music_sound, output_devices, render_backing_track, render_metronome, MENU_CHANNEL)
 
 TARGET_FPS = 240
 CAPTURE_S = 1.5           # wizard: keep collecting note numbers this long after the first hit
@@ -95,9 +95,18 @@ class App:
         self.last_nav = {}
         self.legend_flash = {}     # instrument -> wall time of its last navigation hit
 
-        pygame.init()
-        self.sounds = SoundBank(enabled=not args.no_sound, device=self.settings.get("audio_device"),
-                                drums=self.settings.get("drum_sounds", True))
+        # display and fonts only: pygame.init() would open the mixer here, and opening an audio
+        # device can block on macOS's microphone prompt (seen 2026-09-08: the window never came
+        # up). The mixer opens in a thread instead and swaps in when ready.
+        pygame.display.init()
+        pygame.font.init()
+        self.sounds = SoundBank(enabled=False)
+        self.sounds_ready = threading.Event()
+        self._sounds_pending = None
+        if not args.no_sound:
+            threading.Thread(target=self._open_sounds, daemon=True).start()
+        else:
+            self.sounds_ready.set()
         w, h = (int(v) for v in args.size.lower().split("x"))
         # RESIZABLE gives the window macOS's green fullscreen button (native Spaces fullscreen).
         self.surface = pygame.display.set_mode((w, h), pygame.RESIZABLE)
@@ -119,6 +128,38 @@ class App:
             self.watcher.start()
 
     # --- audio output ------------------------------------------------------------
+    def _open_sounds(self):
+        """Background: build the mixer and the kit; the main loop adopts it (adopt_sounds)."""
+        try:
+            bank = SoundBank(enabled=True, device=self.settings.get("audio_device"), drums=self.settings.get("drum_sounds", True))
+        except Exception as e:                                  # noqa: BLE001
+            print(f"audio failed to open: {e}")
+            bank = SoundBank(enabled=False)
+        self._sounds_pending = bank
+
+    def adopt_sounds(self):
+        """Main thread: swap in the mixer opened in the background, once."""
+        bank = self._sounds_pending
+        if bank is None:
+            return
+        self._sounds_pending = None
+        self.sounds = bank
+        if isinstance(self.screen_obj, PlayScreen):
+            self.screen_obj.game.sounds = bank
+        self.sounds_ready.set()
+        if bank.ok:
+            self.toasts.add(f"audio ready: {bank.device or 'system default'}", DIM)
+        self.update_menu_music()
+
+    def wait_sounds(self, timeout=15.0):
+        """Block until the mixer is open (tests and scripts); the game never waits."""
+        t0 = time.perf_counter()
+        while not self.sounds_ready.is_set() and time.perf_counter() - t0 < timeout:
+            self.adopt_sounds()
+            time.sleep(0.01)
+        self.adopt_sounds()
+        return self.sounds.ok
+
     def set_audio_device(self, name):
         """Reopen the mixer on another output; every Sound belongs to the old mixer, so rebuild."""
         if self.menu_music is not None:
@@ -265,11 +306,12 @@ class App:
         want = self.menu_music_on and not isinstance(self.screen_obj, PlayScreen)
         if want and self.menu_music is None:
             self.menu_music = menu_music_sound()
+        ch = pygame.mixer.Channel(MENU_CHANNEL)
         if want:
-            if not (self.menu_music.get_num_channels() > 0):
-                self.menu_music.play(loops=-1, fade_ms=600)
-        elif self.menu_music is not None:
-            self.menu_music.fadeout(300)
+            if not ch.get_busy():
+                ch.play(self.menu_music, loops=-1, fade_ms=600)
+        elif self.menu_music is not None and ch.get_busy():
+            ch.fadeout(300)
 
     # --- MIDI ------------------------------------------------------------------
     def open_midi(self, wanted):
@@ -539,6 +581,7 @@ class App:
                 if self.screen_obj.on_drum(self.drum_queue.popleft()) is False:
                     running = False
             self.handle_device_events()
+            self.adopt_sounds()
             self.screen_obj.update()
             self.screen_obj.draw(self.surface, clock.get_fps())
             self.recorder.push(self.surface)              # a copy 30 times a second while recording

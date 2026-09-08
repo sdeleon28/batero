@@ -82,8 +82,9 @@ def base_python(cfg):
 def make_icon(icns_path, tmp_dir):
     """A dark rounded tile with the four drum colours and the hit line, rendered with pygame."""
     os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+    os.environ.setdefault("SDL_AUDIODRIVER", "dummy")   # drawing only: never open an audio device here
     import pygame
-    pygame.init()
+    pygame.display.init()
     size = 1024
     surf = pygame.Surface((size, size), pygame.SRCALPHA)
     pygame.draw.rect(surf, (14, 14, 18), (0, 0, size, size), border_radius=int(size * 0.22))
