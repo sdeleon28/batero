@@ -70,6 +70,10 @@ class DeviceWatcher:
             names = self._audio_list() if self._audio_list else _output_devices()
         except Exception:                                   # noqa: BLE001
             return self.state["audio"]
+        current = set(names)
+        if getattr(self, "_audio_set", None) is not None and current != self._audio_set:
+            self.events.put(("audio-list", ", ".join(sorted(current ^ self._audio_set)), True))
+        self._audio_set = current
         if not self.audio_hint:
             return "system default"
         return next((n for n in names if self.audio_hint.lower() in n.lower()), None)

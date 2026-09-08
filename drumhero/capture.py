@@ -35,7 +35,7 @@ import numpy as np
 OUT_DIR = os.path.expanduser("~/Movies/drumhero")
 FPS = 30
 DEFAULTS = {"capture_audio_device": "X18/XR18", "capture_audio_channels": [17, 18],
-            "capture_camera": "iPhone", "capture_pip": 0.28, "capture_corner": "br"}
+            "capture_camera": "iPhone", "capture_pip": 0.28, "capture_corner": "br", "capture_camera_delay_ms": 0}
 CORNERS = ["br", "bl", "tr", "tl"]
 PREVIEW_SIZE = (640, 360)
 CAMERA_FPS = 30              # what cameras accept (Continuity Camera: 30 or 60)
@@ -162,20 +162,25 @@ class Recorder:
                 self._audio = None
         else:
             self.log(f"recording: audio device '{self.settings['capture_audio_device']}' not found, video only")
-        # camera: ffmpeg avfoundation to its own file
+        # camera: frames come into memory and are written on the same clock as the game's
         self.cam_path = None
+        self.feed = None
         self.ff_cam = None
+        self.cam_frames = 0
         cam = find_camera(self.settings["capture_camera"])
         if cam is not None:
-            self.cam_path = os.path.join(self.tmp, "camera.mp4")
-            self.cam_t0 = time.time()
-            self.ff_cam = subprocess.Popen(
-                [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-y",
-                 "-f", "avfoundation", "-framerate", str(CAMERA_FPS), "-pixel_format", "uyvy422", "-video_size", "1280x720",
-                 "-use_wallclock_as_timestamps", "1", "-i", f"{cam[0]}:none",
-                 "-c:v", "h264_videotoolbox", "-b:v", "8M", "-pix_fmt", "yuv420p", self.cam_path],
-                stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-            self.log(f"recording: camera {cam[1]}")
+            try:
+                self.feed = CameraFeed(cam)
+                self.cam_path = os.path.join(self.tmp, "camera.mp4")
+                self.ff_cam = subprocess.Popen(
+                    [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-y",
+                     "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "1280x720", "-r", str(FPS), "-i", "pipe:0",
+                     "-c:v", "h264_videotoolbox", "-b:v", "8M", "-pix_fmt", "yuv420p", self.cam_path],
+                    stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                self.log(f"recording: camera {cam[1]}")
+            except OSError as e:
+                self.log(f"recording: camera failed ({e})")
+                self.feed = None
         self.active = True
         return True
 
@@ -210,17 +215,20 @@ class Recorder:
         if now < self._next_frame:
             return
         self._next_frame = max(self._next_frame + 1 / FPS, now - 0.5 / FPS)
+        cam = self.feed.frame if self.feed is not None else None
         try:
-            self._q.put_nowait(surface.copy())
+            self._q.put_nowait((surface.copy(), cam))
         except queue.Full:
             self.dropped += 1
 
     def _write_frames(self):
         import pygame
+        black = None
         while True:
-            surf = self._q.get()
-            if surf is None:
+            item = self._q.get()
+            if item is None:
                 break
+            surf, cam = item
             if surf.get_size() != self.size:
                 surf = pygame.transform.smoothscale(surf, self.size)
             try:
@@ -228,6 +236,15 @@ class Recorder:
                 self.frames += 1
             except (BrokenPipeError, ValueError, OSError):
                 break
+            if self.ff_cam is not None:
+                if cam is None:                                  # camera not streaming yet: black frame keeps sync
+                    black = black or bytes(1280 * 720 * 3)
+                    cam = black
+                try:
+                    self.ff_cam.stdin.write(cam)
+                    self.cam_frames += 1
+                except (BrokenPipeError, ValueError, OSError):
+                    self.ff_cam = None
 
     def _write_audio(self):
         while True:
@@ -251,9 +268,11 @@ class Recorder:
         if self._audio is not None:
             self._audio.stop(); self._audio.close()
             self._aq.put(None); self._awriter.join(timeout=10); self._afile.close()
+        if self.feed is not None:
+            self.feed.stop()
         if self.ff_cam is not None:
             try:
-                self.ff_cam.stdin.write(b"q"); self.ff_cam.stdin.flush()
+                self.ff_cam.stdin.close()
             except OSError:
                 pass
         stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(self.t0))
@@ -271,12 +290,11 @@ class Recorder:
                 self.ff_cam.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 self.ff_cam.kill()
-        cam_ok = self.cam_path and os.path.exists(self.cam_path) and os.path.getsize(self.cam_path) > 1000
+        cam_ok = self.cam_path and os.path.exists(self.cam_path) and os.path.getsize(self.cam_path) > 1000 and self.cam_frames > 0
         cmd = [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-y", "-i", self.video_path]
-        maps = []
         if cam_ok:
-            offset = self._camera_offset()
-            cmd += ["-itsoffset", f"{offset:.3f}", "-i", self.cam_path]
+            delay = float(self.settings.get("capture_camera_delay_ms", 0)) / 1000   # camera pipeline lag to trim, if any
+            cmd += ["-itsoffset", f"{-delay:.3f}", "-i", self.cam_path]
         if self.audio_path and os.path.exists(self.audio_path):
             cmd += ["-itsoffset", f"{self.audio_t0 - self.t0:.3f}", "-i", self.audio_path]
         if cam_ok:
@@ -317,21 +335,10 @@ class Recorder:
             except (OSError, ValueError, KeyError):
                 continue
         meta = {"take": final, "t0": self.t0, "duration": duration, "fps": FPS, "size": list(self.size),
-                "frames": self.frames, "dropped": self.dropped, "camera": bool(self.cam_path), "run_logs": logs}
+                "frames": self.frames, "dropped": self.dropped, "camera": bool(self.cam_path), "camera_frames": self.cam_frames,
+                "run_logs": logs}
         with open(final[:-4] + ".json", "w") as f:
             json.dump(meta, f, indent=1)
-
-    def _camera_offset(self):
-        """Seconds the camera file starts after the video, from its wall-clock timestamps."""
-        try:
-            r = subprocess.run([ffprobe_path() or "ffprobe", "-v", "error", "-show_entries", "format=start_time",
-                                "-of", "csv=p=0", self.cam_path], capture_output=True, text=True, timeout=15)
-            start = float(r.stdout.strip())
-            if start > 1e9:                                   # epoch seconds: aligned by wall clock
-                return start - self.t0
-        except (ValueError, OSError, subprocess.TimeoutExpired):
-            pass
-        return self.cam_t0 - self.t0 + 0.4                    # ffmpeg's usual startup lag
 
     @property
     def status(self):
@@ -342,6 +349,43 @@ class Recorder:
         if self.composing is not None:
             return "rendering take..."
         return self.error
+
+
+class CameraFeed:
+    """Raw camera frames from ffmpeg into memory; the recorder samples the latest one on its
+    own 30 Hz clock, the same clock that samples the game's picture, so the two streams are
+    aligned by construction (no file offsets to guess)."""
+
+    def __init__(self, camera, size=(1280, 720)):
+        self.size = size
+        self.frame = None
+        self.frames = 0
+        self.error = None
+        w, h = size
+        self.proc = subprocess.Popen(
+            [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-framerate", str(CAMERA_FPS),
+             "-pixel_format", "uyvy422", "-video_size", "1280x720", "-i", f"{camera[0]}:none",
+             "-vf", f"scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL)
+        self.thread = threading.Thread(target=self._read, daemon=True)
+        self.thread.start()
+
+    def _read(self):
+        n = self.size[0] * self.size[1] * 3
+        while True:
+            buf = self.proc.stdout.read(n)
+            if len(buf) < n:
+                break
+            self.frame = buf
+            self.frames += 1
+        if not self.frames:
+            err = self.proc.stderr.read().decode(errors="replace")
+            lines = [l for l in err.splitlines() if l.strip() and "deprecated" not in l and "NSKVO" not in l]
+            self.error = lines[-1][-160:] if lines else "the camera sent no frames"
+
+    def stop(self):
+        if self.proc.poll() is None:
+            self.proc.kill()
 
 
 class CameraPreview:

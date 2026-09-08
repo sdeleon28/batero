@@ -406,6 +406,12 @@ class App:
                 self.toasts.add(f"{name} disconnected: keyboard only", bad)
         elif kind == "midi-other":
             self.toasts.add(f"MIDI device connected: {name}", DIM)
+        elif kind == "audio-list":
+            # CoreAudio's device set changed (a phone mic, a display...): SDL can lose its output
+            # when that happens, so reopen the mixer on the device we want
+            if self.sounds.ok and not self.recorder.active:
+                self.reopen_sounds(self.settings.get("audio_device"))
+                self.toasts.add(f"audio devices changed ({name}): mixer reopened", DIM)
         elif kind == "audio":
             if connected:
                 self.toasts.add(f"audio output {name} connected", ok)
