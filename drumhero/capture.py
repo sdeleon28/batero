@@ -38,6 +38,7 @@ DEFAULTS = {"capture_audio_device": "X18/XR18", "capture_audio_channels": [17, 1
             "capture_camera": "iPhone", "capture_pip": 0.28, "capture_corner": "br"}
 CORNERS = ["br", "bl", "tr", "tl"]
 PREVIEW_SIZE = (640, 360)
+CAMERA_FPS = 30              # what cameras accept (Continuity Camera: 30 or 60)
 
 
 def overlay_xy(corner, margin=24):
@@ -150,7 +151,7 @@ class Recorder:
             self.cam_t0 = time.time()
             self.ff_cam = subprocess.Popen(
                 [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-y",
-                 "-f", "avfoundation", "-framerate", "30", "-pixel_format", "uyvy422", "-video_size", "1280x720",
+                 "-f", "avfoundation", "-framerate", str(CAMERA_FPS), "-pixel_format", "uyvy422", "-video_size", "1280x720",
                  "-use_wallclock_as_timestamps", "1", "-i", f"{cam[0]}:none",
                  "-c:v", "h264_videotoolbox", "-b:v", "8M", "-pix_fmt", "yuv420p", self.cam_path],
                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -333,10 +334,11 @@ class CameraPreview:
         self.frames = 0
         w, h = size
         try:
+            # cameras advertise 30/60 fps modes (the iPhone refuses 15): capture at 30, keep every other frame
             self.proc = subprocess.Popen(
-                [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-framerate", str(fps),
+                [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-framerate", str(CAMERA_FPS),
                  "-pixel_format", "uyvy422", "-video_size", "1280x720", "-i", f"{camera[0]}:none",
-                 "-vf", f"scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+                 "-vf", f"fps={fps},scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL)
         except OSError as e:
             self.proc = None
@@ -353,9 +355,10 @@ class CameraPreview:
                 break
             self.frame = buf
             self.frames += 1
-        err = self.proc.stderr.read().decode(errors="replace").strip()
-        if err and not self.frames:
-            self.error = err[-200:]
+        err = self.proc.stderr.read().decode(errors="replace")
+        if not self.frames:
+            lines = [l for l in err.splitlines() if l.strip() and "deprecated" not in l and "NSKVO" not in l and "Please use" not in l]
+            self.error = (lines[-1][-160:] if lines else "the camera sent no frames")
 
     def surface(self):
         if self.frame is None:
