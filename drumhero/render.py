@@ -292,7 +292,7 @@ class Renderer:
         # HUD with a backing so it stays readable over notes
         dyn = g.dynamics(32) if g.chart.dynamics else None
         expr = g.chart.expression
-        backing = pygame.Surface((int(360 * S), int((150 if dyn is not None else (122 if expr else 100)) * S)))
+        backing = pygame.Surface((int(360 * S), int((150 if dyn is not None else (140 if expr else 100)) * S)))
         backing.fill(BG)
         backing.set_alpha(235)
         surf.blit(backing, (0, 0))
@@ -300,8 +300,9 @@ class Renderer:
             self.dynamics_meter(surf, dyn, 12 * S, 96 * S)
         elif expr:
             a = g.art_counts
-            surf.blit(f.text(f"hat articulations {a['ok']}/{a['ok'] + a['wrong']}   + tight  / mid  o open  > edge  ^ foot",
+            surf.blit(f.text(f"hat articulations {a['ok']}/{a['ok'] + a['wrong']}",
                              f.small, TEXT if a["wrong"] == 0 else JUDGE_COLORS["OK"]), (12 * S, 96 * S))
+            surf.blit(f.text("+ tight   / mid   o open   > edge   ^ foot", f.small, DIM), (12 * S, 116 * S))
         surf.blit(f.text(g.chart.name, f.mid, ACCENT), (12 * S, 8 * S))
         surf.blit(f.text(f"score {score}   combo {combo}", f.mid, TEXT), (12 * S, 38 * S))
         line = f"P {counts['PERFECT']}  G {counts['GOOD']}  O {counts['OK']}  M {counts['MISS']}  S {counts['STRAY']}"
