@@ -15,6 +15,9 @@ SCORE = {"PERFECT": 100, "GOOD": 50, "OK": 20}
 # 88..124 (median 112), taps 29..84 (median 66), accent / taps ratio 1.35..2.2 (median 1.7).
 ACCENT_MIN = 88          # an accented note hit at least this hard counts as an accent
 TAP_MAX = 84             # an unaccented note hit at most this hard counts as a tap; between: neither
+# The hi-hat pad reads much hotter than the snare (2026-09-07, 196 judged hi-hat hits in
+# rudiments: taps 64..96, accents 120..127, median 106), so it gets its own band.
+DYN_THRESHOLDS = {"hihat": (112, 100)}     # instrument -> (accent min, tap max); others use the defaults
 CONTRAST_TARGET = 1.4    # median accent velocity / median tap velocity to aim for
 DYN_BONUS = 30           # score for the right dynamic on a hit note
 TAIL_S = 2.0             # seconds after the last note before the results
@@ -30,12 +33,13 @@ class Flash:
     dyn: str = None      # ACCENT / TAP / SOFT / LOUD when the chart judges dynamics
 
 
-def dynamic_for(accent: bool, velocity: int):
+def dynamic_for(accent: bool, velocity: int, instrument: str = None):
     """ACCENT or TAP when the stroke matches the note, SOFT (missed accent) or LOUD
     (tap too hard) when it does not, None in the band between the thresholds."""
+    accent_min, tap_max = DYN_THRESHOLDS.get(instrument, (ACCENT_MIN, TAP_MAX))
     if accent:
-        return "ACCENT" if velocity >= ACCENT_MIN else "SOFT" if velocity <= TAP_MAX else None
-    return "TAP" if velocity <= TAP_MAX else "LOUD" if velocity >= ACCENT_MIN else None
+        return "ACCENT" if velocity >= accent_min else "SOFT" if velocity <= tap_max else None
+    return "TAP" if velocity <= tap_max else "LOUD" if velocity >= accent_min else None
 
 
 def lead_in_for(bpm: float) -> float:
@@ -167,7 +171,7 @@ class Game:
                 best.state, best.judge, best.error_ms = "hit", judge, err_ms
                 best.hit_velocity = velocity
                 if self.chart.dynamics:
-                    dyn = best.dyn = dynamic_for(best.accent, velocity)
+                    dyn = best.dyn = dynamic_for(best.accent, velocity, best.key)
             self._register(judge, lane, err_ms, velocity, wall_t, best, dyn)
             return judge
 
