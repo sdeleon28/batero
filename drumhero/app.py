@@ -396,7 +396,7 @@ class App:
             return
         S = self.scale
         f = self.fonts
-        y = 16 * S
+        y = 108 * S                                              # under the titles and the hub strip
         for age, text, color in reversed(live):
             k = 1.0 if age < TOAST_S - 0.8 else max(0.0, (TOAST_S - age) / 0.8)
             slide = 0 if age > 0.25 else (1 - age / 0.25) * 30 * S
@@ -415,7 +415,7 @@ class App:
     def device_line(self):
         """One line for the hub: the three devices with their state."""
         w = self.watcher.state
-        midi = f"TD-17 {self.midi_name}" if self.midi_in else "TD-17 not connected"
+        midi = f"MIDI {self.midi_name}" if self.midi_in else "TD-17 not connected"
         audio = f"audio {self.sounds.device}" if self.sounds.device else ("audio system default" if self.sounds.ok else "no audio")
         cam = f"camera {w['camera']}" if w.get("camera") else "no camera"
         return midi, audio, cam
@@ -1202,8 +1202,10 @@ class CameraCheckScreen(Screen):
         surf.fill(BG)
         S = self.s; f = self.f
         f.center(surf, "Camera & take check", f.large, TEXT, 44 * S)
-        pw, ph = int(self.w * 0.42), int(self.w * 0.42 * 9 / 16)
-        lx, rx, y = int(self.w * 0.05), int(self.w * 0.53), int(90 * S)
+        avail = self.h - 210 * S                                   # between the title and the legend
+        ph = int(avail * 0.42); pw = int(ph * 16 / 9)
+        gap = int(40 * S)
+        lx = int(self.w / 2 - pw - gap / 2); rx = int(self.w / 2 + gap / 2); y = int(96 * S)
         # game picture
         surf.blit(f.text("game picture (what the take records)", f.small, TEXT), (lx, y - 22 * S))
         if self.sample is not None:
@@ -1222,11 +1224,11 @@ class CameraCheckScreen(Screen):
                 f.center(surf, line, f.small, DIM, y + ph / 2 - 20 * S + i * 20 * S, rx + pw / 2)
         pygame.draw.rect(surf, (60, 60, 70), (rx, y, pw, ph), 1)
         # composed preview
-        cy = y + ph + 40 * S
+        cy = int(y + ph + 46 * S)
         f.center(surf, f"composed take  ·  camera {self.settings['capture_pip']:.0%} high, corner {self.settings['capture_corner']}  ·  hats/crash size, [ ] corner",
                  f.small, TEXT, cy - 18 * S)
-        cw, ch = int(self.w * 0.36), int(self.w * 0.36 * 9 / 16)
-        cx = int(self.w / 2 - cw / 2)
+        ch = int(avail * 0.44); cw = int(ch * 16 / 9)
+        cx = int(self.w / 2 - cw / 2 - 120 * S)
         if self.sample is not None:
             surf.blit(pygame.transform.smoothscale(self.sample, (cw, ch)), (cx, cy))
         else:
@@ -1242,7 +1244,7 @@ class CameraCheckScreen(Screen):
         pygame.draw.rect(surf, ACCENT, (px, py, pip_w, pip_h), 2)
         pygame.draw.rect(surf, (60, 60, 70), (cx, cy, cw, ch), 1)
         # audio meter, to the right of the composed preview
-        mx = cx + cw + 40 * S
+        mx = cx + cw + 36 * S
         surf.blit(f.text(f"take audio: {self.settings['capture_audio_device']} ch {self.settings['capture_audio_channels']}", f.small, TEXT), (mx, cy))
         levels = self.meter.levels if self.meter else None
         if levels:
