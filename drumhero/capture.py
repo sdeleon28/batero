@@ -49,8 +49,28 @@ def overlay_xy(corner, margin=24):
 AUDIO_SR = 44100
 
 
+FFMPEG_DIRS = ["/opt/homebrew/bin", "/opt/homebrew/anaconda3/bin", "/usr/local/bin", os.path.expanduser("~/.local/bin")]
+
+
+def _tool(name):
+    """A tool on PATH or in the usual places: the app bundle launched from Finder or rcmd
+    gets a minimal PATH (seen 2026-09-08: 'ffmpeg not found' inside the game)."""
+    found = shutil.which(name)
+    if found:
+        return found
+    for d in FFMPEG_DIRS:
+        cand = os.path.join(d, name)
+        if os.path.exists(cand):
+            return cand
+    return None
+
+
 def ffmpeg_path():
-    return shutil.which("ffmpeg")
+    return _tool("ffmpeg")
+
+
+def ffprobe_path():
+    return _tool("ffprobe")
 
 
 def list_video_devices():
@@ -304,7 +324,7 @@ class Recorder:
     def _camera_offset(self):
         """Seconds the camera file starts after the video, from its wall-clock timestamps."""
         try:
-            r = subprocess.run([shutil.which("ffprobe") or "ffprobe", "-v", "error", "-show_entries", "format=start_time",
+            r = subprocess.run([ffprobe_path() or "ffprobe", "-v", "error", "-show_entries", "format=start_time",
                                 "-of", "csv=p=0", self.cam_path], capture_output=True, text=True, timeout=15)
             start = float(r.stdout.strip())
             if start > 1e9:                                   # epoch seconds: aligned by wall clock

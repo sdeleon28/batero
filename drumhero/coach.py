@@ -14,7 +14,7 @@ import threading
 import time
 
 COACH_DIR = os.path.expanduser("~/.config/drumhero/coach")
-CLAUDE_BIN = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
+CLAUDE_BIN = shutil.which("claude") or next((c for c in (os.path.expanduser("~/.local/bin/claude"), "/opt/homebrew/bin/claude", "/usr/local/bin/claude") if os.path.exists(c)), None)
 
 PROMPT = """You are a drum teacher. report.json in this directory describes a student's practice in a
 drum-training game: the catalogue of levels (exercises: single drums, rudiments and accent control on

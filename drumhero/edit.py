@@ -17,7 +17,7 @@ import time
 from .capture import OUT_DIR
 
 EDITS_DIR = os.path.join(OUT_DIR, "edits")
-CLAUDE_BIN = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
+CLAUDE_BIN = shutil.which("claude") or next((c for c in (os.path.expanduser("~/.local/bin/claude"), "/opt/homebrew/bin/claude", "/usr/local/bin/claude") if os.path.exists(c)), None)
 
 # (key, label, one-line blurb for the menu, brief for Claude)
 STYLES = [
