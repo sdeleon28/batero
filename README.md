@@ -243,7 +243,7 @@ change it) and a style, no typing:
 |---|---|
 | Hype video | under 60 s, bold title, the best streaks and fills, beat-synced cuts, speed ramps, ends on the stars |
 | Highlights | the best 30..90 s in order, lower-thirds, results at the end |
-| Full take, polished | the whole take with a title, lower-thirds and fades, no cuts |
+| Full, polished | the whole take with a title, lower-thirds and fades, no cuts |
 | Lesson | the whole take, every fill repeated at half speed with captions, wrong dynamics and misses captioned |
 | Raw with a title | a title card and an end card with the stars |
 

@@ -33,7 +33,7 @@ STYLES = [
      "A highlights reel of 30 to 90 seconds: the best streaks and fills in chronological order, each "
      "clip 4 to 12 seconds, hard cuts on downbeats (use the run log), a small lower-third with the level "
      "name for the first two seconds of each clip, the results screen with the stars at the end."),
-    ("full", "Full take, polished", "the whole take, title and lower-thirds, no cuts",
+    ("full", "Full, polished", "the whole take, title and lower-thirds, no cuts",
      "The whole take untouched in time: add a title card (level name, date) at the start over the first "
      "second of picture, a lower-third with the level name when each level begins (use the run logs), "
      "a fade in and out. Do not cut anything."),

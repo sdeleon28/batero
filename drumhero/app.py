@@ -750,7 +750,7 @@ class EditScreen(Screen):
                 pygame.draw.rect(surf, lerp(LANE_BG, ACCENT, 0.18), (x - 20 * S, y - 8 * S, self.w * 0.64 + 40 * S, 52 * S), border_radius=int(10 * S))
                 pygame.draw.rect(surf, ACCENT, (x - 20 * S, y - 8 * S, 6 * S, 52 * S), border_radius=int(3 * S))
             surf.blit(self.f.text(label, self.f.mid, ACCENT if selected else TEXT), (x, y))
-            surf.blit(self.f.text(blurb, self.f.small, DIM), (x + 260 * S, y + 6 * S))
+            surf.blit(self.f.text(blurb, self.f.small, DIM), (x + 300 * S, y + 6 * S))
             y += 60 * S
         if self.app.editor.busy:
             self.f.center(surf, self.app.editor.status, self.f.small, JUDGE_COLORS["GOOD"], self.h - 84 * S)
