@@ -1229,6 +1229,17 @@ class CameraCheckScreen(Screen):
             self.test_result = f"could not start: {self.app.recorder.error}"
 
     def update(self):
+        # no camera yet: look again every few seconds (Continuity Camera comes and goes with the phone)
+        if self.camera is None and self.test_at is None and time.perf_counter() - getattr(self, "_scan_at", 0) > 5.0:
+            self._scan_at = time.perf_counter()
+            cam = CP.find_camera(self.settings["capture_camera"])
+            if cam:
+                self.camera = cam
+                self.preview = CP.CameraPreview(cam) if CP.ffmpeg_path() else None
+                print(f"camera check: {cam[1]} appeared")
+        if self.preview is not None and self.preview.error and not getattr(self, "_logged_error", False):
+            self._logged_error = True
+            print(f"camera check: preview error: {self.preview.error}")
         if self.test_at is not None and self.app.recorder.active and time.perf_counter() - self.test_at > 3.0:
             path = self.app.recorder.stop()
             self.test_result = f"test take: {os.path.basename(path)}"
@@ -1262,7 +1273,8 @@ class CameraCheckScreen(Screen):
         else:
             pygame.draw.rect(surf, LANE_BG, (rx, y, pw, ph))
             msg = (self.preview.error or "waiting for frames... (allow camera access if macOS asks)") if self.preview else \
-                  f"no video device matching '{self.settings['capture_camera']}': bring the iPhone near and unlock it, or open Camo. R to rescan."
+                  (f"no video device matching '{self.settings['capture_camera']}'. Looking every 5 s. iPhone: same Apple ID, "
+                   f"Wi-Fi and Bluetooth on, near the Mac, locked and still in landscape (or open Camo).")
             for i, line in enumerate(wrap(f, msg, f.small, pw - 20 * S)[:4]):
                 f.center(surf, line, f.small, DIM, y + ph / 2 - 20 * S + i * 20 * S, rx + pw / 2)
         pygame.draw.rect(surf, (60, 60, 70), (rx, y, pw, ph), 1)

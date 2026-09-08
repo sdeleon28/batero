@@ -207,11 +207,9 @@ def output_devices():
     subsystem is up, so open the mixer on the default device first when nothing is open."""
     try:
         from pygame._sdl2 import audio
-        names = list(audio.get_audio_device_names(False))
-        if not names and not pygame.mixer.get_init():
-            pygame.mixer.init()
-            names = list(audio.get_audio_device_names(False))
-        return names
+        if not pygame.mixer.get_init():
+            pygame.mixer.init()                  # SDL refuses to list devices before its audio system is up
+        return list(audio.get_audio_device_names(False))
     except Exception:
         return []
 
