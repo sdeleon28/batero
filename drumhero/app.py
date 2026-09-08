@@ -1498,9 +1498,9 @@ class PlayScreen(Screen):
             cat, index, rate, reps, why = ss["items"][ss["pos"]]
             S = self.s
             label = f"session {ss['name']}  ·  {ss['pos'] + 1}/{len(ss['items'])}" + (f"  ·  rep {ss['rep']}/{reps}" if reps > 1 else "")
-            self.f.center(surf, label, self.f.small, ACCENT, 112 * S)
-            if why:
-                self.f.center(surf, why, self.f.small, DIM, 132 * S)
+            if why and not self.game.finished:
+                label += f"  ·  {why}"
+            self.f.center(surf, label, self.f.small, ACCENT, self.h - (64 if self.game.finished else 24) * S)
         if self.game.finished:
             self.legend(surf, [("snare", "next"), ("hihat", "retry"), ("kick", "back")], y=self.h - 30 * self.s,
                         keys=None)
