@@ -287,16 +287,19 @@ pentatonic pluck with echoes and a low hum, 32 seconds, synthesized at first
 use. It fades out when a level starts. Toggle in Setup or start with
 `--no-menu-music`.
 
-## Backing loop
+## Backing
 
-Built-in levels play over a synthesized backing loop so they feel like music:
-a bass on the eighths, a soft chord pad and a plucked arpeggio over a four-bar
-progression, rendered once at the level's tempo (about 50 ms) the way the drum
-samples are. It starts with the count-in and stays bar-aligned; after a pause
-it rejoins at the next loop boundary. Each level gets a different progression.
-Songs from MIDI files get no loop, since a made-up progression would clash with
-the tune. Toggle it with B during play or from Setup, or start with
-`--no-backing`.
+Built-in levels play over a synthesized backing so they feel like music. It is a
+small arrangement rendered once for the whole level (a few hundred
+milliseconds, cached): a chord progression picked per level from ten, in a key
+of its own, with a soft pad, a bass line, a plucked arpeggio and a generated
+lead. Every four bars the section changes: pad and bass; the arpeggio comes in;
+the lead answers; the bass syncopates and the arpeggio turns around; a
+breakdown; a build with bouncing bass and sixteenth-note arpeggio; and so on,
+cycling, with inversions and sevenths shifting underneath. The count-in gets
+pad and sparse bass. Songs from MIDI files get no backing, since a made-up
+progression would clash with the tune. Toggle it with B during play or from
+Setup, or start with `--no-backing`.
 
 ## Install as a Mac app
 

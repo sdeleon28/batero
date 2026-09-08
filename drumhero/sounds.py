@@ -153,17 +153,44 @@ class SoundBank:
 
 
 # ---------------------------------------------------------------------------
-# Backing loop: bass + pad + plucked arpeggio over a 4-bar chord progression,
-# rendered once at the level's tempo into a seamless loop.
+# Backing: a small arrangement rendered once for the whole level. A chord
+# progression (picked per level), a pad, a bass line, a plucked arpeggio and a
+# generated lead, arranged in 4-bar sections that add, drop and vary parts so the
+# music moves while you drill.
 # ---------------------------------------------------------------------------
-# (root semitone relative to C, chord quality) per bar. Rotated per level for variety.
+# (root semitone relative to C, chord quality) per bar. Picked per level.
 PROGRESSIONS = [
     [(9, "m"), (5, "M"), (0, "M"), (7, "M")],      # Am F C G
     [(4, "m"), (0, "M"), (7, "M"), (2, "M")],      # Em C G D
     [(2, "m"), (10, "M"), (5, "M"), (0, "M")],     # Dm Bb F C
     [(7, "M"), (2, "M"), (4, "m"), (0, "M")],      # G D Em C
+    [(0, "M"), (7, "M"), (9, "m"), (5, "M")],      # C G Am F
+    [(9, "m"), (7, "M"), (5, "M"), (7, "M")],      # Am G F G
+    [(2, "m"), (7, "M"), (0, "M"), (9, "m")],      # Dm G C Am
+    [(5, "M"), (7, "M"), (9, "m"), (9, "m")],      # F G Am Am
+    [(4, "m"), (2, "M"), (7, "M"), (9, "M")],      # Em D G A
+    [(0, "m"), (8, "M"), (3, "M"), (10, "M")],     # Cm Ab Eb Bb
 ]
 BACKING_GAIN = 0.55
+SECTION_BARS = 4
+# What plays in each 4-bar section, cycling. (bass pattern, arp pattern, lead, pad)
+SECTIONS = [
+    ("eighths", None, False, True),        # pad + bass
+    ("eighths", "up", False, True),        # + arpeggio
+    ("root_fifth", "up", True, True),      # + lead
+    ("sync", "updown", True, True),        # busier bass, arp turns around
+    ("sparse", None, False, True),         # breakdown: pad and a few bass notes
+    ("octave", "sixteenths", True, True),  # build: bouncing bass, fast arp, lead
+    ("root_fifth", "broken", False, True), # settle
+    ("sync", "up", True, False),           # no pad: bass, arp and lead carry it
+]
+BASS_PATTERNS = {                          # (eighth index, degree, gain) per bar; degree 0 = root, 7 = fifth
+    "eighths": [(e, 0, 1.0 if e % 2 == 0 else 0.7) for e in range(8)],
+    "root_fifth": [(0, 0, 1.0), (2, 7, 0.8), (4, 0, 1.0), (6, 7, 0.8), (7, 0, 0.6)],
+    "sync": [(0, 0, 1.0), (3, 0, 0.9), (4, 7, 0.8), (6, 0, 0.9), (7, 12, 0.6)],
+    "sparse": [(0, 0, 1.0), (6, 0, 0.6)],
+    "octave": [(e, 0 if e % 2 == 0 else 12, 1.0 if e % 2 == 0 else 0.75) for e in range(8)],
+}
 
 
 def _midi_hz(n):
@@ -174,66 +201,143 @@ def _saw(phase):
     return 2 * (phase % 1.0) - 1
 
 
-def _chord_notes(root, quality, octave_base=57):
-    """Three chord tones as MIDI numbers around octave_base (A3 = 57)."""
+def _chord_notes(root, quality, octave_base=57, inversion=0, seventh=False):
+    """Chord tones as MIDI numbers around octave_base (A3 = 57)."""
     third = 3 if quality == "m" else 4
     r = octave_base + ((root - octave_base) % 12)
-    return [r, r + third, r + 7]
+    tones = [r, r + third, r + 7] + ([r + (10 if quality == "m" else 11)] if seventh else [])
+    for _ in range(inversion):
+        tones = tones[1:] + [tones[0] + 12]
+    return tones
 
 
-def make_backing(bpm, prog_index=0, bars=4, sr=SR):
-    """Return (float32 mono array of exactly `bars` bars, loop length in seconds)."""
+def _scale(root, quality):
+    """Seven scale degrees (semitones from root): natural minor or major."""
+    return [0, 2, 3, 5, 7, 8, 10] if quality == "m" else [0, 2, 4, 5, 7, 9, 11]
+
+
+def _arp_order(pattern, chord):
+    top = [m + 12 for m in chord[:3]]
+    if pattern == "up":
+        return top + [top[1]]
+    if pattern == "updown":
+        return top + [top[1]]
+    if pattern == "broken":
+        return [top[0], top[2], top[1], top[2]]
+    if pattern == "sixteenths":
+        return top + [top[2] + 12]
+    return top
+
+
+def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None):
+    """Mono float32 of (intro_bars + bars) bars at bpm: intro (pad and sparse bass) then the
+    arrangement, bar 0 of the level at intro_bars * bar seconds. Deterministic per
+    prog_index unless seed is given."""
+    rng = np.random.default_rng(prog_index if seed is None else seed)
     prog = PROGRESSIONS[prog_index % len(PROGRESSIONS)]
+    transpose = int(rng.integers(-3, 4))                    # a different key per level
+    lead_tone = int(rng.integers(0, 3))                     # sine / triangle-ish / soft square
     beat = 60 / bpm
     bar = 4 * beat
-    total = bars * bar
-    n = int(round(total * sr))
-    tail = int(0.6 * sr)
-    out = np.zeros(n + tail)
+    total_bars = intro_bars + bars
+    n = int(round(total_bars * bar * sr))
+    out = np.zeros(n + int(1.0 * sr))
 
     def add(start_s, sig):
         i = int(round(start_s * sr))
+        if i >= len(out):
+            return
         j = min(i + len(sig), len(out))
         out[i:j] += sig[: j - i]
 
-    for b in range(bars):
-        root, quality = prog[b % len(prog)]
-        chord = _chord_notes(root, quality)
-        bass_note = chord[0] - 24                                  # two octaves down
-        t0 = b * bar
-
-        # pad: two detuned saws per chord tone, soft attack, lowpassed by a moving average
+    def pad(t0, chord):
         tp = np.arange(int(bar * sr) + int(0.08 * sr)) / sr
-        pad = np.zeros_like(tp)
+        sig = np.zeros_like(tp)
         for m in chord:
             f = _midi_hz(m)
-            pad += _saw(tp * f * 1.003) + _saw(tp * f * 0.997)
+            sig += _saw(tp * f * 1.003) + _saw(tp * f * 0.997)
         env = np.minimum(1.0, tp / 0.06) * np.minimum(1.0, np.maximum(0.0, (bar + 0.08 - tp) / 0.08))
-        pad = np.convolve(pad * env, np.ones(48) / 48, mode="same")
-        add(t0, pad * 0.16)
+        sig = np.convolve(sig * env, np.ones(48) / 48, mode="same")
+        add(t0, sig * 0.16 / max(1, len(chord) / 3))
 
-        # bass: root on every eighth, accented on the beat
-        for e in range(8):
-            f = _midi_hz(bass_note)
-            dur = beat / 2
+    def bass(t0, root_note, pattern):
+        for e, degree, gain in BASS_PATTERNS[pattern]:
+            f = _midi_hz(root_note + degree)
+            dur = beat / 2 if pattern != "sparse" else beat
             tb = np.arange(int(dur * sr)) / sr
-            envb = np.exp(-tb * 6) * np.minimum(1.0, tb / 0.004) * (1 if e % 2 == 0 else 0.7)
+            envb = np.exp(-tb * (6 if pattern != "sparse" else 3)) * np.minimum(1.0, tb / 0.004)
             sig = (np.sin(2 * np.pi * f * tb) * 0.8 + np.sin(4 * np.pi * f * tb) * 0.25 + _saw(tb * f) * 0.15) * envb
-            add(t0 + e * dur, sig * 0.55)
+            add(t0 + e * beat / 2, sig * 0.55 * gain)
 
-        # pluck: arpeggio through the chord an octave up, on the eighths
-        arp = [m + 12 for m in chord] + [chord[1] + 12]
-        for e in range(8):
-            f = _midi_hz(arp[e % len(arp)])
+    def arp(t0, chord, pattern):
+        order = _arp_order(pattern, chord)
+        steps = 16 if pattern == "sixteenths" else 8
+        step = bar / steps
+        for e in range(steps):
+            if pattern == "updown":
+                seq = order + order[-2:0:-1]                 # up then back down
+                m = seq[e % len(seq)]
+            else:
+                m = order[e % len(order)]
+            f = _midi_hz(m)
             ta = np.arange(int(0.25 * sr)) / sr
-            enva = np.exp(-ta * 14) * np.minimum(1.0, ta / 0.002)
+            enva = np.exp(-ta * (14 if steps == 8 else 22)) * np.minimum(1.0, ta / 0.002)
             sig = (np.sin(2 * np.pi * f * ta) + 0.3 * np.sin(6 * np.pi * f * ta)) * enva
-            add(t0 + e * beat / 2, sig * 0.22)
+            add(t0 + e * step, sig * (0.22 if steps == 8 else 0.17) * (1.0 if e % 4 == 0 else 0.8))
 
-    out[:tail] += out[n:n + tail]          # fold the tail onto the start: seamless loop
+    def lead(t0, root, quality, chord, bar_in_section):
+        """A phrase of chord tones and scale steps on a simple rhythm, answered every other bar."""
+        scale = [root + 60 + d for d in _scale(root, quality)] + [root + 72]
+        tones = {m % 12 for m in chord}
+        rhythm = [(0, 1.0), (1.5, 0.5), (2, 1.0), (3, 0.5), (3.5, 0.5)] if bar_in_section % 2 == 0 else [(0.5, 1.5), (2, 2.0)]
+        pos = int(rng.integers(2, 6))
+        for k, (start, length) in enumerate(rhythm):
+            pos = max(0, min(len(scale) - 1, pos + int(rng.integers(-2, 3))))
+            if k == 0 or start in (0, 2):                      # strong beats land on a chord tone
+                cands = [i for i, m in enumerate(scale) if m % 12 in tones]
+                pos = min(cands, key=lambda i: abs(i - pos))
+            f = _midi_hz(scale[pos])
+            dur = length * beat
+            tl = np.arange(int(dur * sr)) / sr
+            env = np.minimum(1.0, tl / 0.02) * np.exp(-tl * 2.5) * np.minimum(1.0, np.maximum(0.0, (dur - tl) / 0.05))
+            ph = 2 * np.pi * f * tl
+            if lead_tone == 0:
+                sig = np.sin(ph) + 0.2 * np.sin(2 * ph)
+            elif lead_tone == 1:
+                sig = 2 / np.pi * np.arcsin(np.sin(ph))       # triangle
+            else:
+                sig = np.tanh(2.5 * np.sin(ph)) * 0.8         # soft square
+            vib = 1 + 0.004 * np.sin(2 * np.pi * 5.5 * tl) * np.minimum(1.0, tl / 0.3)
+            sig = np.interp(tl * vib, tl, sig) if len(tl) > 1 else sig
+            add(t0 + start * beat, sig * env * 0.13)
+
+    for i in range(total_bars):
+        b = i - intro_bars                                    # level bar, negative in the intro
+        t0 = i * bar
+        root, quality = prog[b % len(prog)]
+        root = (root + transpose) % 12
+        section = SECTIONS[(b // SECTION_BARS) % len(SECTIONS)] if b >= 0 else ("sparse", None, False, True)
+        bass_pat, arp_pat, lead_on, pad_on = section
+        inversion = (b // len(prog)) % 3 if b >= 0 else 0
+        chord = _chord_notes(root, quality, inversion=inversion, seventh=(b >= 0 and (b // SECTION_BARS) % 2 == 1))
+        bass_root = _chord_notes(root, quality)[0] - 24
+        if pad_on:
+            pad(t0, chord)
+        bass(t0, bass_root, bass_pat)
+        if arp_pat:
+            arp(t0, chord, arp_pat)
+        if lead_on:
+            lead(t0, root, quality, chord, b % SECTION_BARS)
+
     out = out[:n]
     out = out / (np.max(np.abs(out)) or 1.0) * 0.8
-    return out.astype(np.float32), n / sr
+    return out.astype(np.float32)
+
+
+def make_backing(bpm, prog_index=0, bars=4, sr=SR):
+    """Backwards-compatible: (float32 mono array of `bars` bars, length in seconds)."""
+    data = make_arrangement(bpm, prog_index, bars, 0, sr)
+    return data, len(data) / sr
 
 
 def backing_sound(bpm, prog_index=0, bars=4, lead_in_s=0.0):
@@ -309,12 +413,15 @@ def render_metronome(chart, lead_in_s, total_s, mode="full"):
 
 
 def render_backing_track(bpm, prog_index, lead_in_s, total_s):
-    """The 4-bar loop tiled from the count-in to total_s, chord 1 landing on chart time 0."""
-    loop, length = make_backing(bpm, prog_index)
-    loop = np.roll(loop, int(round(lead_in_s * SR)))
+    """The arrangement from the count-in to total_s, bar 0 landing on chart time 0."""
+    bar = 240 / bpm
+    intro_bars = int(round(lead_in_s / bar))
+    bars = int(np.ceil(total_s / bar)) + 1
+    data = make_arrangement(bpm, prog_index, bars, intro_bars)
     n = int((lead_in_s + total_s) * SR) + SR
-    reps = n // len(loop) + 1
-    return np.tile(loop, reps)[:n]
+    if len(data) < n:
+        data = np.concatenate([data, np.zeros(n - len(data), dtype=np.float32)])
+    return data[:n]
 
 
 class Track:
