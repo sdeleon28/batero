@@ -101,8 +101,17 @@ and the kick goes back to the wizard.
 
 Exercises are warm-ups, one or two drums at slow tempos: kick on the beat,
 snare on the beat, snare on 2 and 4, hi-hat on the beat, crash on the beat,
-kick and snare, alternating, hi-hat eighths. Beats are full grooves from a
-basic beat at 85 bpm up to a rock beat at 130.
+kick and snare, alternating, hi-hat eighths.
+
+Beats are a curriculum of seventeen grooves, each keeping what the one before
+taught and adding one idea, at moderate tempos (use `[` and `]` for speed):
+money beat; eighth-note hats; a second kick on the &; the four-bar phrase with
+a snare pickup; crash on the one; the first fill; the rack tom enters in the
+fill; the floor tom enters and the fill walks down; toms inside the groove; the
+right hand moves to the ride; two crashes in conversation; half time; sixteenth
+kicks; ghost notes; sixteenth hats; a linear groove; and a 16-bar A A B A song
+form with everything. Grooves are written in a small notation in `chart.py`
+(sixteen slots per bar per instrument: `x` stroke, `X` accent, `o` ghost).
 
 Exercises also hold the rudiments, practice-pad style on the snare: single
 strokes in eighths and sixteenths, paradiddle at 70 and 90, paradiddle split

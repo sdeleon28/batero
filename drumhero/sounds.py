@@ -41,9 +41,9 @@ def hihat():
     return x * np.exp(-t * 55)
 
 
-def crash():
-    t = _t(1.6)
-    x = _noise(len(t), 4)
+def crash(seed=4, dur=1.6):
+    t = _t(dur)
+    x = _noise(len(t), seed)
     x = np.diff(x, prepend=0.0)
     shimmer = sum(np.sin(2 * math.pi * f * t) for f in (3150, 4270, 5590, 7330)) * 0.05
     return (x + shimmer) * np.exp(-t * 2.4) * (1 - np.exp(-t * 200))
@@ -132,6 +132,7 @@ class SoundBank:
             "kick": _to_sound(kick()), "snare": _to_sound(snare()),
             "hihat": _to_sound(hihat()), "crash": _to_sound(crash()),
             "tom1": _to_sound(tom()), "floor": _to_sound(floor_tom()), "ride": _to_sound(ride()),
+            "crash2": _to_sound(crash(seed=9, dur=1.3)),
             "click": _to_sound(click()), "click_hi": _to_sound(click(high=True)),
         }
 

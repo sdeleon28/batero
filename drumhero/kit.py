@@ -46,7 +46,7 @@ def migrate(data):
         if k in ZONE and not (legacy and k in INSTRUMENT_ZONES):
             kit[k].extend(notes)
         elif k in INSTRUMENT_ZONES:
-            zones = INSTRUMENT_ZONES[k]
+            zones = INSTRUMENT_ZONES[k] + (INSTRUMENT_ZONES["crash2"] if k == "crash" else [])   # old kits held both crashes under "crash"
             for n in notes:
                 home = next((z for z in zones if n in ZONE[z].defaults), zones[0])
                 kit[home].append(n)

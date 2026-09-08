@@ -36,7 +36,7 @@ KEY_LANES = {pygame.K_1: 0, pygame.K_2: 1, pygame.K_3: 2, pygame.K_4: 3, pygame.
 MODULE_HINTS = ("td-", "td1", "td2", "td5", "alesis", "nitro", "strike", "dtx", "roland", "drum")
 
 # What each drum does inside a list. The hub uses the drums as section buttons instead.
-NAV = {"snare": "accept", "kick": "back", "hihat": "next", "crash": "prev"}
+NAV = {"snare": "accept", "kick": "back", "hihat": "next", "crash": "prev", "crash2": "prev"}
 CATEGORIES = [
     ("kick", "Exercises", "one drum at a time, slow"),
     ("snare", "Beats", "full grooves"),
@@ -302,6 +302,8 @@ class App:
         inst = self.instrument_for(note)
         if inst is None or velocity < NAV_MIN_VELOCITY:
             return
+        if inst == "crash2":
+            inst = "crash"                     # either crash is the "up" / Setup button
         now = time.perf_counter()
         if now - self.last_nav.get(inst, 0) < NAV_DEBOUNCE_S:
             return
@@ -516,6 +518,19 @@ class ListScreen(Screen):
                     ("Quit", "")]
         return [(ch.name, f"{ch.bpm:.0f} bpm · {len(ch.notes):3d} notes · {ch.desc}" + ("  ♪ audio" if ch.audio else "")) for ch in self.app.items_for(self.cat)]
 
+    def fit(self, text, max_w):
+        """text clipped with an ellipsis to max_w pixels in the small font."""
+        if self.f.text(text, self.f.small, DIM).get_width() <= max_w:
+            return text
+        lo, hi = 0, len(text)
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if self.f.text(text[:mid] + "…", self.f.small, DIM).get_width() <= max_w:
+                lo = mid
+            else:
+                hi = mid - 1
+        return text[:lo] + "…"
+
     def move(self, d):
         n = len(self.items())
         if n:
@@ -602,13 +617,17 @@ class ListScreen(Screen):
                 pygame.draw.rect(surf, self.color, (x - 20 * S, y - 8 * S, 6 * S, row_h - 4 * S), border_radius=int(3 * S))
             shown = name if len(name) <= 22 else name[:21] + "…"
             surf.blit(self.f.text(shown, self.f.mid, self.color if selected else TEXT), (x, y))
-            surf.blit(self.f.text(sub, self.f.small, DIM), (x + 370 * S, y + 4 * S))
             best = self.app.results.get(name)
+            right = self.w * 0.88
             if best:
                 s = f"best {best['accuracy'] * 100:.0f}%  mean {best['mean_ms']:+.0f} ms"
                 ts = self.f.text(s, self.f.small, JUDGE_COLORS["PERFECT"] if best["accuracy"] >= 0.9 else JUDGE_COLORS["GOOD"])
-                surf.blit(ts, (self.w * 0.88 - ts.get_width(), y + 4 * S))
+                surf.blit(ts, (right - ts.get_width(), y + 4 * S))
+                right -= ts.get_width() + 16 * S
+            surf.blit(self.f.text(self.fit(sub, right - (x + 370 * S)), self.f.small, DIM), (x + 370 * S, y + 4 * S))
             y += row_h
+        if items:
+            self.f.center(surf, items[self.sel][1], self.f.small, TEXT, self.h - 84 * S)   # the selected one in full
         self.legend(surf, [("hihat", "down"), ("crash", "up"), ("snare", "select"), ("kick", "back")],
                     keys="arrows or j k · Enter or l · Esc or h")
 

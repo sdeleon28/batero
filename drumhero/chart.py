@@ -33,8 +33,8 @@ ZONES = [
     Zone("hihat_pedal", "Hi-hat pedal", "Hi-hat", "pedal", "hihat", "Stomp the HI-HAT PEDAL a few times (chick)", (44,)),
     Zone("crash", "Crash L bow", "Crash L", "bow", "crash", "Hit the LEFT CRASH on the bow", (49,)),
     Zone("crash_edge", "Crash L edge", "Crash L", "edge", "crash", "Hit the LEFT CRASH on the edge", (55,)),
-    Zone("crash2", "Crash R bow", "Crash R", "bow", "crash", "Hit the RIGHT CRASH on the bow", (57,)),
-    Zone("crash2_edge", "Crash R edge", "Crash R", "edge", "crash", "Hit the RIGHT CRASH on the edge", (52,)),
+    Zone("crash2", "Crash R bow", "Crash R", "bow", "crash2", "Hit the RIGHT CRASH on the bow", (57,)),
+    Zone("crash2_edge", "Crash R edge", "Crash R", "edge", "crash2", "Hit the RIGHT CRASH on the edge", (52,)),
     Zone("tom1", "Rack tom head", "Rack tom", "head", "tom1", "Hit the RACK TOM head", (48,)),
     Zone("tom1_rim", "Rack tom rim", "Rack tom", "rim", "tom1", "Hit the RACK TOM RIM", (50,)),
     Zone("floor", "Floor tom head", "Floor tom", "head", "floor", "Hit the FLOOR TOM head", (43, 45)),
@@ -52,9 +52,9 @@ for _z in ZONES:
     PADS[-1][1].append(_z.key)
 
 # Instruments: what charts refer to. The first four also drive the menus.
-INSTRUMENTS = ["kick", "snare", "hihat", "crash", "tom1", "floor", "ride"]
-LABELS = {"kick": "Kick", "snare": "Snare", "hihat": "Hi-Hat", "crash": "Crash",
-          "tom1": "Rack tom", "floor": "Floor tom", "ride": "Ride"}
+INSTRUMENTS = ["kick", "snare", "hihat", "crash", "tom1", "floor", "ride", "crash2"]
+LABELS = {"kick": "Kick", "snare": "Snare", "hihat": "Hi-Hat", "crash": "Crash L",
+          "tom1": "Rack tom", "floor": "Floor tom", "ride": "Ride", "crash2": "Crash R"}
 COLORS = {
     "kick": (245, 90, 90),
     "snare": (250, 170, 60),
@@ -63,7 +63,10 @@ COLORS = {
     "tom1": (80, 200, 230),
     "floor": (100, 130, 250),
     "ride": (190, 110, 240),
+    "crash2": (60, 190, 150),
 }
+# Charts that use one crash accept either crash pad; only charts with both lanes tell them apart.
+CRASH_PAIR = {"crash": "crash2", "crash2": "crash"}
 INSTRUMENT_ZONES = {inst: [z.key for z in ZONES if z.instrument == inst] for inst in INSTRUMENTS}
 # Fallback kit, General MIDI / TD-17 factory numbers, used until the wizard has run.
 DEFAULT_KIT = {z.key: list(z.defaults) for z in ZONES}
@@ -97,7 +100,7 @@ def expand_family(notes):
 # Chart notes from MIDI files are folded into instruments when they are the GM drum numbers.
 GM_TO_INSTRUMENT = {35: "kick", 36: "kick", 37: "snare", 38: "snare", 40: "snare",
                     22: "hihat", 26: "hihat", 42: "hihat", 44: "hihat", 46: "hihat",
-                    49: "crash", 52: "crash", 55: "crash", 57: "crash",
+                    49: "crash", 55: "crash", 52: "crash2", 57: "crash2",
                     47: "tom1", 48: "tom1", 50: "tom1", 41: "floor", 43: "floor", 45: "floor", 58: "floor",
                     51: "ride", 53: "ride", 59: "ride"}
 GM_DRUM_NAMES = {
@@ -460,12 +463,143 @@ EXERCISES = [
     _build("Alternating", "Kick, snare, kick, snare.", 85, 8, _kick_snare_alternating),
     _build("Hi-hat eighths", "Hi-hat on every eighth note.", 90, 8, _hats_eighths),
 ]
+# --- grooves: a small notation --------------------------------------------------------
+# One string per instrument per bar, sixteen slots (sixteenths): "x" a stroke, "X" an
+# accent, "o" a ghost, "." nothing. Bars are dicts; a level is a list of bars, its
+# phrase, repeated to the level length.
+GROOVE_KEYS = {"hh": "hihat", "kk": "kick", "sn": "snare", "t1": "tom1", "ft": "floor",
+               "rd": "ride", "cl": "crash", "cr": "crash2"}
+GROOVE_VEL = {"X": 120, "x": 96, "o": 62}      # only X draws as an accent
+
+
+def _groove(name, desc, bpm, phrase, bars=8):
+    """A groove level from `phrase` (list of bar dicts, see GROOVE_KEYS) repeated to `bars`."""
+    beat = 60 / bpm
+    notes = []
+    for bar in range(bars):
+        for k, pat in phrase[bar % len(phrase)].items():
+            key = GROOVE_KEYS[k]
+            assert len(pat) == 16, (name, k, pat)
+            for i, c in enumerate(pat):
+                if c in GROOVE_VEL:
+                    notes.append(ChartNote((bar * 4 + i / 4) * beat, key, GROOVE_VEL[c], accent=(c == "X")))
+    notes.sort(key=lambda n: (n.t, INSTRUMENTS.index(n.key)))
+    return Chart(name, notes, bpm, desc)
+
+
+_H8 = "x.x.x.x.x.x.x.x."          # hats on the eighths
+_H4 = "x...x...x...x..."          # hats on the quarters
+_H16 = "xxxxxxxxxxxxxxxx"         # hats on the sixteenths
+_S24 = "....X.......X..."         # backbeat
+
+# The curriculum: every level keeps what the one before taught and adds one idea.
 BEATS = [
-    _build("Basic beat", "Kick, snare and quarter-note hats together.", 85, 8, _basic_beat),
-    _build("Eighth-note hats", "Same beat, hats on the eighths.", 95, 12, _eighth_beat),
-    _build("Crash on the one", "Crash at the start of every four bars.", 100, 16, _crash_beat),
-    _build("Rock beat", "Kick and snare variations every few bars.", 110, 16, _rock_beat),
-    _build("Rock beat, faster", "The same beat at 130.", 130, 16, _rock_beat),
+    _groove("1 · Money beat", "Kick on 1 and 3, snare on 2 and 4, hats on the quarters.", 85, [
+        {"hh": _H4, "kk": "x.......x.......", "sn": _S24},
+    ]),
+    _groove("2 · Eighth-note hats", "The same beat with the hats on every eighth: the right hand keeps time.", 90, [
+        {"hh": _H8, "kk": "x.......x.......", "sn": _S24},
+    ]),
+    _groove("3 · Kick on the &", "A second kick on the & of 3, then on the & of 1 in the answering bar.", 90, [
+        {"hh": _H8, "kk": "x.......x.x.....", "sn": _S24},
+        {"hh": _H8, "kk": "x.x.....x.......", "sn": _S24},
+    ]),
+    _groove("4 · Four-bar phrase", "Three bars of groove, then a bar with a snare pickup on the & of 4: the phrase has a shape.", 92, [
+        {"hh": _H8, "kk": "x.......x.x.....", "sn": _S24},
+        {"hh": _H8, "kk": "x.x.....x.......", "sn": _S24},
+        {"hh": _H8, "kk": "x.......x.x.....", "sn": _S24},
+        {"hh": _H8, "kk": "x.x.....x.......", "sn": "....X.......X.x."},
+    ]),
+    _groove("5 · Crash on the one", "The left crash replaces the hat on the 1 that starts each phrase.", 92, [
+        {"cl": "x...............", "hh": "..x.x.x.x.x.x.x.", "kk": "x.......x.x.....", "sn": _S24},
+        {"hh": _H8, "kk": "x.x.....x.......", "sn": _S24},
+        {"hh": _H8, "kk": "x.......x.x.....", "sn": _S24},
+        {"hh": _H8, "kk": "x.x.....x.......", "sn": "....X.......X.x."},
+    ]),
+    _groove("6 · First fill", "Bar 4 ends with snare sixteenths on beat 4, straight into the crash.", 92, [
+        {"cl": "x...............", "hh": "..x.x.x.x.x.x.x.", "kk": "x.......x.x.....", "sn": _S24},
+        {"hh": _H8, "kk": "x.x.....x.......", "sn": _S24},
+        {"hh": _H8, "kk": "x.......x.x.....", "sn": _S24},
+        {"hh": "x.x.x.x.x.x.....", "kk": "x.x.....x.......", "sn": "....X.......xxxx"},
+    ]),
+    _groove("7 · Rack tom enters", "The fill moves: two snares, two rack toms. The tom lane is new.", 92, [
+        {"cl": "x...............", "hh": "..x.x.x.x.x.x.x.", "kk": "x.......x.x.....", "sn": _S24},
+        {"hh": _H8, "kk": "x.x.....x.......", "sn": _S24},
+        {"hh": _H8, "kk": "x.......x.x.....", "sn": _S24},
+        {"hh": "x.x.x.x.x.x.....", "kk": "x.x.....x.......", "sn": "....X.......xx..", "t1": "..............xx"},
+    ]),
+    _groove("8 · Floor tom enters", "The fill walks down snare, rack tom, floor tom over beats 3 and 4.", 92, [
+        {"cl": "x...............", "hh": "..x.x.x.x.x.x.x.", "kk": "x.......x.x.....", "sn": _S24},
+        {"hh": _H8, "kk": "x.x.....x.......", "sn": _S24},
+        {"hh": _H8, "kk": "x.......x.x.....", "sn": _S24},
+        {"hh": "x.x.x.x.........", "kk": "x.x.....x.......", "sn": "....X...xxxx....", "t1": "............xx..", "ft": "..............xx"},
+    ]),
+    _groove("9 · Toms in the groove", "The floor tom takes over the hat's job on beats 1 and 3, the rack tom answers on the & of 4.", 88, [
+        {"cl": "x...............", "ft": "..x.....x.x.....", "hh": "....x.x.....x.x.", "kk": "x.......x.......", "sn": _S24},
+        {"ft": "x.x.....x.x.....", "hh": "....x.x.....x.x.", "kk": "x.......x.......", "sn": _S24, "t1": "..............x."},
+        {"ft": "x.x.....x.x.....", "hh": "....x.x.....x.x.", "kk": "x.......x.......", "sn": _S24},
+        {"ft": "x.x.....x.x.....", "hh": "....x.x.........", "kk": "x.......x.......", "sn": "....X.......x.x.", "t1": "............x.x."},
+    ]),
+    _groove("10 · Ride", "The right hand moves to the ride for the second half of the phrase, crash on the way in.", 92, [
+        {"cl": "x...............", "hh": "..x.x.x.x.x.x.x.", "kk": "x.......x.x.....", "sn": _S24},
+        {"hh": _H8, "kk": "x.x.....x.......", "sn": _S24},
+        {"cl": "x...............", "rd": "..x.x.x.x.x.x.x.", "kk": "x.......x.x.....", "sn": _S24},
+        {"rd": "x.x.x.x.x.x.....", "kk": "x.x.....x.......", "sn": "....X.......xx..", "t1": "..............xx"},
+    ]),
+    _groove("11 · Two crashes", "Left crash opens the phrase, right crash answers on beat 3 of bar 4 and closes it.", 92, [
+        {"cl": "x...............", "rd": "..x.x.x.x.x.x.x.", "kk": "x.......x.x.....", "sn": _S24},
+        {"rd": _H8, "kk": "x.x.....x.......", "sn": _S24},
+        {"rd": _H8, "kk": "x.......x.x.....", "sn": _S24},
+        {"cr": "........x.......", "rd": "x.x.x.x.........", "kk": "x.x.....x.......", "sn": "....X...xx......", "t1": "..........xx....", "ft": "............xx.."},
+    ], bars=8),
+    _groove("12 · Half time", "Snare on 3 only, kick on 1 and the & of 2: twice the space, same phrase shape.", 80, [
+        {"cl": "x...............", "hh": "..x.x.x.x.x.x.x.", "kk": "x.....x.........", "sn": "........X......."},
+        {"hh": _H8, "kk": "x.....x...x.....", "sn": "........X......."},
+        {"hh": _H8, "kk": "x.....x.........", "sn": "........X......."},
+        {"hh": "x.x.x.x.........", "kk": "x.....x.........", "sn": "........X...xx..", "t1": "..............xx", "ft": "................"},
+    ]),
+    _groove("13 · Sixteenth kicks", "Kicks land on the e and the a: the funk pocket under the hats.", 88, [
+        {"cl": "x...............", "hh": "..x.x.x.x.x.x.x.", "kk": "x..x......x.x...", "sn": _S24},
+        {"hh": _H8, "kk": "x.........x..x..", "sn": _S24},
+        {"hh": _H8, "kk": "x..x......x.x...", "sn": _S24},
+        {"hh": _H8, "kk": "x.........x..x..", "sn": "....X.......X.ox"},
+    ]),
+    _groove("14 · Ghost notes", "Soft snares on the e of 2 and the a of 3 between the backbeats.", 88, [
+        {"cl": "x...............", "hh": "..x.x.x.x.x.x.x.", "kk": "x..x......x.x...", "sn": "....Xo.....oX..."},
+        {"hh": _H8, "kk": "x.........x..x..", "sn": "....Xo.....oX..."},
+        {"hh": _H8, "kk": "x..x......x.x...", "sn": "....Xo.....oX..."},
+        {"hh": _H8, "kk": "x.........x..x..", "sn": "....Xo.....oX.ox"},
+    ]),
+    _groove("15 · Sixteenth hats", "One hand plays every sixteenth on the hats while the funk pocket stays put.", 76, [
+        {"cl": "x...............", "hh": ".xxxxxxxxxxxxxxx", "kk": "x..x......x.x...", "sn": "....Xo.....oX..."},
+        {"hh": _H16, "kk": "x.........x..x..", "sn": "....Xo.....oX..."},
+        {"hh": _H16, "kk": "x..x......x.x...", "sn": "....Xo.....oX..."},
+        {"hh": "xxxxxxxxxxxx....", "kk": "x.........x..x..", "sn": "....Xo.....oX...", "t1": "............xx..", "ft": "..............xx"},
+    ]),
+    _groove("16 · Linear", "Nothing lands together: hats, kick and snare take turns, toms and ride fill the gaps.", 86, [
+        {"cl": "x...............", "hh": ".x.x..x..x.x..x.", "kk": "x...x......x....", "sn": "....X.......X..."},
+        {"hh": ".x.x..x..x.x..x.", "kk": "x...x......x....", "sn": "....X.......X...", "t1": "..............x."},
+        {"rd": ".x.x..x..x.x..x.", "kk": "x...x......x....", "sn": "....X.......X..."},
+        {"rd": ".x.x..x.........", "kk": "x...x......x....", "sn": "....X...x.x.....", "t1": ".........x.x....", "ft": "..........x.x.x.", "cr": "...............x"},
+    ]),
+    _groove("17 · Song form", "A A B A: hats verses, a ride bridge with tom hits, two crashes, ghost notes, the works.", 92, [
+        {"cl": "x...............", "hh": "..x.x.x.x.x.x.x.", "kk": "x..x......x.x...", "sn": "....Xo.....oX..."},
+        {"hh": _H8, "kk": "x.........x..x..", "sn": "....Xo.....oX..."},
+        {"hh": _H8, "kk": "x..x......x.x...", "sn": "....Xo.....oX..."},
+        {"hh": "x.x.x.x.x.x.....", "kk": "x.........x..x..", "sn": "....Xo.....oX.xx"},
+        {"cl": "x...............", "hh": "..x.x.x.x.x.x.x.", "kk": "x..x......x.x...", "sn": "....Xo.....oX..."},
+        {"hh": _H8, "kk": "x.........x..x..", "sn": "....Xo.....oX..."},
+        {"hh": _H8, "kk": "x..x......x.x...", "sn": "....Xo.....oX..."},
+        {"hh": "x.x.x.x.........", "kk": "x.........x..x..", "sn": "....X...xx......", "t1": "..........xx....", "ft": "............xx.."},
+        {"cr": "x...............", "rd": "..x.x.x.x.x.x.x.", "kk": "x.....x.........", "sn": "........X.......", "ft": "..........x....."},
+        {"rd": _H8, "kk": "x.....x...x.....", "sn": "........X.......", "t1": "..............x."},
+        {"rd": _H8, "kk": "x.....x.........", "sn": "........X.......", "ft": "..........x....."},
+        {"rd": "x.x.x.x.........", "kk": "x.....x.........", "sn": "........X...x...", "t1": ".............x..", "ft": "..............xx"},
+        {"cl": "x...............", "hh": "..x.x.x.x.x.x.x.", "kk": "x..x......x.x...", "sn": "....Xo.....oX..."},
+        {"hh": _H8, "kk": "x.........x..x..", "sn": "....Xo.....oX..."},
+        {"hh": _H8, "kk": "x..x......x.x...", "sn": "....Xo.....oX..."},
+        {"cr": "..............x.", "hh": "x.x.x.x.x.x.....", "kk": "x.........x..x..", "sn": "....X.......xxx.", "cl": "...............x"},
+    ], bars=16),
 ]
 EXERCISES = EXERCISES + RUDIMENTS
 LEVELS = EXERCISES + BEATS
@@ -483,7 +617,10 @@ def build_lanes(chart: Chart, kit: dict):
     lanes, by_note, extra = [], {}, 0
     for i, key in enumerate(ordered):
         if key in INSTRUMENTS:
-            lane = Lane(i, key, LABELS[key], COLORS[key], set(kit_notes(kit, key)))
+            notes = set(kit_notes(kit, key))
+            if key in CRASH_PAIR and CRASH_PAIR[key] not in keys:
+                notes |= set(kit_notes(kit, CRASH_PAIR[key]))      # one crash lane: either pad counts
+            lane = Lane(i, key, LABELS[key], COLORS[key], notes)
         else:
             num = int(key[1:])
             lane = Lane(i, key, GM_DRUM_NAMES.get(num, f"note {num}"), EXTRA_PALETTE[extra % len(EXTRA_PALETTE)], {num})
