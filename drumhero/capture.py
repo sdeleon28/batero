@@ -35,7 +35,16 @@ import numpy as np
 OUT_DIR = os.path.expanduser("~/Movies/drumhero")
 FPS = 30
 DEFAULTS = {"capture_audio_device": "X18/XR18", "capture_audio_channels": [17, 18],
-            "capture_camera": "iPhone", "capture_pip": 0.28}
+            "capture_camera": "iPhone", "capture_pip": 0.28, "capture_corner": "br"}
+CORNERS = ["br", "bl", "tr", "tl"]
+PREVIEW_SIZE = (640, 360)
+
+
+def overlay_xy(corner, margin=24):
+    """ffmpeg overlay expression for a corner."""
+    x = f"W-w-{margin}" if corner in ("br", "tr") else f"{margin}"
+    y = f"H-h-{margin}" if corner in ("br", "bl") else f"{margin}"
+    return f"{x}:{y}"
 AUDIO_SR = 44100
 
 
@@ -251,8 +260,8 @@ class Recorder:
             cmd += ["-itsoffset", f"{self.audio_t0 - self.t0:.3f}", "-i", self.audio_path]
         if cam_ok:
             pip = float(self.settings["capture_pip"])
-            cmd += ["-filter_complex", f"[1:v]scale=-2:ih*{pip:.3f}*{self.size[1]}/ih[pip];"
-                                       f"[0:v][pip]overlay=W-w-24:H-h-24:eof_action=pass[v]", "-map", "[v]"]
+            cmd += ["-filter_complex", f"[1:v]scale=-2:{int(pip * self.size[1])}[pip];"
+                                       f"[0:v][pip]overlay={overlay_xy(self.settings.get('capture_corner', 'br'))}:eof_action=pass[v]", "-map", "[v]"]
             if self.audio_path:
                 cmd += ["-map", "2:a"]
             cmd += ["-c:v", "h264_videotoolbox", "-b:v", "14M", "-pix_fmt", "yuv420p"]
@@ -312,6 +321,80 @@ class Recorder:
         if self.composing is not None:
             return "rendering take..."
         return self.error
+
+
+class CameraPreview:
+    """Live frames from the camera through ffmpeg (rawvideo on a pipe), latest frame kept."""
+
+    def __init__(self, camera, size=PREVIEW_SIZE, fps=15):
+        self.size = size
+        self.frame = None            # bytes of the latest rgb24 frame
+        self.error = None
+        self.frames = 0
+        w, h = size
+        try:
+            self.proc = subprocess.Popen(
+                [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-framerate", str(fps),
+                 "-pixel_format", "uyvy422", "-video_size", "1280x720", "-i", f"{camera[0]}:none",
+                 "-vf", f"scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL)
+        except OSError as e:
+            self.proc = None
+            self.error = str(e)
+            return
+        self.thread = threading.Thread(target=self._read, daemon=True)
+        self.thread.start()
+
+    def _read(self):
+        n = self.size[0] * self.size[1] * 3
+        while True:
+            buf = self.proc.stdout.read(n)
+            if len(buf) < n:
+                break
+            self.frame = buf
+            self.frames += 1
+        err = self.proc.stderr.read().decode(errors="replace").strip()
+        if err and not self.frames:
+            self.error = err[-200:]
+
+    def surface(self):
+        if self.frame is None:
+            return None
+        import pygame
+        return pygame.image.frombuffer(self.frame, self.size, "RGB")
+
+    def stop(self):
+        if self.proc is not None and self.proc.poll() is None:
+            self.proc.kill()
+
+
+class AudioMeter:
+    """RMS level per selected channel of the capture device, updated by the input stream."""
+
+    def __init__(self, settings):
+        import sounddevice as sd
+        self.settings = {**DEFAULTS, **{k: v for k, v in settings.items() if k in DEFAULTS}}
+        self.levels = None           # dB per selected channel
+        self.error = None
+        dev = audio_device_index(self.settings["capture_audio_device"])
+        if dev is None:
+            self.error = f"audio device '{self.settings['capture_audio_device']}' not found"
+            self.stream = None
+            return
+        idx, info = dev
+        nin = int(info["max_input_channels"])
+        self.chans = [c - 1 for c in self.settings["capture_audio_channels"] if 0 <= c - 1 < nin]
+        self.stream = sd.InputStream(device=idx, channels=nin, samplerate=int(info["default_samplerate"]), blocksize=2048,
+                                     dtype="float32", callback=self._cb)
+        self.stream.start()
+
+    def _cb(self, indata, frames, t, status):
+        rms = np.sqrt(np.mean(indata[:, self.chans] ** 2, axis=0)) if self.chans else np.zeros(0)
+        self.levels = [float(20 * np.log10(v + 1e-9)) for v in rms]
+
+    def stop(self):
+        if self.stream is not None:
+            self.stream.stop(); self.stream.close()
 
 
 def check(settings=None, seconds=2.0):

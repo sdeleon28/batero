@@ -21,9 +21,11 @@ from .kit import (default_kit, describe, describe_pads, load_kit, load_progress,
                   save_progress, save_settings)
 from .runlog import RunLog
 from .capture import Recorder
+from . import capture as CP
 from . import edit as E
 from . import stats as ST
 from .coach import Coach
+from .devices import DeviceWatcher, Toasts, TOAST_S
 from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, draw_hihat_state, draw_stars, lerp
 from .game import TAIL_S, lead_in_for
 from . import ghost as GH
@@ -82,6 +84,10 @@ class App:
         self.coach = Coach(self.settings.get("claude_bin"), self.settings.get("coach_language", "es"),
                            self.settings.get("coach_model"))
         self.session = None          # {"name", "items": [(cat, index, rate, reps, why)], "pos", "rep"} while a playlist runs
+        self.toasts = Toasts()
+        self.camera_name = None
+        self.watcher = DeviceWatcher(args.port, self.settings.get("audio_device"), self.settings.get("capture_camera", "iPhone"),
+                                     midi_hints=MODULE_HINTS)
         self.midi_trace = None       # one line per note-on, for latency measurements (--midi-trace or settings)
         trace = getattr(args, "midi_trace", None) or self.settings.get("midi_trace")
         if trace:
@@ -107,6 +113,10 @@ class App:
             self.toggle_fullscreen()
             self.on_resize()
         self.open_midi(args.port)
+        self.watcher.state["midi"] = self.midi_name
+        self.watcher.state["audio"] = self.sounds.device or ("system default" if not self.settings.get("audio_device") else None)
+        if not (args.port == "__none__"):
+            self.watcher.start()
 
     # --- audio output ------------------------------------------------------------
     def set_audio_device(self, name):
@@ -323,6 +333,93 @@ class App:
         self.drum_queue.append(inst)
 
     # --- screens ---------------------------------------------------------------
+    # --- devices -------------------------------------------------------------------
+    def handle_device_events(self):
+        while not self.watcher.events.empty():
+            kind, name, connected = self.watcher.events.get_nowait()
+            self.on_device(kind, name, connected)
+
+    def on_device(self, kind, name, connected):
+        """A device appeared or went away: toast it and react."""
+        ok, bad = JUDGE_COLORS["PERFECT"], JUDGE_COLORS["MISS"]
+        if kind == "midi":
+            if connected:
+                if self.midi_in is None or self.midi_name != name:
+                    try:
+                        if self.midi_in is not None:
+                            self.midi_in.close()
+                        self.midi_in = mido.open_input(name, callback=self.on_midi)
+                        self.midi_name = name
+                    except (OSError, IOError) as e:
+                        self.toasts.add(f"{name}: could not open ({e})", bad)
+                        return
+                self.toasts.add(f"{name} connected: drums are live", ok)
+            else:
+                if self.midi_in is not None:
+                    try:
+                        self.midi_in.close()
+                    except Exception:                       # noqa: BLE001
+                        pass
+                self.midi_in, self.midi_name = None, None
+                self.toasts.add(f"{name} disconnected: keyboard only", bad)
+        elif kind == "midi-other":
+            self.toasts.add(f"MIDI device connected: {name}", DIM)
+        elif kind == "audio":
+            if connected:
+                self.toasts.add(f"audio output {name} connected", ok)
+                if self.settings.get("audio_device") and (self.sounds.device or "") != name:
+                    self.set_audio_device(self.settings["audio_device"])
+            else:
+                self.toasts.add(f"audio output {name} disconnected: sound falls back to the system default", bad)
+                if self.sounds.device:
+                    self.reopen_sounds(None)
+        elif kind == "camera":
+            self.camera_name = name if connected else None
+            self.toasts.add(f"camera {name} {'available for takes' if connected else 'gone'}", ok if connected else DIM)
+
+    def reopen_sounds(self, device):
+        """Rebuild the mixer on `device` (None = system default) without touching the saved setting."""
+        if self.menu_music is not None:
+            self.menu_music.stop()
+        if isinstance(self.screen_obj, PlayScreen):
+            self.screen_obj.game.stop_tracks()
+        self.sounds = SoundBank(enabled=not self.args.no_sound, device=device, drums=self.settings.get("drum_sounds", True))
+        self.track_cache = {}
+        self.menu_music = None
+        if isinstance(self.screen_obj, PlayScreen):
+            self.screen_obj.game.sounds = self.sounds
+        self.update_menu_music()
+
+    def draw_toasts(self):
+        live = self.toasts.live()
+        if not live:
+            return
+        S = self.scale
+        f = self.fonts
+        y = 16 * S
+        for age, text, color in reversed(live):
+            k = 1.0 if age < TOAST_S - 0.8 else max(0.0, (TOAST_S - age) / 0.8)
+            slide = 0 if age > 0.25 else (1 - age / 0.25) * 30 * S
+            ts = f.text(text, f.small, TEXT)
+            w, h = ts.get_width() + 44 * S, ts.get_height() + 14 * S
+            x = self.size[0] - w - 16 * S + slide
+            box = pygame.Surface((int(w), int(h)), pygame.SRCALPHA)
+            pygame.draw.rect(box, (*LANE_BG, int(235 * k)), box.get_rect(), border_radius=int(9 * S))
+            pygame.draw.rect(box, (*color, int(255 * k)), box.get_rect(), max(1, int(2 * S)), border_radius=int(9 * S))
+            pygame.draw.circle(box, (*color, int(255 * k)), (int(16 * S), int(h / 2)), int(5 * S))
+            ts.set_alpha(int(255 * k))
+            box.blit(ts, (30 * S, 7 * S))
+            self.surface.blit(box, (x, y))
+            y += h + 8 * S
+
+    def device_line(self):
+        """One line for the hub: the three devices with their state."""
+        w = self.watcher.state
+        midi = f"TD-17 {self.midi_name}" if self.midi_in else "TD-17 not connected"
+        audio = f"audio {self.sounds.device}" if self.sounds.device else ("audio system default" if self.sounds.ok else "no audio")
+        cam = f"camera {w['camera']}" if w.get("camera") else "no camera"
+        return midi, audio, cam
+
     def level_by_name(self, name):
         for cat in ("kick", "snare", "hihat"):
             for i, ch in enumerate(self.items_for(cat)):
@@ -382,12 +479,18 @@ class App:
     def toggle_recording(self):
         if self.recorder.active:
             path = self.recorder.stop()
+            self.watcher.paused = False
+            self.toasts.add(f"take stopped, rendering {os.path.basename(path)}", DIM)
             print(f"recording stopped, composing {path}")
         else:
             name = self.screen_obj.chart.name if isinstance(self.screen_obj, PlayScreen) else "take"
+            self.watcher.paused = True                     # the camera is ffmpeg's now
             if self.recorder.start(self.size, name):
+                self.toasts.add("recording" + (f" with camera {self.camera_name}" if self.camera_name else ", no camera"), (235, 70, 70))
                 print("recording started")
             else:
+                self.watcher.paused = False
+                self.toasts.add(f"recording could not start: {self.recorder.error}", JUDGE_COLORS["MISS"])
                 print(f"recording could not start: {self.recorder.error}")
 
     def draw_recording_status(self):
@@ -435,14 +538,17 @@ class App:
             while self.drum_queue:
                 if self.screen_obj.on_drum(self.drum_queue.popleft()) is False:
                     running = False
+            self.handle_device_events()
             self.screen_obj.update()
             self.screen_obj.draw(self.surface, clock.get_fps())
             self.recorder.push(self.surface)              # a copy 30 times a second while recording
             self.draw_recording_status()
+            self.draw_toasts()
             pygame.display.flip()
             clock.tick(TARGET_FPS)
         if self.midi_in:
             self.midi_in.close()
+        self.watcher.stop()
         if self.recorder.active:
             self.recorder.stop()
         if self.recorder.composing is not None:
@@ -604,8 +710,16 @@ class HubScreen(Screen):
                 self.f.center(surf, describe(self.app.kit), self.f.small, color, y + ph - 26 * S, x + pw / 2)
             if not self.app.has_drum(cat) and self.app.midi_in:
                 self.f.center(surf, "no pad assigned", self.f.small, JUDGE_COLORS["MISS"], y + 60 * S, x + pw / 2)
-        self.f.center(surf, f"{self.midi_line()}   ·   keys 1-4, arrows or hjkl + Enter   ·   F11 fullscreen   ·   Esc quit",
-                      self.f.small, DIM, self.h - 30 * S)
+        midi, audio, cam = self.app.device_line()
+        chips = [(midi, bool(self.app.midi_in)), (audio, bool(self.app.sounds.ok)), (cam, bool(self.app.watcher.state.get("camera")))]
+        total = sum(self.f.text(t, self.f.small, DIM).get_width() + 34 * S for t, _ in chips)
+        x = self.w / 2 - total / 2
+        for text, on in chips:
+            pygame.draw.circle(surf, JUDGE_COLORS["PERFECT"] if on else (80, 80, 90), (int(x + 6 * S), int(self.h - 44 * S)), int(5 * S))
+            ts = self.f.text(text, self.f.small, TEXT if on else DIM)
+            surf.blit(ts, (x + 18 * S, self.h - 44 * S - ts.get_height() / 2))
+            x += ts.get_width() + 34 * S
+        self.f.center(surf, "keys 1-4, arrows or hjkl + Enter   ·   F11 fullscreen   ·   Esc quit", self.f.small, DIM, self.h - 20 * S)
 
 
 # ---------------------------------------------------------------------------
@@ -632,6 +746,7 @@ class ListScreen(Screen):
                     (f"Start fullscreen: {'on' if self.app.settings.get('fullscreen', True) else 'off'}", "F11 or Cmd+F toggles any time, saved"),
                     ("Recording (V)", f"audio {self.app.recorder.settings['capture_audio_device']} ch {self.app.recorder.settings['capture_audio_channels']}"
                                       f" · camera '{self.app.recorder.settings['capture_camera']}' · ~/Movies/drumhero"),
+                    ("Camera & take check", "the iPhone next to the game picture, the PiP layout, the take's audio meter, a test take"),
                     ("Edit a take with Claude", "pick a take and a style; Claude Code cuts it with ffmpeg"),
                     ("Progress (S)", "streak, minutes, trends, records"),
                     ("Coach (C)", "Claude reads your stats: strengths, weaknesses, focus, playlists"),
@@ -682,10 +797,12 @@ class ListScreen(Screen):
             elif self.sel == 9:
                 self.app.toggle_recording()
             elif self.sel == 10:
-                self.app.go(EditScreen(self.app))
+                self.app.go(CameraCheckScreen(self.app, self.app.surface))
             elif self.sel == 11:
-                self.app.go(StatsScreen(self.app))
+                self.app.go(EditScreen(self.app))
             elif self.sel == 12:
+                self.app.go(StatsScreen(self.app))
+            elif self.sel == 13:
                 self.app.go(CoachScreen(self.app))
             else:
                 return False
@@ -984,6 +1101,174 @@ class CoachScreen(Screen):
 
 
 # ---------------------------------------------------------------------------
+class CameraCheckScreen(Screen):
+    """Soundcheck for takes: the game picture next to the camera, the composed preview with
+    the picture-in-picture, the take's audio channels metered, and a 3-second test take."""
+
+    def __init__(self, app, sample=None):
+        super().__init__(app)
+        self.sample = sample.copy() if sample is not None else None   # what the take captures
+        self.settings = {**CP.DEFAULTS, **{k: v for k, v in app.settings.items() if k in CP.DEFAULTS}}
+        self.camera = CP.find_camera(self.settings["capture_camera"])
+        self.preview = CP.CameraPreview(self.camera) if self.camera and CP.ffmpeg_path() else None
+        try:
+            self.meter = CP.AudioMeter(app.settings)
+        except Exception as e:                                   # noqa: BLE001
+            self.meter = None
+            self.meter_error = str(e)
+        else:
+            self.meter_error = self.meter.error
+        self.test_at = None
+        self.test_result = None
+
+    def close(self):
+        if self.preview:
+            self.preview.stop()
+        if self.meter:
+            self.meter.stop()
+        self.preview = self.meter = None
+
+    def leave(self):
+        self.close()
+        self.app.go(ListScreen(self.app, "crash", 10))
+
+    def on_drum(self, inst):
+        action = NAV.get(inst)
+        if action == "back":
+            self.leave()
+        elif action == "next":
+            self.cycle_pip(1)
+        elif action == "prev":
+            self.cycle_pip(-1)
+        elif action == "accept":
+            self.test_take()
+        return True
+
+    def on_key(self, key):
+        if key in (pygame.K_ESCAPE, pygame.K_h):
+            self.leave()
+        elif key in (pygame.K_DOWN, pygame.K_j):
+            self.cycle_pip(1)
+        elif key in (pygame.K_UP, pygame.K_k):
+            self.cycle_pip(-1)
+        elif key in (pygame.K_LEFTBRACKET, pygame.K_RIGHTBRACKET, pygame.K_LEFT, pygame.K_RIGHT):
+            corners = CP.CORNERS
+            i = corners.index(self.settings["capture_corner"]) if self.settings["capture_corner"] in corners else 0
+            self.settings["capture_corner"] = corners[(i + (1 if key in (pygame.K_RIGHTBRACKET, pygame.K_RIGHT) else -1)) % 4]
+            self.save()
+        elif key in (pygame.K_RETURN, pygame.K_l):
+            self.test_take()
+        elif key == pygame.K_r:
+            self.close()
+            self.__init__(self.app, self.sample)
+        return True
+
+    def cycle_pip(self, d):
+        sizes = [0.2, 0.28, 0.36, 0.45]
+        cur = min(range(4), key=lambda i: abs(sizes[i] - self.settings["capture_pip"]))
+        self.settings["capture_pip"] = sizes[(cur + d) % 4]
+        self.save()
+
+    def save(self):
+        self.app.settings.update({k: self.settings[k] for k in ("capture_pip", "capture_corner")})
+        save_settings(self.app.settings)
+        self.app.recorder.settings.update(self.settings)
+
+    def test_take(self):
+        if self.app.recorder.active or self.app.recorder.composing:
+            return
+        self.close()                                             # the camera and the device go to the recorder
+        self.app.recorder.settings.update(self.settings)
+        if self.app.recorder.start(self.app.size, "camera check"):
+            self.test_at = time.perf_counter()
+            self.test_result = None
+        else:
+            self.test_result = f"could not start: {self.app.recorder.error}"
+
+    def update(self):
+        if self.test_at is not None and self.app.recorder.active and time.perf_counter() - self.test_at > 3.0:
+            path = self.app.recorder.stop()
+            self.test_result = f"test take: {os.path.basename(path)}"
+        if self.test_at is not None and not self.app.recorder.active and self.app.recorder.composing is None and self.test_result and self.preview is None:
+            self.test_result = (f"saved {self.test_result[11:]}" if not self.app.recorder.error else self.app.recorder.error)
+            self.test_at = None
+            self.preview = CP.CameraPreview(self.camera) if self.camera and CP.ffmpeg_path() else None   # back to live
+            try:
+                self.meter = CP.AudioMeter(self.app.settings)
+            except Exception:                                  # noqa: BLE001
+                self.meter = None
+
+    def draw(self, surf, fps):
+        surf.fill(BG)
+        S = self.s; f = self.f
+        f.center(surf, "Camera & take check", f.large, TEXT, 44 * S)
+        pw, ph = int(self.w * 0.42), int(self.w * 0.42 * 9 / 16)
+        lx, rx, y = int(self.w * 0.05), int(self.w * 0.53), int(90 * S)
+        # game picture
+        surf.blit(f.text("game picture (what the take records)", f.small, TEXT), (lx, y - 22 * S))
+        if self.sample is not None:
+            surf.blit(pygame.transform.smoothscale(self.sample, (pw, ph)), (lx, y))
+        pygame.draw.rect(surf, (60, 60, 70), (lx, y, pw, ph), 1)
+        # camera
+        surf.blit(f.text(f"camera: {self.camera[1] if self.camera else 'none found'}", f.small, TEXT if self.camera else JUDGE_COLORS["MISS"]), (rx, y - 22 * S))
+        cam = self.preview.surface() if self.preview else None
+        if cam is not None:
+            surf.blit(pygame.transform.smoothscale(cam, (pw, ph)), (rx, y))
+        else:
+            pygame.draw.rect(surf, LANE_BG, (rx, y, pw, ph))
+            msg = (self.preview.error or "waiting for frames... (allow camera access if macOS asks)") if self.preview else \
+                  f"no video device matching '{self.settings['capture_camera']}': bring the iPhone near and unlock it, or open Camo. R to rescan."
+            for i, line in enumerate(wrap(f, msg, f.small, pw - 20 * S)[:4]):
+                f.center(surf, line, f.small, DIM, y + ph / 2 - 20 * S + i * 20 * S, rx + pw / 2)
+        pygame.draw.rect(surf, (60, 60, 70), (rx, y, pw, ph), 1)
+        # composed preview
+        cy = y + ph + 40 * S
+        f.center(surf, f"composed take  ·  camera {self.settings['capture_pip']:.0%} high, corner {self.settings['capture_corner']}  ·  hats/crash size, [ ] corner",
+                 f.small, TEXT, cy - 18 * S)
+        cw, ch = int(self.w * 0.36), int(self.w * 0.36 * 9 / 16)
+        cx = int(self.w / 2 - cw / 2)
+        if self.sample is not None:
+            surf.blit(pygame.transform.smoothscale(self.sample, (cw, ch)), (cx, cy))
+        else:
+            pygame.draw.rect(surf, LANE_BG, (cx, cy, cw, ch))
+        pip_h = int(ch * self.settings["capture_pip"]); pip_w = int(pip_h * 16 / 9); m = int(24 * cw / 1920)
+        corner = self.settings["capture_corner"]
+        px = cx + (cw - pip_w - m if corner in ("br", "tr") else m)
+        py = cy + (ch - pip_h - m if corner in ("br", "bl") else m)
+        if cam is not None:
+            surf.blit(pygame.transform.smoothscale(cam, (pip_w, pip_h)), (px, py))
+        else:
+            pygame.draw.rect(surf, lerp(LANE_BG, ACCENT, 0.3), (px, py, pip_w, pip_h))
+        pygame.draw.rect(surf, ACCENT, (px, py, pip_w, pip_h), 2)
+        pygame.draw.rect(surf, (60, 60, 70), (cx, cy, cw, ch), 1)
+        # audio meter, to the right of the composed preview
+        mx = cx + cw + 40 * S
+        surf.blit(f.text(f"take audio: {self.settings['capture_audio_device']} ch {self.settings['capture_audio_channels']}", f.small, TEXT), (mx, cy))
+        levels = self.meter.levels if self.meter else None
+        if levels:
+            for i, db in enumerate(levels):
+                bar_w = 200 * S
+                k = max(0.0, min(1.0, (db + 60) / 60))
+                pygame.draw.rect(surf, LANE_BG, (mx, cy + (30 + i * 26) * S, bar_w, 14 * S), border_radius=int(4 * S))
+                pygame.draw.rect(surf, JUDGE_COLORS["PERFECT"] if db > -40 else JUDGE_COLORS["OK"], (mx, cy + (30 + i * 26) * S, bar_w * k, 14 * S), border_radius=int(4 * S))
+                surf.blit(f.text(f"{db:5.0f} dB", f.small, DIM), (mx + bar_w + 10 * S, cy + (27 + i * 26) * S))
+            if max(levels) < -70:
+                for i, line in enumerate(wrap(f, "silent: on the XR18 set USB sends 17/18 to Main L/R (X-AIR Edit, Setup, Audio/MIDI)", f.small, 300 * S)[:3]):
+                    surf.blit(f.text(line, f.small, JUDGE_COLORS["OK"]), (mx, cy + (90 + i * 18) * S))
+        else:
+            surf.blit(f.text(self.meter_error or "no signal yet", f.small, JUDGE_COLORS["MISS"] if self.meter_error else DIM), (mx, cy + 30 * S))
+        # test take state
+        if self.app.recorder.active and self.test_at is not None:
+            f.center(surf, f"test take recording {3 - int(time.perf_counter() - self.test_at)}...", f.mid, (235, 70, 70), self.h - 92 * S)
+        elif self.app.recorder.composing is not None and self.test_at is not None:
+            f.center(surf, "rendering the test take...", f.mid, JUDGE_COLORS["GOOD"], self.h - 92 * S)
+        elif self.test_result:
+            f.center(surf, self.test_result, f.mid, JUDGE_COLORS["PERFECT"] if "saved" in self.test_result else JUDGE_COLORS["MISS"], self.h - 92 * S)
+        self.legend(surf, [("hihat", "size"), ("crash", "size"), ("snare", "test take 3 s"), ("kick", "back")],
+                    keys="[ ] corner · R rescan · Enter test take · Esc back · results in ~/Movies/drumhero")
+
+
+# ---------------------------------------------------------------------------
 class EditScreen(Screen):
     """Pick a take (newest first) and a style, and hand it to Claude Code. Hi-hat / crash
     move through the styles, snare starts, kick goes back; [ and ] change the take."""
@@ -1003,12 +1288,12 @@ class EditScreen(Screen):
         elif action == "accept":
             self.accept()
         elif action == "back":
-            self.app.go(ListScreen(self.app, "crash", 10))
+            self.app.go(ListScreen(self.app, "crash", 11))
         return True
 
     def on_key(self, key):
         if key in (pygame.K_ESCAPE, pygame.K_h):
-            self.app.go(ListScreen(self.app, "crash", 10))
+            self.app.go(ListScreen(self.app, "crash", 11))
         elif key in (pygame.K_DOWN, pygame.K_j):
             self.sel = (self.sel + 1) % len(E.STYLES)
         elif key in (pygame.K_UP, pygame.K_k):

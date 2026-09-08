@@ -234,6 +234,18 @@ the sound card's output, and the camera picture-in-picture in the corner.
 Settings: `capture_audio_device`, `capture_audio_channels`, `capture_camera`,
 `capture_pip` (camera height as a fraction of the picture, 0.28).
 
+## Devices: hot-plug and toasts
+
+A watcher thread polls the MIDI inputs and audio outputs every 1.5 s and the
+cameras every 12 s (not while a take records). When the TD-17, the audio
+device from settings or the camera appears or goes away, a toast slides in at
+the top right and the game reacts: the TD-17 is opened as soon as it shows up
+(plug it in after launch and the drums go live), the mixer moves back to the
+saved device when it returns and falls back to the system default when it
+goes, the camera is marked available for takes. Any other MIDI device that
+appears gets a quiet mention. The hub's footer shows the three devices with a
+green dot when present.
+
 ## Progress (S)
 
 The hub shows a strip with your streak, today's minutes and the total; S (or
@@ -257,6 +269,17 @@ tempo, shows "session x/y" and why the level is there, and returns to the coach
 when it is done. A asks again. The analysis is kept in
 `~/.config/drumhero/coach/coach.json` (`coach_language`, `coach_model` in
 settings).
+
+## Camera & take check
+
+Setup has "Camera & take check", the soundcheck of takes: the game picture on
+the left, the camera live on the right (ffmpeg feeds the iPhone's frames into
+the game at 15 fps), the composed take below with the picture-in-picture where
+it will land, and the take's audio channels metered next to it, with a hint
+when they are silent. Hi-hat and crash change the camera size (20, 28, 36 or
+45 % of the height), `[` and `]` move it between the four corners, R rescans
+the cameras, and snare or Enter records a 3-second test take, renders it and
+shows the result. Sizes and corner are saved.
 
 ## Edit a take with Claude
 
@@ -464,4 +487,5 @@ whatever the display adds. The audio mixer uses a 256-sample buffer, about 6 ms.
 - `drumhero/runlog.py`, `drumhero/audit.py`: per-level run logs and the audit tool
 - `drumhero/capture.py`, `drumhero/edit.py`: recording a take, editing it with Claude Code
 - `drumhero/stats.py`, `drumhero/coach.py`: progress statistics, the coach and its playlists
+- `drumhero/devices.py`: device watcher and toasts
 - `drumhero/app.py`: menu, level select, wizard, play screen, main loop
