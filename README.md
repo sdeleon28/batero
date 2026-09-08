@@ -110,7 +110,12 @@ a snare pickup; crash on the one; the first fill; the rack tom enters in the
 fill; the floor tom enters and the fill walks down; toms inside the groove; the
 right hand moves to the ride; two crashes in conversation; half time; sixteenth
 kicks; ghost notes; sixteenth hats; a linear groove; and a 16-bar A A B A song
-form with everything. Grooves are written in a small notation in `chart.py`
+form with everything. Then rock, metal and punk: fill vocabulary; kick doubles;
+punk with the snare on the &; the gallop; riding the crash; the right crash on
+the & of 4; sixteenth kick runs; whole-bar fills around the kit; a half-time
+breakdown; three-over-four kicks; a lite blast; fills that land on a crash;
+and a 16-bar rock anthem with a build from ghosts to accents. Grooves are
+written in a small notation in `chart.py`
 (sixteen slots per bar per instrument: `x` stroke, `X` accent, `o` ghost).
 
 Exercises also hold the rudiments, practice-pad style on the snare: single
