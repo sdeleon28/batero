@@ -47,6 +47,31 @@ def hihat():
     return x * np.exp(-t * 55)
 
 
+def hihat_open(dur=0.55, seed=12):
+    t = _t(dur)
+    x = _noise(len(t), seed)
+    for _ in range(2):
+        x = np.diff(x, prepend=0.0)
+    ring = np.sin(2 * np.pi * 6100 * t) * 0.15 + np.sin(2 * np.pi * 8700 * t) * 0.1
+    return (x * 0.6 + ring) * np.exp(-t * 7) * np.minimum(1.0, t / 0.002)
+
+
+def hihat_mid():
+    return hihat_open(0.22, seed=13)
+
+
+def chick():
+    t = _t(0.08)
+    x = _noise(len(t), 14)
+    for _ in range(3):
+        x = np.diff(x, prepend=0.0)
+    return x * np.exp(-t * 90) * 0.7 + np.sin(2 * np.pi * 3000 * t) * np.exp(-t * 200) * 0.3
+
+
+HH_SOUND = {"tight body": "hihat", "tight edge": "hihat", "mid body": "hihat_mid", "mid edge": "hihat_mid",
+            "open body": "hihat_open", "open edge": "hihat_open", "pedal chick": "chick"}
+
+
 def crash(seed=4, dur=1.6):
     t = _t(dur)
     x = _noise(len(t), seed)
@@ -227,6 +252,8 @@ class SoundBank:
         self.sounds = {
             "kick": _to_sound(kick()), "snare": _to_sound(snare()),
             "hihat": _to_sound(hihat()), "crash": _to_sound(crash()),
+            "hihat_open": _to_sound(hihat_open()), "hihat_mid": _to_sound(hihat_mid()), "chick": _to_sound(chick()),
+            "pedal": _to_sound(chick()),
             "tom1": _to_sound(tom()), "floor": _to_sound(floor_tom()), "ride": _to_sound(ride()),
             "crash2": _to_sound(crash(seed=9, dur=1.3)),
             "click": _to_sound(click()), "click_hi": _to_sound(click(high=True)),
@@ -249,9 +276,12 @@ class SoundBank:
             s = self.sounds[key] = _to_sound(tone(int(key[1:])))
         return s
 
-    def play(self, key, velocity=100, gain=1.0):
+    def play(self, key, velocity=100, gain=1.0, art=None):
+        """art: a hi-hat articulation (hhmapper's labels) picks the open, mid, tight or chick sample."""
         if not self.ok or (not self.drums and key not in ("click", "click_hi")):
             return
+        if art in HH_SOUND and key in ("hihat", "pedal"):
+            key = HH_SOUND[art]
         s = self._get(key)
         if s is None:
             return

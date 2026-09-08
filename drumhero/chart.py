@@ -30,7 +30,7 @@ ZONES = [
     Zone("snare_rim", "Snare rim", "Snare", "rim", "snare", "Hit the SNARE RIM: rimshots and cross-stick", (40, 37)),
     Zone("hihat", "Hi-hat bow", "Hi-hat", "bow", "hihat", "Hit the HI-HAT on top (bow), pedal up and down", (42, 46)),
     Zone("hihat_edge", "Hi-hat edge", "Hi-hat", "edge", "hihat", "Hit the HI-HAT EDGE, pedal up and down", (22, 26)),
-    Zone("hihat_pedal", "Hi-hat pedal", "Hi-hat", "pedal", "hihat", "Stomp the HI-HAT PEDAL a few times (chick)", (44,)),
+    Zone("hihat_pedal", "Hi-hat pedal", "Hi-hat", "pedal", "pedal", "Stomp the HI-HAT PEDAL a few times (chick)", (44,)),
     Zone("crash", "Crash L bow", "Crash L", "bow", "crash", "Hit the LEFT CRASH on the bow", (49,)),
     Zone("crash_edge", "Crash L edge", "Crash L", "edge", "crash", "Hit the LEFT CRASH on the edge", (55,)),
     Zone("crash2", "Crash R bow", "Crash R", "bow", "crash2", "Hit the RIGHT CRASH on the bow", (57,)),
@@ -52,9 +52,9 @@ for _z in ZONES:
     PADS[-1][1].append(_z.key)
 
 # Instruments: what charts refer to. The first four also drive the menus.
-INSTRUMENTS = ["kick", "snare", "hihat", "crash", "tom1", "floor", "ride", "crash2"]
+INSTRUMENTS = ["kick", "snare", "hihat", "crash", "tom1", "floor", "ride", "crash2", "pedal"]
 LABELS = {"kick": "Kick", "snare": "Snare", "hihat": "Hi-Hat", "crash": "Crash L",
-          "tom1": "Rack tom", "floor": "Floor tom", "ride": "Ride", "crash2": "Crash R"}
+          "tom1": "Rack tom", "floor": "Floor tom", "ride": "Ride", "crash2": "Crash R", "pedal": "HH pedal"}
 COLORS = {
     "kick": (245, 90, 90),
     "snare": (250, 170, 60),
@@ -64,7 +64,13 @@ COLORS = {
     "floor": (100, 130, 250),
     "ride": (190, 110, 240),
     "crash2": (60, 190, 150),
+    "pedal": (220, 200, 120),
 }
+# Hi-hat articulations, named exactly as hhmapper labels them (and GetGood Drums plays them):
+# openness from the pedal (CC4) x zone, plus the foot.
+HH_ARTS = ["tight body", "tight edge", "mid body", "mid edge", "open body", "open edge", "pedal chick"]
+HH_GLYPH = {"tight body": "+", "tight edge": ">+", "mid body": "/", "mid edge": ">/", "open body": "o", "open edge": ">o",
+            "pedal chick": "^"}
 # Charts that use one crash accept either crash pad; only charts with both lanes tell them apart.
 CRASH_PAIR = {"crash": "crash2", "crash2": "crash"}
 INSTRUMENT_ZONES = {inst: [z.key for z in ZONES if z.instrument == inst] for inst in INSTRUMENTS}
@@ -99,7 +105,7 @@ def expand_family(notes):
 
 # Chart notes from MIDI files are folded into instruments when they are the GM drum numbers.
 GM_TO_INSTRUMENT = {35: "kick", 36: "kick", 37: "snare", 38: "snare", 40: "snare",
-                    22: "hihat", 26: "hihat", 42: "hihat", 44: "hihat", 46: "hihat",
+                    22: "hihat", 26: "hihat", 42: "hihat", 44: "pedal", 46: "hihat",
                     49: "crash", 55: "crash", 52: "crash2", 57: "crash2",
                     47: "tom1", 48: "tom1", 50: "tom1", 41: "floor", 43: "floor", 45: "floor", 58: "floor",
                     51: "ride", 53: "ride", 59: "ride"}
@@ -125,6 +131,9 @@ class ChartNote:
     accent: bool = False    # an accented stroke (judged when the chart has dynamics)
     hit_velocity: int = None
     dyn: str = None         # ACCENT / TAP (right) or SOFT / LOUD (wrong), set when hit
+    art: str = None         # required hi-hat articulation (HH_ARTS), judged when the chart has expression
+    art_ok: bool = None     # set when hit: the stroke's articulation matched
+    played: str = None      # the articulation actually played
 
 
 @dataclass
@@ -157,6 +166,7 @@ class Chart:
     sticking: list = None       # ["R", "L", ...] pattern shown as a strip (rudiments)
     accents: set = None         # indices within the sticking pattern that are accented
     dynamics: bool = False      # judge accents vs taps by velocity
+    expression: bool = False    # judge hi-hat articulations (openness, zone, chick)
     rate: float = 1.0           # tempo multiplier this chart was scaled by (see at_rate)
 
     def at_rate(self, rate: float):
@@ -468,8 +478,11 @@ EXERCISES = [
 # accent, "o" a ghost, "." nothing. Bars are dicts; a level is a list of bars, its
 # phrase, repeated to the level length.
 GROOVE_KEYS = {"hh": "hihat", "kk": "kick", "sn": "snare", "t1": "tom1", "ft": "floor",
-               "rd": "ride", "cl": "crash", "cr": "crash2"}
+               "rd": "ride", "cl": "crash", "cr": "crash2", "pd": "pedal"}
 GROOVE_VEL = {"X": 120, "x": 96, "o": 62}      # only X draws as an accent
+# In the "hh" string these letters ask for an articulation (bow taps soft, edge strokes hard);
+# "x"/"X"/"o" stay "any hi-hat". In "pd", "x" is a chick.
+HH_LETTERS = {"t": "tight body", "T": "tight edge", "m": "mid body", "M": "mid edge", "a": "open body", "A": "open edge"}
 
 
 def _groove(name, desc, bpm, phrase, bars=8):
@@ -481,10 +494,18 @@ def _groove(name, desc, bpm, phrase, bars=8):
             key = GROOVE_KEYS[k]
             assert len(pat) == 16, (name, k, pat)
             for i, c in enumerate(pat):
-                if c in GROOVE_VEL:
-                    notes.append(ChartNote((bar * 4 + i / 4) * beat, key, GROOVE_VEL[c], accent=(c == "X")))
+                t = (bar * 4 + i / 4) * beat
+                if k == "pd" and c in GROOVE_VEL:
+                    notes.append(ChartNote(t, "pedal", GROOVE_VEL[c], art="pedal chick"))
+                elif k == "hh" and c in HH_LETTERS:
+                    art = HH_LETTERS[c]
+                    notes.append(ChartNote(t, "hihat", 110 if "edge" in art else 88, accent="edge" in art, art=art))
+                elif c in GROOVE_VEL:
+                    notes.append(ChartNote(t, key, GROOVE_VEL[c], accent=(c == "X")))
     notes.sort(key=lambda n: (n.t, INSTRUMENTS.index(n.key)))
-    return Chart(name, notes, bpm, desc)
+    ch = Chart(name, notes, bpm, desc)
+    ch.expression = any(n.art for n in notes)
+    return ch
 
 
 _H8 = "x.x.x.x.x.x.x.x."          # hats on the eighths
@@ -704,7 +725,71 @@ BEATS = [
         {"kk": "x...x...x...x.x.", "sn": "xxxx........xx..", "t1": "....xxxx........", "ft": "........xxxx....", "cl": "..............x.", "cr": "..............x."},
     ], bars=16),
 ]
-EXERCISES = EXERCISES + RUDIMENTS
+# --- hi-hat control: what the pedal, the zone and the foot can say ----------------------
+# Notation: t/T tight bow/edge, m/M mid, a/A open, pd x = chick. The names of the articulations
+# are hhmapper's, so what the lesson asks for is what GetGood Drums plays.
+_KS = {"kk": "x.......x.......", "sn": _S24}
+HIHAT_LESSONS = [
+    _groove("Tight and open", "Eighths on the bow: a bar with the pedal down tight, a bar with it up open. Feel the pedal travel.", 84, [
+        {"hh": "t.t.t.t.t.t.t.t.", **_KS},
+        {"hh": "a.a.a.a.a.a.a.a.", **_KS},
+    ]),
+    _groove("Half open", "The same eighths at half pedal: the sloshy mid hat. Find the spot and hold it.", 84, [
+        {"hh": "m.m.m.m.m.m.m.m.", **_KS},
+        {"hh": "m.m.m.m.m.m.m.m.", "kk": "x.....x.x.......", "sn": _S24},
+    ]),
+    _groove("Openness ladder", "Two bars tight, two bars mid, two bars open, then back down to tight. Every step is a pedal position.", 84, [
+        {"hh": "t.t.t.t.t.t.t.t.", **_KS}, {"hh": "t.t.t.t.t.t.t.t.", **_KS},
+        {"hh": "m.m.m.m.m.m.m.m.", **_KS}, {"hh": "m.m.m.m.m.m.m.m.", **_KS},
+        {"hh": "a.a.a.a.a.a.a.a.", **_KS}, {"hh": "a.a.a.a.a.a.a.a.", **_KS},
+        {"hh": "m.m.m.m.m.m.m.m.", **_KS}, {"hh": "t.t.t.t.t.t.t.t.", **_KS},
+    ]),
+    _groove("Open on the &", "Tight eighths, the hat opens on the & of 4 and the foot closes it on the next 1: the disco hat.", 88, [
+        {"hh": "t.t.t.t.t.t.t.a.", "pd": "x...............", **_KS},
+        {"hh": "t.t.t.t.t.t.t.a.", "pd": "x...............", "kk": "x.......x.x.....", "sn": _S24},
+    ]),
+    _groove("Bark", "An open hat choked right away by the foot: open on the & of 2, chick on 3, tight around it.", 88, [
+        {"hh": "t.t.t.a...t.t.t.", "pd": "........x.......", **_KS},
+        {"hh": "t.t.t.a...t.t.a.", "pd": "........x.......", "kk": "x.......x.x.....", "sn": _S24},
+    ]),
+    _groove("Foot on 2 and 4", "No sticks on the hat: the foot chicks on 2 and 4 under kick and snare, then on every beat.", 84, [
+        {"pd": "....x.......x...", "kk": "x.......x.......", "sn": _S24},
+        {"pd": "....x.......x...", "kk": "x.......x.......", "sn": _S24},
+        {"pd": "x...x...x...x...", "kk": "x.......x.......", "sn": _S24},
+        {"pd": "x...x...x...x...", "kk": "x.......x.x.....", "sn": _S24},
+    ]),
+    _groove("Bow and edge", "Tight eighths alternating bow taps and edge accents: the shoulder of the stick speaks on the beat.", 84, [
+        {"hh": "T.t.T.t.T.t.T.t.", **_KS},
+        {"hh": "T.t.t.t.T.t.t.t.", **_KS},
+    ]),
+    _groove("Edge on the open", "Open hats on the edge: the & of 2 and the & of 4 open on the edge, chicks close them on 3 and 1.", 88, [
+        {"hh": "t.t.t.A.t.t.t.A.", "pd": "x.......x.......", **_KS},
+        {"hh": "t.t.t.A.t.t.t.A.", "pd": "x.......x.......", "kk": "x..x......x.x...", "sn": _S24},
+    ]),
+    _groove("Sixteenths, mid and tight", "Sixteenths on the bow, tight on the beats and mid in between: the pedal breathes with every beat.", 76, [
+        {"hh": "tmmmtmmmtmmmtmmm", **_KS},
+        {"hh": "tmmmtmmmtmmmtmmm", "kk": "x..x......x.x...", "sn": _S24},
+    ]),
+    _groove("Hi-hat song", "Sixteen bars that use everything: tight groove, open &s, edge accents, a mid section, barks, and the foot on 2 and 4.", 88, [
+        {"hh": "t.t.t.t.t.t.t.t.", "kk": "x.......x.x.....", "sn": _S24},
+        {"hh": "t.t.t.t.t.t.t.a.", "pd": "x...............", "kk": "x.......x.x.....", "sn": _S24},
+        {"hh": "t.t.t.t.t.t.t.t.", "kk": "x.......x.x.....", "sn": _S24},
+        {"hh": "t.t.t.t.t.t.t.a.", "pd": "x...............", "kk": "x.......x.x.....", "sn": "....X.......X.x."},
+        {"hh": "T.t.T.t.T.t.T.t.", "kk": "x.......x.x.....", "sn": _S24},
+        {"hh": "T.t.T.t.T.t.T.a.", "pd": "x...............", "kk": "x.......x.x.....", "sn": _S24},
+        {"hh": "T.t.T.t.T.t.T.t.", "kk": "x.......x.x.....", "sn": _S24},
+        {"hh": "T.t.T.t.T.t.t.A.", "pd": "x...............", "kk": "x.......x.x.....", "sn": "....X.......xx.."},
+        {"hh": "m.m.m.m.m.m.m.m.", "kk": "x.....x.x.......", "sn": _S24},
+        {"hh": "m.m.m.m.m.m.m.m.", "kk": "x.....x.x.......", "sn": _S24},
+        {"hh": "m.m.m.m.m.m.m.m.", "kk": "x.....x.x.......", "sn": _S24},
+        {"hh": "m.m.m.m.m.m.m.A.", "pd": "x...............", "kk": "x.....x.x.......", "sn": "....X.......X.x."},
+        {"hh": "t.t.t.a...t.t.t.", "pd": "........x.......", "kk": "x.......x.x.....", "sn": _S24},
+        {"hh": "t.t.t.a...t.t.a.", "pd": "x.......x.......", "kk": "x.......x.x.....", "sn": _S24},
+        {"pd": "....x.......x...", "kk": "x.......x.......", "sn": _S24},
+        {"hh": "t.t.t.t.t.t.t.A.", "pd": "....x.......x...", "kk": "x.......x.x.....", "sn": "....X.......xxxx"},
+    ], bars=16),
+]
+EXERCISES = EXERCISES + RUDIMENTS + HIHAT_LESSONS
 LEVELS = EXERCISES + BEATS
 
 

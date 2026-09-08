@@ -98,6 +98,16 @@ class GhostFilter:
         self.last_stroke = (t, note, velocity, zone, openness_label(self.pedal_cc))
         return None
 
+    def articulation_for(self, note):
+        """hhmapper's label for the stroke just accepted: 'tight edge', 'open body', 'pedal chick'...
+        None for other pads."""
+        if note in CHICK_NOTES:
+            return "pedal chick"
+        ls = self.last_stroke
+        if ls and ls[1] == note:
+            return f"{ls[4]} {'edge' if ls[3] == 'edge' else 'body'}"
+        return None
+
     def _flag(self, why, t=None, note=None, velocity=None):
         self.filtered += 1
         self.last_reason = why

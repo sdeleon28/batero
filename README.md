@@ -126,6 +126,25 @@ e, on &, on a, and a moving accent). Each note carries its hand (R or L) and
 the strip under the metronome shows the whole sticking with the stroke being
 played lit up.
 
+## Hi-hat control
+
+Exercises end with ten hi-hat lessons that use everything the TD-17 hi-hat can
+say: the pedal's openness (tight, mid, open, read from CC4 at the moment of the
+stroke), the zone (bow or edge) and the foot (the chick). The articulations are
+named exactly as hhmapper labels them, so a lesson that asks for "open edge" is
+what GetGood Drums plays through hhmapper: tight body, tight edge, mid body,
+mid edge, open body, open edge, pedal chick. The chick has its own lane.
+
+Notes carry a glyph: `+` tight, `/` mid, `o` open, `>` on the edge, `^` the
+foot. Each hit is judged on timing and on articulation: the right one earns a
+bonus and shows its name under the note; a wrong one shows "want open body",
+and "HAT: OPEN BODY" under the judgement. The HUD counts them and the results
+give the rate, which feeds the grade like dynamics do. The game's own kit plays
+open, mid, tight or chick samples according to what you actually played, and
+the guide plays what the chart asks for. Lessons: tight and open, half open,
+the openness ladder, open on the &, the bark, foot on 2 and 4, bow and edge,
+edge on the open, sixteenths mid and tight, and a 16-bar hi-hat song.
+
 ## Accents
 
 Rudiments judge dynamics as well as timing. Accented strokes are the tall notes

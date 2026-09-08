@@ -1708,7 +1708,7 @@ class PlayScreen(Screen):
         if self.nav_ready():
             self.app.nav_hit(note, velocity)
             return "nav"
-        j = self.game.hit(note, velocity)
+        j = self.game.hit(note, velocity, art=self.app.ghosts.articulation_for(note))
         return f"{j}" if j else "unmapped"
 
     def on_drum(self, inst):

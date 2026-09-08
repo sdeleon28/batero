@@ -4,7 +4,7 @@ import time
 
 import pygame
 
-from .chart import COUNT_LABELS
+from .chart import COUNT_LABELS, HH_GLYPH
 from .game import CONTRAST_TARGET, Game
 from .ghost import PEDAL_CLOSED_CC, openness_label
 
@@ -225,9 +225,12 @@ class Renderer:
             if accent:
                 pygame.draw.rect(surf, (255, 255, 255), rect, 2, border_radius=int(6 * S))
             if n.state != "miss":
-                label = (">" + n.hand if accent and n.hand else (">" if accent else n.hand))
+                if n.art:
+                    label = HH_GLYPH.get(n.art, "")                 # + tight, / mid, o open, > edge, ^ chick
+                else:
+                    label = (">" + n.hand if accent and n.hand else (">" if accent else n.hand))
                 if label:
-                    f.center(surf, label, f.mid if accent else f.small, (20, 20, 24), y, x + w / 2)
+                    f.center(surf, label, f.mid if (accent or n.art) else f.small, (20, 20, 24), y, x + w / 2)
 
         # flashes: ring at the line + error number, drawn the frame after the hit arrives
         latest = None
@@ -252,6 +255,11 @@ class Renderer:
                 if fl.dyn and newest_in_lane[fl.lane] is fl:
                     ds = f.text(DYN_LABELS[fl.dyn], f.mid if fl.dyn in ("SOFT", "LOUD") else f.small, lerp(DYN_COLORS[fl.dyn], BG, jt))
                     surf.blit(ds, (cx - ds.get_width() / 2, self.line_y - (44 + 40 * jt) * S))
+                if fl.art and newest_in_lane[fl.lane] is fl:
+                    want, ok = fl.art
+                    col = DYN_COLORS["ACCENT"] if ok else DYN_COLORS["SOFT"]
+                    ds = f.text(want if ok else f"want {want}", f.small if ok else f.mid, lerp(col, BG, jt))
+                    surf.blit(ds, (cx - ds.get_width() / 2, self.line_y - (44 + 40 * jt) * S))
 
         if latest is not None:
             jt = (wall - latest.wall_t) / JUDGE_TEXT_S
@@ -271,6 +279,11 @@ class Renderer:
                 ds.set_alpha(int(255 * (1 - jt)))
                 surf.blit(ds, (self.w / 2 - ds.get_width() / 2, self.h * 0.30 + 90 * S))
                 ds.set_alpha(255)
+            elif latest.art and not latest.art[1]:
+                ds = f.text(f"HAT: {latest.art[0].upper()}", f.mid, DYN_COLORS["SOFT"])
+                ds.set_alpha(int(255 * (1 - jt)))
+                surf.blit(ds, (self.w / 2 - ds.get_width() / 2, self.h * 0.30 + 90 * S))
+                ds.set_alpha(255)
 
         self.metronome(surf, now)
         if any(l.key == "hihat" for l in g.lanes):
@@ -278,12 +291,17 @@ class Renderer:
 
         # HUD with a backing so it stays readable over notes
         dyn = g.dynamics(32) if g.chart.dynamics else None
-        backing = pygame.Surface((int(360 * S), int((150 if dyn is not None else 100) * S)))
+        expr = g.chart.expression
+        backing = pygame.Surface((int(360 * S), int((150 if dyn is not None else (122 if expr else 100)) * S)))
         backing.fill(BG)
         backing.set_alpha(235)
         surf.blit(backing, (0, 0))
         if dyn is not None:
             self.dynamics_meter(surf, dyn, 12 * S, 96 * S)
+        elif expr:
+            a = g.art_counts
+            surf.blit(f.text(f"hat articulations {a['ok']}/{a['ok'] + a['wrong']}   + tight  / mid  o open  > edge  ^ foot",
+                             f.small, TEXT if a["wrong"] == 0 else JUDGE_COLORS["OK"]), (12 * S, 96 * S))
         surf.blit(f.text(g.chart.name, f.mid, ACCENT), (12 * S, 8 * S))
         surf.blit(f.text(f"score {score}   combo {combo}", f.mid, TEXT), (12 * S, 38 * S))
         line = f"P {counts['PERFECT']}  G {counts['GOOD']}  O {counts['OK']}  M {counts['MISS']}  S {counts['STRAY']}"
@@ -410,8 +428,12 @@ class Renderer:
                           f"contrast {c:.2f}x" if c is not None else
                           f"accents {st['accents_ok']}/{st['accents']} · taps {st['taps_ok']}/{st['taps']}",
                           self.f.mid, JUDGE_COLORS["PERFECT"] if ok else JUDGE_COLORS["OK"]))
+        if g.chart.expression and st.get("art_ok", 0) + st.get("art_wrong", 0):
+            r = st["art_rate"]
+            lines.append((f"hat articulations {st['art_ok']}/{st['art_ok'] + st['art_wrong']}  ({r * 100:.0f}%)", self.f.mid,
+                          JUDGE_COLORS["PERFECT"] if r >= 0.85 else JUDGE_COLORS["OK"]))
         lines.append(("Enter next · R retry · Esc back", self.f.small, DIM))
-        bh = 370 + (40 if g.chart.dynamics else 0)
+        bh = 370 + (40 if g.chart.dynamics else 0) + (40 if g.chart.expression else 0)
         box = pygame.Surface((int(600 * S), int(bh * S)))
         box.fill((10, 10, 14))
         box.set_alpha(250)

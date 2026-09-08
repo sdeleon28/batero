@@ -20,6 +20,7 @@ TAP_MAX = 84             # an unaccented note hit at most this hard counts as a 
 DYN_THRESHOLDS = {"hihat": (116, 104)}     # instrument -> (accent min, tap max); others use the defaults
 CONTRAST_TARGET = 1.4    # median accent velocity / median tap velocity to aim for
 DYN_BONUS = 30           # score for the right dynamic on a hit note
+ART_BONUS = 30           # score for the right hi-hat articulation on a hit note
 # Stars: a 0..100 grade from accuracy (half), hit quality (PERFECT 1, GOOD 0.6, OK 0.3) and
 # dynamics (or quality again when the chart has none), minus strays, cut at these grades.
 STAR_GRADES = [30, 50, 70, 85, 94]
@@ -46,6 +47,7 @@ class Flash:
     error_ms: float
     velocity: int
     dyn: str = None      # ACCENT / TAP / SOFT / LOUD when the chart judges dynamics
+    art: tuple = None    # (required articulation, matched) when the chart judges hi-hat expression
 
 
 def dynamic_for(accent: bool, velocity: int, instrument: str = None):
@@ -95,6 +97,7 @@ class Game:
             self.combo = self.max_combo = self.score = 0
             self.counts = {k: 0 for k in ("PERFECT", "GOOD", "OK", "MISS", "STRAY")}
             self.dyn_counts = {k: 0 for k in ("ACCENT", "TAP", "SOFT", "LOUD")}
+            self.art_counts = {"ok": 0, "wrong": 0}
             self.cursor = 0                     # first note that may still be pending
             self.guide_cursor = 0
             self.last_click_beat = None
@@ -157,20 +160,21 @@ class Game:
                 track.stop()
 
     # --- input -------------------------------------------------------------
-    def hit(self, note: int, velocity: int = 100, wall_t: float = None):
-        """Judge an incoming MIDI note. Called from the MIDI thread; must be quick."""
+    def hit(self, note: int, velocity: int = 100, wall_t: float = None, art: str = None):
+        """Judge an incoming MIDI note. Called from the MIDI thread; must be quick.
+        art: the hi-hat articulation played (hhmapper's labels), known from the pedal and the zone."""
         lane = self.by_note.get(note)
         if lane is None:
             if self.log is not None:
                 self.log.add("unmapped", note=note, velocity=velocity)
             return None
-        return self.hit_lane(lane, velocity, wall_t, note)
+        return self.hit_lane(lane, velocity, wall_t, note, art)
 
-    def hit_lane(self, lane: int, velocity: int = 100, wall_t: float = None, note: int = None):
+    def hit_lane(self, lane: int, velocity: int = 100, wall_t: float = None, note: int = None, art: str = None):
         if wall_t is None:
             wall_t = time.perf_counter()
         if self.sounds:
-            self.sounds.play(self.lanes[lane].key, velocity)
+            self.sounds.play(self.lanes[lane].key, velocity, art=art)
         with self.lock:
             if self.paused or self.finished:
                 return None
@@ -195,6 +199,12 @@ class Game:
                 best.hit_velocity = velocity
                 if self.chart.dynamics:
                     dyn = best.dyn = dynamic_for(best.accent, velocity, best.key)
+                if self.chart.expression and best.art:
+                    best.played = art
+                    best.art_ok = (art == best.art)
+                    self.art_counts["ok" if best.art_ok else "wrong"] += 1
+                    if best.art_ok:
+                        self.score += ART_BONUS
             self._register(judge, lane, err_ms, velocity, wall_t, best, dyn)
             if self.log is not None:
                 self.log.add("hit", note=note, velocity=velocity, key=self.lanes[lane].key, lane=lane, judge=judge,
@@ -216,7 +226,8 @@ class Game:
             self.dyn_counts[dyn] += 1
             if dyn in ("ACCENT", "TAP"):
                 self.score += DYN_BONUS
-        self.flashes.append(Flash(wall_t, lane, judge, err_ms, velocity, dyn))
+        self.flashes.append(Flash(wall_t, lane, judge, err_ms, velocity, dyn,
+                                  None if note is None or note.art is None or note.art_ok is None else (note.art, note.art_ok)))
         self.hits.append((note.t if note else None, lane, judge, err_ms, velocity, dyn))
 
     # --- per-frame housekeeping ----------------------------------------------
@@ -246,7 +257,7 @@ class Game:
                 while self.guide_cursor < len(self.notes) and self.notes[self.guide_cursor].t <= t:
                     n = self.notes[self.guide_cursor]
                     if self.guide and not n.sounded:
-                        self.sounds.play(n.key, n.velocity, 0.45)
+                        self.sounds.play(n.key, n.velocity, 0.45, art=n.art)
                     n.sounded = True
                     self.guide_cursor += 1
 
@@ -270,6 +281,12 @@ class Game:
         out["stray_rate"] = c["STRAY"] / total if total else 0.0
         judged = out.get("accents_ok", 0) + out.get("taps_ok", 0) + out.get("soft", 0) + out.get("loud", 0)
         out["dyn_rate"] = (out["accents_ok"] + out["taps_ok"]) / judged if self.chart.dynamics and judged else None
+        a = self.art_counts
+        out["art_ok"], out["art_wrong"] = a["ok"], a["wrong"]
+        out["art_total"] = sum(1 for n in self.notes if n.art)
+        out["art_rate"] = a["ok"] / (a["ok"] + a["wrong"]) if self.chart.expression and (a["ok"] + a["wrong"]) else None
+        if out["art_rate"] is not None:
+            out["dyn_rate"] = out["art_rate"] if out["dyn_rate"] is None else (out["dyn_rate"] + out["art_rate"]) / 2
         out["grade"] = grade_for(out)
         out["stars"] = stars_for(out["grade"])
         out["max_combo"] = self.max_combo
