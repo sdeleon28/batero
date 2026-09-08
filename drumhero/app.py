@@ -21,6 +21,7 @@ from .kit import (default_kit, describe, describe_pads, load_kit, load_progress,
                   save_progress, save_settings)
 from .runlog import RunLog
 from .capture import Recorder
+from . import edit as E
 from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, draw_hihat_state, draw_stars, lerp
 from .game import TAIL_S, lead_in_for
 from . import ghost as GH
@@ -75,6 +76,7 @@ class App:
         self.ghosts = GhostFilter()  # drops the hi-hat notes the pedal produces on its own
         self.runlog = RunLog()       # every level is written to ~/Library/Logs/drumhero/runs when it ends
         self.recorder = Recorder(self.settings)   # V: take of the game, the interface's mix and the camera
+        self.editor = E.Editor(self.settings.get("claude_bin"))   # Edit with Claude
         self.midi_trace = None       # one line per note-on, for latency measurements (--midi-trace or settings)
         trace = getattr(args, "midi_trace", None) or self.settings.get("midi_trace")
         if trace:
@@ -329,12 +331,16 @@ class App:
 
     def draw_recording_status(self):
         status = self.recorder.status
+        rec = self.recorder.active
+        if not status and (self.editor.busy or self.editor.status):
+            status = self.editor.status
+            if self.editor.busy:
+                status += " ." * (int(time.perf_counter()) % 4)
         if not status:
             return
         S = self.scale
         f = self.fonts
-        rec = self.recorder.active
-        color = (235, 70, 70) if rec else (DIM if not self.recorder.error else JUDGE_COLORS["MISS"])
+        color = (235, 70, 70) if rec else (JUDGE_COLORS["MISS"] if (self.recorder.error or self.editor.error) and not self.editor.busy else DIM)
         ts = f.text(status, f.small, color)
         x = self.size[0] - ts.get_width() - 16 * S
         y = self.size[1] - ts.get_height() - 8 * S
@@ -556,6 +562,7 @@ class ListScreen(Screen):
                     (f"Start fullscreen: {'on' if self.app.settings.get('fullscreen', True) else 'off'}", "F11 or Cmd+F toggles any time, saved"),
                     ("Recording (V)", f"audio {self.app.recorder.settings['capture_audio_device']} ch {self.app.recorder.settings['capture_audio_channels']}"
                                       f" · camera '{self.app.recorder.settings['capture_camera']}' · ~/Movies/drumhero"),
+                    ("Edit a take with Claude", "pick a take and a style; Claude Code cuts it with ffmpeg"),
                     ("Quit", "")]
         return [(ch.name, f"{ch.bpm:.0f} bpm · {len(ch.notes):3d} notes · {ch.desc}" + ("  ♪ audio" if ch.audio else "")) for ch in self.app.items_for(self.cat)]
 
@@ -602,6 +609,8 @@ class ListScreen(Screen):
                 save_settings(self.app.settings)
             elif self.sel == 9:
                 self.app.toggle_recording()
+            elif self.sel == 10:
+                self.app.go(EditScreen(self.app))
             else:
                 return False
         elif self.items():
@@ -673,6 +682,82 @@ class ListScreen(Screen):
             self.f.center(surf, items[self.sel][1], self.f.small, TEXT, self.h - 84 * S)   # the selected one in full
         self.legend(surf, [("hihat", "down"), ("crash", "up"), ("snare", "select"), ("kick", "back")],
                     keys="arrows or j k · Enter or l · Esc or h")
+
+
+# ---------------------------------------------------------------------------
+class EditScreen(Screen):
+    """Pick a take (newest first) and a style, and hand it to Claude Code. Hi-hat / crash
+    move through the styles, snare starts, kick goes back; [ and ] change the take."""
+
+    def __init__(self, app):
+        super().__init__(app)
+        self.takes = E.takes()
+        self.take_i = 0
+        self.sel = 0
+
+    def on_drum(self, inst):
+        action = NAV.get(inst)
+        if action == "next":
+            self.sel = (self.sel + 1) % len(E.STYLES)
+        elif action == "prev":
+            self.sel = (self.sel - 1) % len(E.STYLES)
+        elif action == "accept":
+            self.accept()
+        elif action == "back":
+            self.app.go(ListScreen(self.app, "crash", 10))
+        return True
+
+    def on_key(self, key):
+        if key in (pygame.K_ESCAPE, pygame.K_h):
+            self.app.go(ListScreen(self.app, "crash", 10))
+        elif key in (pygame.K_DOWN, pygame.K_j):
+            self.sel = (self.sel + 1) % len(E.STYLES)
+        elif key in (pygame.K_UP, pygame.K_k):
+            self.sel = (self.sel - 1) % len(E.STYLES)
+        elif key in (pygame.K_LEFTBRACKET, pygame.K_LEFT) and self.takes:
+            self.take_i = (self.take_i + 1) % len(self.takes)
+        elif key in (pygame.K_RIGHTBRACKET, pygame.K_RIGHT) and self.takes:
+            self.take_i = (self.take_i - 1) % len(self.takes)
+        elif key in (pygame.K_RETURN, pygame.K_l):
+            self.accept()
+        return True
+
+    def accept(self):
+        if not self.takes or self.app.editor.busy:
+            return
+        if self.app.editor.start(self.takes[self.take_i], E.STYLES[self.sel][0]):
+            self.app.go(HubScreen(self.app, 3))
+
+    def draw(self, surf, fps):
+        surf.fill(BG)
+        S = self.s
+        self.f.center(surf, "Edit with Claude", self.f.large, TEXT, 60 * S)
+        if not self.takes:
+            self.f.center(surf, "No takes yet. Press V during play to record one.", self.f.mid, DIM, self.h * 0.42)
+        else:
+            take = self.takes[self.take_i]
+            meta = E.sidecar_for(take) or {}
+            levels = ", ".join(l["chart"] for l in meta.get("run_logs", [])) or "no levels logged"
+            self.f.center(surf, os.path.basename(take)[:-4], self.f.mid, ACCENT, 110 * S)
+            self.f.center(surf, f"{meta.get('duration', 0):.0f} s · {levels}" + ("  · camera" if meta.get("camera") else ""),
+                          self.f.small, DIM, 138 * S)
+            self.f.center(surf, f"take {self.take_i + 1} of {len(self.takes)}  ·  [ ] or ← → to change", self.f.small, DIM, 160 * S)
+        y = 210 * S
+        for i, (key, label, blurb, _) in enumerate(E.STYLES):
+            selected = i == self.sel
+            x = self.w * 0.18
+            if selected:
+                pygame.draw.rect(surf, lerp(LANE_BG, ACCENT, 0.18), (x - 20 * S, y - 8 * S, self.w * 0.64 + 40 * S, 52 * S), border_radius=int(10 * S))
+                pygame.draw.rect(surf, ACCENT, (x - 20 * S, y - 8 * S, 6 * S, 52 * S), border_radius=int(3 * S))
+            surf.blit(self.f.text(label, self.f.mid, ACCENT if selected else TEXT), (x, y))
+            surf.blit(self.f.text(blurb, self.f.small, DIM), (x + 260 * S, y + 6 * S))
+            y += 60 * S
+        if self.app.editor.busy:
+            self.f.center(surf, self.app.editor.status, self.f.small, JUDGE_COLORS["GOOD"], self.h - 84 * S)
+        elif self.app.editor.error:
+            self.f.center(surf, self.app.editor.error, self.f.small, JUDGE_COLORS["MISS"], self.h - 84 * S)
+        self.legend(surf, [("hihat", "down"), ("crash", "up"), ("snare", "edit"), ("kick", "back")],
+                    keys="arrows or j k · Enter or l · Esc or h · edits land in ~/Movies/drumhero/edits")
 
 
 # ---------------------------------------------------------------------------

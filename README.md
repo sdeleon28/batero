@@ -234,6 +234,28 @@ the sound card's output, and the camera picture-in-picture in the corner.
 Settings: `capture_audio_device`, `capture_audio_channels`, `capture_camera`,
 `capture_pip` (camera height as a fraction of the picture, 0.28).
 
+## Edit a take with Claude
+
+Setup has "Edit a take with Claude". Pick a take (newest first, `[` and `]`
+change it) and a style, no typing:
+
+| style | what Claude makes |
+|---|---|
+| Hype video | under 60 s, bold title, the best streaks and fills, beat-synced cuts, speed ramps, ends on the stars |
+| Highlights | the best 30..90 s in order, lower-thirds, results at the end |
+| Full take, polished | the whole take with a title, lower-thirds and fades, no cuts |
+| Lesson | the whole take, every fill repeated at half speed with captions, wrong dynamics and misses captioned |
+| Raw with a title | a title card and an end card with the stars |
+
+The game writes a job folder in `~/Movies/drumhero/edits/<take>/` with
+`job.json` (the take, its sidecar, the run logs of the levels played during
+it, the style and its brief) and starts Claude Code there in print mode,
+allowed to use ffmpeg, ffprobe and files only. The run logs give Claude every
+hit with a wall-clock time, so it can cut on downbeats, find PERFECT streaks
+and caption misses. The result is `edit-<style>.mp4` next to `notes.md`
+(the edit decisions) and `claude.log`; the state shows bottom right while it
+runs. Needs the `claude` CLI on the PATH (`claude_bin` in settings otherwise).
+
 ## Run logs and auditing
 
 Every level you play is written, when it ends, to
@@ -415,4 +437,5 @@ whatever the display adds. The audio mixer uses a 256-sample buffer, about 6 ms.
 - `drumhero/sounds.py`: synthesized kit
 - `drumhero/kit.py`: kit file
 - `drumhero/runlog.py`, `drumhero/audit.py`: per-level run logs and the audit tool
+- `drumhero/capture.py`, `drumhero/edit.py`: recording a take, editing it with Claude Code
 - `drumhero/app.py`: menu, level select, wizard, play screen, main loop

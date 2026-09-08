@@ -18,6 +18,8 @@ How it works, and why not a screen recorder:
 - Stop: a compose pass muxes video and audio and overlays the camera in the corner,
   aligned by wall clock. The result is the only file left.
 """
+import glob
+import json
 import os
 import queue
 import re
@@ -267,8 +269,27 @@ class Recorder:
             shutil.copytree(self.tmp, keep, dirs_exist_ok=True)
         else:
             self.log(f"recording saved: {final} ({self.frames} frames, {self.dropped} dropped)")
+            self._write_sidecar(final, duration)
         shutil.rmtree(self.tmp, ignore_errors=True)
         self.composing = None
+
+    def _write_sidecar(self, final, duration):
+        """<take>.json: when it started, how long, and the run logs of levels played meanwhile."""
+        from .runlog import RUNS_DIR
+        logs = []
+        for path in sorted(glob.glob(os.path.join(RUNS_DIR, "*.jsonl"))):
+            try:
+                with open(path) as f:
+                    head = json.loads(f.readline())
+                if head.get("ended", 0) >= self.t0 and head.get("started", 0) <= self.t0 + duration:
+                    logs.append({"path": path, "chart": head["chart"]["name"], "started": head["started"],
+                                 "ended": head.get("ended"), "stats": head.get("stats")})
+            except (OSError, ValueError, KeyError):
+                continue
+        meta = {"take": final, "t0": self.t0, "duration": duration, "fps": FPS, "size": list(self.size),
+                "frames": self.frames, "dropped": self.dropped, "camera": bool(self.cam_path), "run_logs": logs}
+        with open(final[:-4] + ".json", "w") as f:
+            json.dump(meta, f, indent=1)
 
     def _camera_offset(self):
         """Seconds the camera file starts after the video, from its wall-clock timestamps."""
