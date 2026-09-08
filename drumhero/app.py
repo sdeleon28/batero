@@ -18,8 +18,10 @@ from . import chart as C
 from .chart import BEATS, EXERCISES, build_lanes, load_midi_chart, load_song_folder
 from .game import Game
 from .kit import default_kit, describe, describe_pads, load_kit, load_settings, save_kit, save_settings
+from .runlog import RunLog
 from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, draw_hihat_state, lerp
 from .game import TAIL_S, lead_in_for
+from . import ghost as GH
 from .ghost import GhostFilter
 from .sounds import (BACKING_GAIN, METRONOME_GAIN, PROGRESSIONS, SoundBank, Track, load_audio_track,
                      menu_music_sound, output_devices, render_backing_track, render_metronome)
@@ -69,6 +71,7 @@ class App:
         self.fullscreen = False
         self.drum_queue = deque()  # navigation hits, handed to the screen on the main thread
         self.ghosts = GhostFilter()  # drops the hi-hat notes the pedal produces on its own
+        self.runlog = RunLog()       # every level is written to ~/Library/Logs/drumhero/runs when it ends
         self.midi_trace = None       # one line per note-on, for latency measurements (--midi-trace or settings)
         trace = getattr(args, "midi_trace", None) or self.settings.get("midi_trace")
         if trace:
@@ -274,6 +277,8 @@ class App:
         t_cb = time.perf_counter()
         if msg.type == "control_change":
             self.ghosts.control_change(msg.control, msg.value)
+            if msg.control == 4:
+                self.runlog.add("cc", control=msg.control, value=msg.value)
         elif msg.type == "note_on" and msg.velocity > 0:
             scr = self.screen_obj
             if scr is None:
@@ -281,8 +286,10 @@ class App:
             why = self.ghosts.reason(msg.note, msg.velocity)
             if why is not None:
                 scr.on_ghost(msg.note, msg.velocity, why)
+                self.runlog.add("ghost", note=msg.note, velocity=msg.velocity, why=why)
                 result = why
             else:
+                self.runlog.add("note", note=msg.note, velocity=msg.velocity, cc=self.ghosts.pedal_cc)
                 result = scr.on_note(msg.note, msg.velocity)
             if self.midi_trace is not None:
                 # wall clock at the callback, note, velocity, outcome, microseconds spent judging
@@ -896,8 +903,16 @@ class PlayScreen(Screen):
         self.lanes, self.by_note = build_lanes(self.chart, app.kit)
         # scroll speed follows the tempo so a beat is always the same distance on screen
         self.game = Game(self.chart, self.lanes, self.by_note, offset_ms=app.offset_ms, speed=app.rate,
-                         sounds=app.sounds, guide=app.guide and not self.chart.audio)   # the record has its own drums
+                         sounds=app.sounds, guide=app.guide and not self.chart.audio,   # the record has its own drums
+                         log=app.runlog)
         self.game.metronome_mode = app.metronome_mode
+        app.runlog.start(self.chart, self.lanes, app.kit, app.settings, {
+            "offset_ms": app.offset_ms, "guide": self.game.guide, "metronome": app.metronome_mode,
+            "backing": app.backing_on, "drum_sounds": app.sounds.drums, "dyn_thresholds": self.game.dyn_thresholds(),
+            "ghost_filter": {"hihat_min_velocity": GH.HIHAT_MIN_VELOCITY, "chick_splash_ms": GH.CHICK_SPLASH_MS,
+                             "pedal_motion_cc": GH.PEDAL_MOTION_CC, "pedal_motion_ms": GH.PEDAL_MOTION_MS,
+                             "zone_crosstalk": GH.ZONE_CROSSTALK, "any_min_velocity": GH.ANY_MIN_VELOCITY},
+        })
         prog = None if cat == "hihat" else index + (0 if cat == "kick" else 2)   # songs bring their own music
         for name, track in app.tracks_for(self.chart, prog).items():
             self.game.set_track(name, track, enabled=(app.backing_on if name == "backing" else True))
@@ -938,6 +953,7 @@ class PlayScreen(Screen):
         elif key == pygame.K_SPACE:
             if not g.finished:
                 g.toggle_pause()
+                self.app.runlog.add("pause", paused=g.paused)
         elif key == pygame.K_r:
             self.retry()
         elif key == pygame.K_RETURN and g.finished:
@@ -951,6 +967,7 @@ class PlayScreen(Screen):
         elif key in (pygame.K_COMMA, pygame.K_PERIOD):
             g.offset_ms = self.app.offset_ms = g.offset_ms + (5 if key == pygame.K_PERIOD else -5)
             self.app.settings["offset_ms"] = self.app.offset_ms      # remembered across runs
+            self.app.runlog.add("offset", offset_ms=self.app.offset_ms)
             save_settings(self.app.settings)
         elif key == pygame.K_g:
             g.guide = self.app.guide = not g.guide
@@ -993,6 +1010,10 @@ class PlayScreen(Screen):
         self.record()
         if self.app.args.log:
             self.game.write_csv(self.app.args.log)
+        if self.game.hits:
+            self.app.runlog.write(self.game.stats())     # once, off the hot path
+        else:
+            self.app.runlog.header = None
 
     def record(self):
         if self.recorded or not self.game.hits:

@@ -182,6 +182,22 @@ pending note in its lane; a note can only be hit once.
 
 The error shown is `hit time - note time`: negative is early, positive is late.
 
+## Run logs and auditing
+
+Every level you play is written, when it ends, to
+`~/Library/Logs/drumhero/runs/<date-time> <level>.jsonl`: a header with the chart
+(every note with its time, instrument and accent), the lanes, the kit, the
+settings, the offset, the tempo rate and the judging thresholds, then one line per
+MIDI message, ghost, hit (judge, error, velocity, dynamic), miss and change.
+Recording is an in-memory append per event and the file is written once at the
+end, so the main loop and the MIDI thread never wait on disk.
+
+```
+.venv/bin/python -m drumhero.audit                  # the latest run: timing, dynamics, wrong calls
+.venv/bin/python -m drumhero.audit --hits           # every hit
+.venv/bin/python -m drumhero.audit --hihat-tap 104  # re-judge the run's dynamics with other thresholds
+```
+
 ## Drum sounds off: play through Bitwig
 
 "Drum sounds" in Setup (or D while playing) silences the game's own kit: hits,
@@ -332,4 +348,5 @@ whatever the display adds. The audio mixer uses a 256-sample buffer, about 6 ms.
 - `drumhero/render.py`: the play field
 - `drumhero/sounds.py`: synthesized kit
 - `drumhero/kit.py`: kit file
+- `drumhero/runlog.py`, `drumhero/audit.py`: per-level run logs and the audit tool
 - `drumhero/app.py`: menu, level select, wizard, play screen, main loop

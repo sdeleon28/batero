@@ -49,7 +49,8 @@ def lead_in_for(bpm: float) -> float:
 
 
 class Game:
-    def __init__(self, chart, lanes, by_note, offset_ms=0.0, speed=1.0, sounds=None, guide=True):
+    def __init__(self, chart, lanes, by_note, offset_ms=0.0, speed=1.0, sounds=None, guide=True, log=None):
+        self.log = log                      # RunLog or None; append-only, never blocks
         self.tracks = {}                    # name -> (Track, enabled); pre-rendered audio on the chart timeline
         self.chart = chart
         self.notes = chart.notes
@@ -94,6 +95,9 @@ class Game:
     @property
     def paused(self):
         return self.paused_at is not None
+
+    def dyn_thresholds(self):
+        return {"default": [ACCENT_MIN, TAP_MAX], **{k: list(v) for k, v in DYN_THRESHOLDS.items()}}
 
     def toggle_pause(self):
         with self.lock:
@@ -140,10 +144,12 @@ class Game:
         """Judge an incoming MIDI note. Called from the MIDI thread; must be quick."""
         lane = self.by_note.get(note)
         if lane is None:
+            if self.log is not None:
+                self.log.add("unmapped", note=note, velocity=velocity)
             return None
-        return self.hit_lane(lane, velocity, wall_t)
+        return self.hit_lane(lane, velocity, wall_t, note)
 
-    def hit_lane(self, lane: int, velocity: int = 100, wall_t: float = None):
+    def hit_lane(self, lane: int, velocity: int = 100, wall_t: float = None, note: int = None):
         if wall_t is None:
             wall_t = time.perf_counter()
         if self.sounds:
@@ -173,6 +179,12 @@ class Game:
                 if self.chart.dynamics:
                     dyn = best.dyn = dynamic_for(best.accent, velocity, best.key)
             self._register(judge, lane, err_ms, velocity, wall_t, best, dyn)
+            if self.log is not None:
+                self.log.add("hit", note=note, velocity=velocity, key=self.lanes[lane].key, lane=lane, judge=judge,
+                             song_t=round(t, 4), chart_t=round(best.t, 4) if best else None,
+                             error_ms=round(err_ms, 2) if err_ms is not None else None,
+                             accent=best.accent if best else None, hand=best.hand if best else None, dyn=dyn,
+                             combo=self.combo, score=self.score)
             return judge
 
     def _register(self, judge, lane, err_ms, velocity, wall_t, note, dyn=None):
@@ -204,6 +216,8 @@ class Game:
                 if n.state == "pending":
                     n.state, n.judge = "miss", "MISS"
                     self._register("MISS", n.lane, None, 0, time.perf_counter(), n)
+                    if self.log is not None:
+                        self.log.add("miss", key=n.key, chart_t=round(n.t, 4), accent=n.accent, hand=n.hand)
             while self.cursor < len(self.notes) and self.notes[self.cursor].state != "pending":
                 self.cursor += 1
             if not self.finished and t > self.notes[-1].t + TAIL_S:
