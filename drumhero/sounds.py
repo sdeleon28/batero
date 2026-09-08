@@ -154,44 +154,133 @@ class SoundBank:
 
 
 # ---------------------------------------------------------------------------
-# Backing: a small arrangement rendered once for the whole level. A chord
-# progression (picked per level), a pad, a bass line, a plucked arpeggio and a
-# generated lead, arranged in 4-bar sections that add, drop and vary parts so the
-# music moves while you drill.
+# Backing: a small arrangement rendered once for the whole level. Each level
+# picks a style (timbres, harmony, section plan, melody generator) so levels
+# sound different from each other: synth, chiptune, metal, punk, organ,
+# strings, funk.
 # ---------------------------------------------------------------------------
-# (root semitone relative to C, chord quality) per bar. Picked per level.
-PROGRESSIONS = [
-    [(9, "m"), (5, "M"), (0, "M"), (7, "M")],      # Am F C G
-    [(4, "m"), (0, "M"), (7, "M"), (2, "M")],      # Em C G D
-    [(2, "m"), (10, "M"), (5, "M"), (0, "M")],     # Dm Bb F C
-    [(7, "M"), (2, "M"), (4, "m"), (0, "M")],      # G D Em C
-    [(0, "M"), (7, "M"), (9, "m"), (5, "M")],      # C G Am F
-    [(9, "m"), (7, "M"), (5, "M"), (7, "M")],      # Am G F G
-    [(2, "m"), (7, "M"), (0, "M"), (9, "m")],      # Dm G C Am
-    [(5, "M"), (7, "M"), (9, "m"), (9, "m")],      # F G Am Am
-    [(4, "m"), (2, "M"), (7, "M"), (9, "M")],      # Em D G A
-    [(0, "m"), (8, "M"), (3, "M"), (10, "M")],     # Cm Ab Eb Bb
-]
+# (root semitone relative to C, chord quality) per bar. Qualities: M, m, 5 (power
+# chord), M7, m7, sus2, dim.
+PROGRESSIONS = {
+    "pop": [
+        [(9, "m"), (5, "M"), (0, "M"), (7, "M")],      # Am F C G
+        [(0, "M"), (7, "M"), (9, "m"), (5, "M")],      # C G Am F
+        [(4, "m"), (0, "M"), (7, "M"), (2, "M")],      # Em C G D
+        [(7, "M"), (2, "M"), (4, "m"), (0, "M")],      # G D Em C
+        [(5, "M"), (7, "M"), (9, "m"), (9, "m")],      # F G Am Am
+    ],
+    "minor": [
+        [(2, "m"), (10, "M"), (5, "M"), (0, "M")],     # Dm Bb F C
+        [(9, "m"), (7, "M"), (5, "M"), (7, "M")],      # Am G F G
+        [(2, "m"), (7, "M"), (0, "M"), (9, "m")],      # Dm G C Am
+        [(0, "m"), (8, "M"), (3, "M"), (10, "M")],     # Cm Ab Eb Bb
+        [(9, "m7"), (5, "M7"), (2, "m7"), (4, "m7")],  # Am7 Fmaj7 Dm7 Em7
+    ],
+    "metal": [
+        [(4, "5"), (5, "5"), (4, "5"), (2, "5")],      # E5 F5 E5 D5   phrygian
+        [(4, "5"), (4, "5"), (7, "5"), (5, "5")],      # E5 E5 G5 F5
+        [(9, "5"), (0, "5"), (7, "5"), (10, "5")],     # A5 C5 G5 Bb5
+        [(4, "5"), (10, "5"), (9, "5"), (7, "5")],     # E5 Bb5 A5 G5  tritone
+        [(2, "5"), (2, "5"), (5, "5"), (4, "5")],      # D5 D5 F5 E5
+    ],
+    "punk": [
+        [(0, "5"), (5, "5"), (7, "5"), (7, "5")],      # C5 F5 G5 G5
+        [(9, "5"), (5, "5"), (0, "5"), (7, "5")],      # A5 F5 C5 G5
+        [(2, "5"), (9, "5"), (7, "5"), (2, "5")],      # D5 A5 G5 D5
+        [(4, "5"), (0, "5"), (7, "5"), (2, "5")],      # E5 C5 G5 D5
+    ],
+    "soul": [
+        [(2, "m7"), (7, "M7"), (0, "M7"), (9, "m7")],  # Dm7 G7 Cmaj7 Am7
+        [(4, "m7"), (9, "m7"), (2, "m7"), (7, "M7")],  # Em7 Am7 Dm7 G7
+        [(0, "M7"), (4, "m7"), (5, "M7"), (7, "M7")],  # Cmaj7 Em7 Fmaj7 G7
+        [(9, "m7"), (2, "m7"), (9, "m7"), (4, "m7")],  # Am7 Dm7 Am7 Em7
+    ],
+    "cinematic": [
+        [(9, "m"), (9, "m"), (5, "M7"), (7, "sus2")],  # Am Am Fmaj7 Gsus2
+        [(2, "m"), (10, "M7"), (2, "m"), (0, "sus2")], # Dm Bbmaj7 Dm Csus2
+        [(4, "m"), (0, "M7"), (2, "sus2"), (11, "dim")],  # Em Cmaj7 Dsus2 Bdim
+        [(0, "m"), (8, "M7"), (10, "sus2"), (7, "m")], # Cm Abmaj7 Bbsus2 Gm
+    ],
+    "funk": [
+        [(4, "m7"), (4, "m7"), (9, "m7"), (4, "m7")],  # Em7 Em7 Am7 Em7
+        [(2, "m7"), (7, "M7"), (2, "m7"), (7, "M7")],  # Dm7 G7 Dm7 G7
+        [(9, "m7"), (2, "m7"), (4, "m7"), (2, "m7")],  # Am7 Dm7 Em7 Dm7
+    ],
+}
 BACKING_GAIN = 0.55
 SECTION_BARS = 4
-# What plays in each 4-bar section, cycling. (bass pattern, arp pattern, lead, pad)
-SECTIONS = [
-    ("eighths", None, False, True),        # pad + bass
-    ("eighths", "up", False, True),        # + arpeggio
-    ("root_fifth", "up", True, True),      # + lead
-    ("sync", "updown", True, True),        # busier bass, arp turns around
-    ("sparse", None, False, True),         # breakdown: pad and a few bass notes
-    ("octave", "sixteenths", True, True),  # build: bouncing bass, fast arp, lead
-    ("root_fifth", "broken", False, True), # settle
-    ("sync", "up", True, False),           # no pad: bass, arp and lead carry it
-]
-BASS_PATTERNS = {                          # (eighth index, degree, gain) per bar; degree 0 = root, 7 = fifth
-    "eighths": [(e, 0, 1.0 if e % 2 == 0 else 0.7) for e in range(8)],
-    "root_fifth": [(0, 0, 1.0), (2, 7, 0.8), (4, 0, 1.0), (6, 7, 0.8), (7, 0, 0.6)],
-    "sync": [(0, 0, 1.0), (3, 0, 0.9), (4, 7, 0.8), (6, 0, 0.9), (7, 12, 0.6)],
-    "sparse": [(0, 0, 1.0), (6, 0, 0.6)],
-    "octave": [(e, 0 if e % 2 == 0 else 12, 1.0 if e % 2 == 0 else 0.75) for e in range(8)],
+BASS_PATTERNS = {                          # (sixteenth index, degree, gain); degree 0 = root, 7 = fifth
+    "eighths": [(e * 2, 0, 1.0 if e % 2 == 0 else 0.7) for e in range(8)],
+    "root_fifth": [(0, 0, 1.0), (4, 7, 0.8), (8, 0, 1.0), (12, 7, 0.8), (14, 0, 0.6)],
+    "sync": [(0, 0, 1.0), (6, 0, 0.9), (8, 7, 0.8), (12, 0, 0.9), (14, 12, 0.6)],
+    "sparse": [(0, 0, 1.0), (12, 0, 0.6)],
+    "whole": [(0, 0, 1.0)],
+    "octave": [(e * 2, 0 if e % 2 == 0 else 12, 1.0 if e % 2 == 0 else 0.75) for e in range(8)],
+    "gallop": [(q * 4 + k, 0, 1.0 if k == 0 else 0.7) for q in range(4) for k in (0, 2, 3)],
+    "chug": [(0, 0, 1.0), (2, 0, 0.8), (4, 0, 0.9), (6, 0, 0.8), (8, 0, 1.0), (10, 0, 0.8), (11, 0, 0.7), (14, 0, 0.8)],
+    "funk": [(0, 0, 1.0), (3, 12, 0.7), (6, 7, 0.9), (8, 0, 0.9), (11, 12, 0.7), (13, 10, 0.6), (14, 0, 0.9)],
+    "pump": [(e, 0, 1.0 if e % 4 == 0 else 0.7) for e in range(16)],
 }
+# What plays per 4-bar section: (bass pattern, chord part, chord pattern, lead, pad).
+# chord part: "pad" (sustained), "arp" (pluck, pattern = order), "chug" (power-chord
+# stabs on the bass rhythm), "stab" (short chord hits on a rhythm), "strum" (chord on
+# every eighth).
+STYLES = {
+    "synth": dict(
+        progressions=("pop", "minor"), pad="saw", bass="sine", chord="pluck", lead="sine", lead_kind="phrase",
+        scale="natural", plan=[
+            ("eighths", None, None, False, True), ("eighths", "arp", "up", False, True),
+            ("root_fifth", "arp", "up", True, True), ("sync", "arp", "updown", True, True),
+            ("sparse", None, None, False, True), ("octave", "arp", "sixteenths", True, True),
+            ("root_fifth", "arp", "broken", False, True), ("sync", "arp", "up", True, False)]),
+    "chiptune": dict(
+        progressions=("pop",), pad=None, bass="square", chord="square", lead="square", lead_kind="riff",
+        scale="pentatonic", plan=[
+            ("octave", "arp", "sixteenths", False, False), ("octave", "arp", "sixteenths", True, False),
+            ("pump", "arp", "up", True, False), ("sync", "arp", "updown", True, False),
+            ("eighths", None, None, True, False), ("octave", "arp", "sixteenths", True, False)]),
+    "metal": dict(
+        progressions=("metal",), pad="dark", bass="dist", chord="power", lead="lead_saw", lead_kind="riff",
+        scale="phrygian", plan=[
+            ("chug", "chug", None, False, False), ("gallop", "chug", None, False, False),
+            ("chug", "chug", None, True, False), ("whole", "pad_only", None, False, True),
+            ("gallop", "chug", None, True, False), ("pump", "chug", None, False, False),
+            ("chug", "chug", None, True, True)]),
+    "punk": dict(
+        progressions=("punk",), pad=None, bass="pick", chord="power", lead=None, lead_kind=None,
+        scale="natural", plan=[
+            ("eighths", "strum", None, False, False), ("eighths", "strum", None, False, False),
+            ("pump", "strum", None, False, False), ("sparse", "stab", None, False, False),
+            ("eighths", "strum", None, False, False), ("octave", "strum", None, False, False)]),
+    "organ": dict(
+        progressions=("soul",), pad="organ", bass="sub", chord="bell", lead="triangle", lead_kind="phrase",
+        scale="dorian", plan=[
+            ("root_fifth", None, None, False, True), ("root_fifth", "stab", None, False, True),
+            ("sync", "stab", None, True, True), ("funk", "arp", "broken", True, True),
+            ("whole", None, None, True, True), ("sync", "stab", None, True, True)]),
+    "strings": dict(
+        progressions=("cinematic", "minor"), pad="strings", bass="sub", chord="bell", lead="lead_saw", lead_kind="long",
+        scale="natural", plan=[
+            ("whole", None, None, False, True), ("whole", "arp", "up", False, True),
+            ("sparse", "arp", "up", True, True), ("root_fifth", "arp", "updown", True, True),
+            ("whole", None, None, True, True), ("eighths", "arp", "sixteenths", True, True)]),
+    "funk": dict(
+        progressions=("funk",), pad=None, bass="pick", chord="clav", lead="square", lead_kind="riff",
+        scale="pentatonic", plan=[
+            ("funk", "stab", None, False, False), ("funk", "stab", None, True, False),
+            ("octave", "stab", None, True, True), ("funk", None, None, False, False),
+            ("funk", "stab", None, True, False), ("sync", "arp", "broken", True, True)]),
+}
+STYLE_ORDER = ["synth", "metal", "chiptune", "punk", "organ", "strings", "funk"]
+STAB_RHYTHMS = [[0, 6, 8, 14], [2, 6, 10, 14], [0, 3, 6, 10, 12], [4, 12], [0, 7, 10]]   # sixteenth indices
+SCALES = {"natural": {"M": [0, 2, 4, 5, 7, 9, 11], "m": [0, 2, 3, 5, 7, 8, 10]},
+          "pentatonic": {"M": [0, 2, 4, 7, 9], "m": [0, 3, 5, 7, 10]},
+          "dorian": {"M": [0, 2, 4, 5, 7, 9, 11], "m": [0, 2, 3, 5, 7, 9, 10]},
+          "phrygian": {"M": [0, 2, 4, 5, 7, 9, 11], "m": [0, 1, 3, 5, 7, 8, 10]}}
+
+
+def style_for(prog_index):
+    return STYLE_ORDER[prog_index % len(STYLE_ORDER)]
 
 
 def _midi_hz(n):
@@ -202,133 +291,225 @@ def _saw(phase):
     return 2 * (phase % 1.0) - 1
 
 
-def _chord_notes(root, quality, octave_base=57, inversion=0, seventh=False):
+def _square(phase):
+    return np.where((phase % 1.0) < 0.5, 1.0, -1.0)
+
+
+def _chord_notes(root, quality, octave_base=57, inversion=0):
     """Chord tones as MIDI numbers around octave_base (A3 = 57)."""
-    third = 3 if quality == "m" else 4
     r = octave_base + ((root - octave_base) % 12)
-    tones = [r, r + third, r + 7] + ([r + (10 if quality == "m" else 11)] if seventh else [])
+    iv = {"M": [0, 4, 7], "m": [0, 3, 7], "5": [0, 7, 12], "M7": [0, 4, 7, 11], "m7": [0, 3, 7, 10],
+          "sus2": [0, 2, 7], "dim": [0, 3, 6]}[quality]
+    tones = [r + i for i in iv]
     for _ in range(inversion):
         tones = tones[1:] + [tones[0] + 12]
     return tones
 
 
-def _scale(root, quality):
-    """Seven scale degrees (semitones from root): natural minor or major."""
-    return [0, 2, 3, 5, 7, 8, 10] if quality == "m" else [0, 2, 4, 5, 7, 9, 11]
+def _minor(quality):
+    return quality in ("m", "m7", "dim") or quality == "5"
 
 
 def _arp_order(pattern, chord):
     top = [m + 12 for m in chord[:3]]
-    if pattern == "up":
-        return top + [top[1]]
-    if pattern == "updown":
-        return top + [top[1]]
     if pattern == "broken":
         return [top[0], top[2], top[1], top[2]]
     if pattern == "sixteenths":
         return top + [top[2] + 12]
-    return top
+    return top + [top[1]]
+
+
+def _lowpass(sig, n):
+    return np.convolve(sig, np.ones(n) / n, mode="same") if n > 1 else sig
 
 
 def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None):
-    """Mono float32 of (intro_bars + bars) bars at bpm: intro (pad and sparse bass) then the
-    arrangement, bar 0 of the level at intro_bars * bar seconds. Deterministic per
-    prog_index unless seed is given."""
+    """Mono float32 of (intro_bars + bars) bars at bpm: intro (thin) then the arrangement,
+    bar 0 of the level at intro_bars * bar seconds. Deterministic per prog_index."""
     rng = np.random.default_rng(prog_index if seed is None else seed)
-    prog = PROGRESSIONS[prog_index % len(PROGRESSIONS)]
-    transpose = int(rng.integers(-3, 4))                    # a different key per level
-    lead_tone = int(rng.integers(0, 3))                     # sine / triangle-ish / soft square
+    style_name = style_for(prog_index)
+    st = STYLES[style_name]
+    family = st["progressions"][int(rng.integers(0, len(st["progressions"])))]
+    prog = PROGRESSIONS[family][int(rng.integers(0, len(PROGRESSIONS[family])))]
+    transpose = int(rng.integers(-4, 4))
+    stab_rhythm = STAB_RHYTHMS[int(rng.integers(0, len(STAB_RHYTHMS)))]
+    riff = None                                             # built on first use, then transposed
     beat = 60 / bpm
     bar = 4 * beat
+    six = bar / 16
     total_bars = intro_bars + bars
     n = int(round(total_bars * bar * sr))
-    out = np.zeros(n + int(1.0 * sr))
+    out = np.zeros(n + int(1.5 * sr))
 
-    def add(start_s, sig):
+    def add(start_s, sig, gain=1.0):
         i = int(round(start_s * sr))
-        if i >= len(out):
+        if i >= len(out) or i < 0:
             return
         j = min(i + len(sig), len(out))
-        out[i:j] += sig[: j - i]
+        out[i:j] += sig[: j - i] * gain
 
-    def pad(t0, chord):
-        tp = np.arange(int(bar * sr) + int(0.08 * sr)) / sr
+    def env_ad(t, attack, decay, hold=None):
+        e = np.minimum(1.0, t / max(attack, 1e-4)) * np.exp(-t * decay)
+        if hold is not None:
+            e *= np.minimum(1.0, np.maximum(0.0, (hold - t) / 0.03))
+        return e
+
+    # --- pads ----------------------------------------------------------------------
+    def pad(t0, chord, kind):
+        tp = np.arange(int(bar * sr) + int(0.1 * sr)) / sr
         sig = np.zeros_like(tp)
         for m in chord:
             f = _midi_hz(m)
-            sig += _saw(tp * f * 1.003) + _saw(tp * f * 0.997)
-        env = np.minimum(1.0, tp / 0.06) * np.minimum(1.0, np.maximum(0.0, (bar + 0.08 - tp) / 0.08))
-        sig = np.convolve(sig * env, np.ones(48) / 48, mode="same")
-        add(t0, sig * 0.16 / max(1, len(chord) / 3))
+            if kind == "saw":
+                sig += _saw(tp * f * 1.003) + _saw(tp * f * 0.997)
+            elif kind == "strings":
+                sig += _saw(tp * f * 1.004) + _saw(tp * f * 0.996) + 0.5 * _saw(tp * f * 2.002)
+            elif kind == "organ":
+                vib = 1 + 0.003 * np.sin(2 * np.pi * 6 * tp)
+                sig += sum(a * np.sin(2 * np.pi * f * h * tp * vib) for h, a in ((1, 1), (2, 0.6), (3, 0.4), (4, 0.3), (6, 0.15)))
+            elif kind == "dark":
+                sig += np.tanh(1.5 * (_saw(tp * f * 0.5 * 1.002) + _saw(tp * f * 0.5 * 0.998)))
+        attack = {"saw": 0.06, "strings": 0.35, "organ": 0.01, "dark": 0.2}[kind]
+        env = np.minimum(1.0, tp / attack) * np.minimum(1.0, np.maximum(0.0, (bar + 0.1 - tp) / 0.12))
+        sig = _lowpass(sig * env, {"saw": 48, "strings": 64, "organ": 8, "dark": 90}[kind])
+        add(t0, sig, {"saw": 0.16, "strings": 0.14, "organ": 0.12, "dark": 0.12}[kind] / max(1, len(chord) / 3))
 
-    def bass(t0, root_note, pattern):
+    # --- bass ----------------------------------------------------------------------
+    def bass(t0, root_note, pattern, kind):
         for e, degree, gain in BASS_PATTERNS[pattern]:
             f = _midi_hz(root_note + degree)
-            dur = beat / 2 if pattern != "sparse" else beat
+            dur = {"whole": bar, "sparse": beat}.get(pattern, beat / 2)
             tb = np.arange(int(dur * sr)) / sr
-            envb = np.exp(-tb * (6 if pattern != "sparse" else 3)) * np.minimum(1.0, tb / 0.004)
-            sig = (np.sin(2 * np.pi * f * tb) * 0.8 + np.sin(4 * np.pi * f * tb) * 0.25 + _saw(tb * f) * 0.15) * envb
-            add(t0 + e * beat / 2, sig * 0.55 * gain)
+            if kind == "sine":
+                sig = (np.sin(2 * np.pi * f * tb) * 0.8 + np.sin(4 * np.pi * f * tb) * 0.25 + _saw(tb * f) * 0.15) * env_ad(tb, 0.004, 6)
+            elif kind == "sub":
+                sig = (np.sin(2 * np.pi * f * tb) + 0.15 * np.sin(4 * np.pi * f * tb)) * env_ad(tb, 0.01, 1.5 if pattern == "whole" else 3, dur)
+            elif kind == "square":
+                sig = _lowpass(_square(tb * f) * 0.6 + 0.3 * _square(tb * f * 0.5), 6) * env_ad(tb, 0.003, 8)
+            elif kind == "pick":
+                pick = _noise(len(tb), 21) * np.exp(-tb * 400) * 0.5
+                sig = (_lowpass(_saw(tb * f) + 0.4 * _square(tb * f * 0.5), 10) + pick) * env_ad(tb, 0.002, 7)
+            else:  # dist: chugging power root, palm-muted
+                raw = _saw(tb * f) + _saw(tb * f * 1.5) * 0.6 + _saw(tb * f * 2) * 0.4
+                sig = _lowpass(np.tanh(3.0 * raw), 14) * env_ad(tb, 0.002, 18 if pattern in ("chug", "gallop", "pump") else 6)
+            add(t0 + e * six, sig, 0.55 * gain)
 
-    def arp(t0, chord, pattern):
+    # --- chord parts -----------------------------------------------------------------
+    def pluck_tone(f, ta, kind):
+        if kind == "pluck":
+            return (np.sin(2 * np.pi * f * ta) + 0.3 * np.sin(6 * np.pi * f * ta)) * env_ad(ta, 0.002, 14)
+        if kind == "square":
+            return _lowpass(_square(ta * f), 4) * env_ad(ta, 0.001, 10)
+        if kind == "bell":
+            return (np.sin(2 * np.pi * f * ta) + 0.5 * np.sin(2 * np.pi * f * 2.76 * ta) * np.exp(-ta * 8)) * env_ad(ta, 0.002, 4)
+        if kind == "clav":
+            return _lowpass(_saw(ta * f) * _square(ta * f * 0.501), 3) * env_ad(ta, 0.001, 22)
+        return _saw(ta * f) * env_ad(ta, 0.002, 12)
+
+    def arp(t0, chord, pattern, kind):
         order = _arp_order(pattern, chord)
         steps = 16 if pattern == "sixteenths" else 8
-        step = bar / steps
+        seq = order + order[-2:0:-1] if pattern == "updown" else order
         for e in range(steps):
-            if pattern == "updown":
-                seq = order + order[-2:0:-1]                 # up then back down
-                m = seq[e % len(seq)]
-            else:
-                m = order[e % len(order)]
-            f = _midi_hz(m)
+            f = _midi_hz(seq[e % len(seq)])
             ta = np.arange(int(0.25 * sr)) / sr
-            enva = np.exp(-ta * (14 if steps == 8 else 22)) * np.minimum(1.0, ta / 0.002)
-            sig = (np.sin(2 * np.pi * f * ta) + 0.3 * np.sin(6 * np.pi * f * ta)) * enva
-            add(t0 + e * step, sig * (0.22 if steps == 8 else 0.17) * (1.0 if e % 4 == 0 else 0.8))
+            add(t0 + e * bar / steps, pluck_tone(f, ta, kind), (0.22 if steps == 8 else 0.17) * (1.0 if e % 4 == 0 else 0.8))
 
-    def lead(t0, root, quality, chord, bar_in_section):
-        """A phrase of chord tones and scale steps on a simple rhythm, answered every other bar."""
-        scale = [root + 60 + d for d in _scale(root, quality)] + [root + 72]
+    def stab(t0, chord, kind, rhythm):
+        for e in rhythm:
+            ta = np.arange(int(0.22 * sr)) / sr
+            sig = sum(pluck_tone(_midi_hz(m + 12), ta, kind) for m in chord)
+            add(t0 + e * six, sig, 0.16 / max(1, len(chord) / 3))
+
+    def power(t0, root_note, pattern_or_rhythm, strum):
+        """Distorted power chord: root, fifth, octave through tanh; on the bass rhythm
+        (chug) or on every eighth (strum)."""
+        steps = [(e * 2, 1.0 if e % 2 == 0 else 0.8) for e in range(8)] if strum else \
+                [(e, g) for e, _, g in BASS_PATTERNS[pattern_or_rhythm]]
+        for e, gain in steps:
+            dur = beat / 2 if strum else six * 1.6
+            ta = np.arange(int(max(dur, 0.12) * sr)) / sr
+            raw = np.zeros_like(ta)
+            for m in (root_note, root_note + 7, root_note + 12):
+                f = _midi_hz(m)
+                raw += _saw(ta * f * 1.002) + _saw(ta * f * 0.998)
+            sig = _lowpass(np.tanh(2.2 * raw), 6) * env_ad(ta, 0.003, 4 if strum else 16, dur)
+            add(t0 + e * six, sig, 0.10 * gain)
+
+    # --- lead ------------------------------------------------------------------------
+    def tone(f, tl, kind):
+        ph = 2 * np.pi * f * tl
+        vib = 1 + 0.004 * np.sin(2 * np.pi * 5.5 * tl) * np.minimum(1.0, tl / 0.3)
+        if kind == "sine":
+            sig = np.sin(ph) + 0.2 * np.sin(2 * ph)
+        elif kind == "triangle":
+            sig = 2 / np.pi * np.arcsin(np.sin(ph))
+        elif kind == "square":
+            sig = _lowpass(_square(tl * f), 3) * 0.7
+        else:  # lead_saw
+            sig = _lowpass(_saw(tl * f) + 0.5 * _saw(tl * f * 1.005), 5) * 0.8
+        return np.interp(tl * vib, tl, sig) if len(tl) > 1 else sig
+
+    def scale_notes(root, quality):
+        degs = SCALES[st["scale"]]["m" if _minor(quality) else "M"]
+        return [root + 60 + d for d in degs] + [root + 72]
+
+    def lead(t0, root, quality, chord, bar_in_section, kind):
+        nonlocal riff
+        scale = scale_notes(root, quality)
         tones = {m % 12 for m in chord}
-        rhythm = [(0, 1.0), (1.5, 0.5), (2, 1.0), (3, 0.5), (3.5, 0.5)] if bar_in_section % 2 == 0 else [(0.5, 1.5), (2, 2.0)]
-        pos = int(rng.integers(2, 6))
-        for k, (start, length) in enumerate(rhythm):
-            pos = max(0, min(len(scale) - 1, pos + int(rng.integers(-2, 3))))
-            if k == 0 or start in (0, 2):                      # strong beats land on a chord tone
-                cands = [i for i, m in enumerate(scale) if m % 12 in tones]
-                pos = min(cands, key=lambda i: abs(i - pos))
+        if kind == "riff":
+            if riff is None:                                  # (slot, scale degree index, length in sixteenths)
+                slots = sorted(rng.choice(16, size=int(rng.integers(4, 7)), replace=False))
+                riff = [(int(sl), int(rng.integers(0, len(scale))), 2) for sl in slots]
+            events = [(sl * 0.25, d, ln * 0.25) for sl, d, ln in riff]
+        elif kind == "long":
+            events = [(0, None, 2.0), (2, None, 2.0)] if bar_in_section % 2 == 0 else [(0, None, 4.0)]
+        else:  # phrase
+            rhythm = [(0, 1.0), (1.5, 0.5), (2, 1.0), (3, 0.5), (3.5, 0.5)] if bar_in_section % 2 == 0 else [(0.5, 1.5), (2, 2.0)]
+            events = [(start, None, length) for start, length in rhythm]
+        pos = int(rng.integers(2, min(6, len(scale))))
+        for k, (start, deg, length) in enumerate(events):
+            if deg is None:
+                pos = max(0, min(len(scale) - 1, pos + int(rng.integers(-2, 3))))
+                if k == 0 or start in (0, 2):                  # strong beats land on a chord tone
+                    cands = [i for i, m in enumerate(scale) if m % 12 in tones] or [0]
+                    pos = min(cands, key=lambda i: abs(i - pos))
+            else:
+                pos = deg
             f = _midi_hz(scale[pos])
             dur = length * beat
             tl = np.arange(int(dur * sr)) / sr
-            env = np.minimum(1.0, tl / 0.02) * np.exp(-tl * 2.5) * np.minimum(1.0, np.maximum(0.0, (dur - tl) / 0.05))
-            ph = 2 * np.pi * f * tl
-            if lead_tone == 0:
-                sig = np.sin(ph) + 0.2 * np.sin(2 * ph)
-            elif lead_tone == 1:
-                sig = 2 / np.pi * np.arcsin(np.sin(ph))       # triangle
-            else:
-                sig = np.tanh(2.5 * np.sin(ph)) * 0.8         # soft square
-            vib = 1 + 0.004 * np.sin(2 * np.pi * 5.5 * tl) * np.minimum(1.0, tl / 0.3)
-            sig = np.interp(tl * vib, tl, sig) if len(tl) > 1 else sig
-            add(t0 + start * beat, sig * env * 0.13)
+            env = np.minimum(1.0, tl / 0.02) * np.exp(-tl * (2.5 if kind != "long" else 0.6)) * np.minimum(1.0, np.maximum(0.0, (dur - tl) / 0.05))
+            add(t0 + start * beat, tone(f, tl, st["lead"]) * env, 0.13 if kind != "long" else 0.11)
 
+    plan = st["plan"]
     for i in range(total_bars):
         b = i - intro_bars                                    # level bar, negative in the intro
         t0 = i * bar
         root, quality = prog[b % len(prog)]
         root = (root + transpose) % 12
-        section = SECTIONS[(b // SECTION_BARS) % len(SECTIONS)] if b >= 0 else ("sparse", None, False, True)
-        bass_pat, arp_pat, lead_on, pad_on = section
-        inversion = (b // len(prog)) % 3 if b >= 0 else 0
-        chord = _chord_notes(root, quality, inversion=inversion, seventh=(b >= 0 and (b // SECTION_BARS) % 2 == 1))
+        if b >= 0:
+            bass_pat, part, part_pat, lead_on, pad_on = plan[(b // SECTION_BARS) % len(plan)]
+        else:
+            bass_pat, part, part_pat, lead_on, pad_on = ("sparse", None, None, False, st["pad"] is not None)
+        inversion = (b // len(prog)) % 3 if b >= 0 and quality != "5" else 0
+        chord = _chord_notes(root, quality, inversion=inversion)
         bass_root = _chord_notes(root, quality)[0] - 24
-        if pad_on:
-            pad(t0, chord)
-        bass(t0, bass_root, bass_pat)
-        if arp_pat:
-            arp(t0, chord, arp_pat)
-        if lead_on:
-            lead(t0, root, quality, chord, b % SECTION_BARS)
+        if pad_on and st["pad"]:
+            pad(t0, chord, st["pad"])
+        if part != "pad_only":
+            bass(t0, bass_root, bass_pat, st["bass"])
+        if part == "arp":
+            arp(t0, chord, part_pat, st["chord"] if st["chord"] != "power" else "pluck")
+        elif part == "stab":
+            stab(t0, chord, st["chord"] if st["chord"] != "power" else "pluck", stab_rhythm)
+        elif part == "chug":
+            power(t0, bass_root + 12, bass_pat, strum=False)
+        elif part == "strum":
+            power(t0, bass_root + 12, None, strum=True)
+        if lead_on and st["lead"]:
+            lead(t0, root, quality, chord, b % SECTION_BARS, st["lead_kind"])
 
     out = out[:n]
     out = out / (np.max(np.abs(out)) or 1.0) * 0.8

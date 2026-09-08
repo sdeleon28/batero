@@ -305,15 +305,25 @@ use. It fades out when a level starts. Toggle in Setup or start with
 
 Built-in levels play over a synthesized backing so they feel like music. It is a
 small arrangement rendered once for the whole level (a few hundred
-milliseconds, cached): a chord progression picked per level from ten, in a key
-of its own, with a soft pad, a bass line, a plucked arpeggio and a generated
-lead. Every four bars the section changes: pad and bass; the arpeggio comes in;
-the lead answers; the bass syncopates and the arpeggio turns around; a
-breakdown; a build with bouncing bass and sixteenth-note arpeggio; and so on,
-cycling, with inversions and sevenths shifting underneath. The count-in gets
-pad and sparse bass. Songs from MIDI files get no backing, since a made-up
-progression would clash with the tune. Toggle it with B during play or from
-Setup, or start with `--no-backing`.
+milliseconds, cached). Each level gets a style, cycling through seven so
+neighbouring levels sound different:
+
+| style | harmony | parts |
+|---|---|---|
+| synth | pop and minor progressions | saw pad, sine bass, plucked arpeggio, sine lead phrases |
+| metal | phrygian power chords, tritones | distorted chugs and gallops, dark pad, saw-lead riff |
+| chiptune | pop | square bass, square sixteenth arpeggios, pentatonic square riff |
+| punk | power-chord I IV V | picked bass on the eighths, strummed distorted chords |
+| organ | seventh chords | organ pad, sub bass, bell stabs, dorian triangle lead |
+| strings | cinematic minor with sevenths and sus2 | slow string pad, whole-note bass, bells, long saw-lead notes |
+| funk | minor sevenths | slap-style bass line, clav stabs, pentatonic riff |
+
+Every four bars the section changes along the style's own plan (parts come and
+go, bass patterns switch, a breakdown, a build), the key is transposed per
+level, and the riff or phrase is generated per level. The count-in gets a thin
+intro. Songs from MIDI files get no backing, since a made-up progression would
+clash with the tune. Toggle it with B during play or from Setup, or start with
+`--no-backing`.
 
 ## Install as a Mac app
 
