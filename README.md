@@ -234,6 +234,30 @@ the sound card's output, and the camera picture-in-picture in the corner.
 Settings: `capture_audio_device`, `capture_audio_channels`, `capture_camera`,
 `capture_pip` (camera height as a fraction of the picture, 0.28).
 
+## Progress (S)
+
+The hub shows a strip with your streak, today's minutes and the total; S (or
+"Progress" in Setup) opens the progress screen: day streak and best streak,
+minutes today and overall, notes hit, stars; minutes per day this week; the
+accuracy, timing-consistency and grade trends over the last runs; records (best
+run, tightest timing, longest combo); and the last runs with their stars. It is
+all read from the run logs, header lines only, so it costs nothing.
+
+## Coach (C)
+
+C (or "Coach" in Setup) sends a compact report to Claude: the catalogue of
+levels, every level you played with best and mean results, the last runs in
+detail and your practice habit. Claude answers, in your language, with your
+strengths and weaknesses (each citing the evidence), the focus for the next
+session, a weekly diet, and three playlists: warm-up and fundamentals, one that
+attacks the main weakness, one that stretches toward the next curriculum step.
+Each playlist item names a level, a tempo rate and repetitions. Snare or Enter
+starts a playlist as a session: the game runs its levels in order at the given
+tempo, shows "session x/y" and why the level is there, and returns to the coach
+when it is done. A asks again. The analysis is kept in
+`~/.config/drumhero/coach/coach.json` (`coach_language`, `coach_model` in
+settings).
+
 ## Edit a take with Claude
 
 Setup has "Edit a take with Claude". Pick a take (newest first, `[` and `]`
@@ -323,6 +347,7 @@ timing errors; the mean is your latency, the deviation is you.
 | , / .         | input offset -/+ 5 ms              |
 | D             | drum sounds on/off (saved)         |
 | V             | start / stop a take (video + mix)  |
+| S / C (hub)   | progress / coach                   |
 | 1..9, 0       | hit lanes from the keyboard        |
 
 `--no-sound` disables audio entirely, `--no-guide` starts with the guide track
@@ -438,4 +463,5 @@ whatever the display adds. The audio mixer uses a 256-sample buffer, about 6 ms.
 - `drumhero/kit.py`: kit file
 - `drumhero/runlog.py`, `drumhero/audit.py`: per-level run logs and the audit tool
 - `drumhero/capture.py`, `drumhero/edit.py`: recording a take, editing it with Claude Code
+- `drumhero/stats.py`, `drumhero/coach.py`: progress statistics, the coach and its playlists
 - `drumhero/app.py`: menu, level select, wizard, play screen, main loop

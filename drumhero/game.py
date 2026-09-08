@@ -270,6 +270,8 @@ class Game:
         out["dyn_rate"] = (out["accents_ok"] + out["taps_ok"]) / judged if self.chart.dynamics and judged else None
         out["grade"] = grade_for(out)
         out["stars"] = stars_for(out["grade"])
+        out["max_combo"] = self.max_combo
+        out["score"] = self.score
         return out
 
     def dynamics(self, last_n=None):

@@ -22,6 +22,8 @@ from .kit import (default_kit, describe, describe_pads, load_kit, load_progress,
 from .runlog import RunLog
 from .capture import Recorder
 from . import edit as E
+from . import stats as ST
+from .coach import Coach
 from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, draw_hihat_state, draw_stars, lerp
 from .game import TAIL_S, lead_in_for
 from . import ghost as GH
@@ -77,6 +79,9 @@ class App:
         self.runlog = RunLog()       # every level is written to ~/Library/Logs/drumhero/runs when it ends
         self.recorder = Recorder(self.settings)   # V: take of the game, the interface's mix and the camera
         self.editor = E.Editor(self.settings.get("claude_bin"))   # Edit with Claude
+        self.coach = Coach(self.settings.get("claude_bin"), self.settings.get("coach_language", "es"),
+                           self.settings.get("coach_model"))
+        self.session = None          # {"name", "items": [(cat, index, rate, reps, why)], "pos", "rep"} while a playlist runs
         self.midi_trace = None       # one line per note-on, for latency measurements (--midi-trace or settings)
         trace = getattr(args, "midi_trace", None) or self.settings.get("midi_trace")
         if trace:
@@ -318,6 +323,62 @@ class App:
         self.drum_queue.append(inst)
 
     # --- screens ---------------------------------------------------------------
+    def level_by_name(self, name):
+        for cat in ("kick", "snare", "hihat"):
+            for i, ch in enumerate(self.items_for(cat)):
+                if ch.name == name:
+                    return cat, i
+        return None
+
+    def level_names(self):
+        return {ch.name for cat in ("kick", "snare", "hihat") for ch in self.items_for(cat)}
+
+    def stats_summary(self):
+        """Cached for a second: the hub draws it every frame."""
+        now = time.perf_counter()
+        if getattr(self, "_summary_at", 0) < now - 1.0:
+            self._summary = ST.summary()
+            self._summary_at = now
+        return self._summary
+
+    def coach_report(self):
+        return ST.report({"exercises": self.items_for("kick"), "beats": self.items_for("snare"), "songs": self.items_for("hihat")})
+
+    def start_session(self, playlist):
+        items = []
+        for it in playlist.get("items", []):
+            found = self.level_by_name(it.get("level"))
+            if found:
+                items.append((found[0], found[1], float(it.get("rate", 1.0)), max(1, int(it.get("reps", 1))), it.get("why", "")))
+        if not items:
+            return False
+        self.session = {"name": playlist.get("name", "session"), "items": items, "pos": 0, "rep": 1}
+        self.session_go()
+        return True
+
+    def session_go(self):
+        cat, index, rate, reps, why = self.session["items"][self.session["pos"]]
+        self.rate = rate
+        self.go(PlayScreen(self, cat, index))
+
+    def session_advance(self):
+        """Called when a level of a session ends and the player continues. True if it moved on."""
+        ss = self.session
+        if ss is None:
+            return False
+        cat, index, rate, reps, why = ss["items"][ss["pos"]]
+        if ss["rep"] < reps:
+            ss["rep"] += 1
+        elif ss["pos"] + 1 < len(ss["items"]):
+            ss["pos"] += 1; ss["rep"] = 1
+        else:
+            self.session = None
+            self.rate = 1.0
+            self.go(CoachScreen(self, done=ss["name"]))
+            return True
+        self.session_go()
+        return True
+
     def toggle_recording(self):
         if self.recorder.active:
             path = self.recorder.stop()
@@ -336,11 +397,13 @@ class App:
             status = self.editor.status
             if self.editor.busy:
                 status += " ." * (int(time.perf_counter()) % 4)
+        if not status and self.coach.busy:
+            status = self.coach.status + " ." * (int(time.perf_counter()) % 4)
         if not status:
             return
         S = self.scale
         f = self.fonts
-        color = (235, 70, 70) if rec else (JUDGE_COLORS["MISS"] if (self.recorder.error or self.editor.error) and not self.editor.busy else DIM)
+        color = (235, 70, 70) if rec else (JUDGE_COLORS["MISS"] if (self.recorder.error or self.editor.error) and not (self.editor.busy or self.coach.busy) else DIM)
         ts = f.text(status, f.small, color)
         x = self.size[0] - ts.get_width() - 16 * S
         y = self.size[1] - ts.get_height() - 8 * S
@@ -496,13 +559,20 @@ class HubScreen(Screen):
             self.sel ^= 2
         elif key in (pygame.K_RETURN, pygame.K_SPACE):
             self.open(self.sel)
+        elif key == pygame.K_s:
+            self.app.go(StatsScreen(self.app))
+        elif key == pygame.K_c:
+            self.app.go(CoachScreen(self.app))
         return True
 
     def draw(self, surf, fps):
         surf.fill(BG)
         S = self.s
         self.f.center(surf, "drumhero", self.f.big, TEXT, 52 * S)
-        self.f.center(surf, "strike a drum to open its section", self.f.small, DIM, 92 * S)
+        sm = self.app.stats_summary()
+        strip = (f"streak {sm['streak']} day{'s' if sm['streak'] != 1 else ''}  ·  today {sm['today_minutes']:.0f} min"
+                 f"  ·  {sm['total_minutes']:.0f} min in {sm['days']} days  ·  S progress  ·  C coach")
+        self.f.center(surf, strip, self.f.small, ACCENT if sm["streak"] else DIM, 92 * S)
         gap, top, bottom, side = 18 * S, 118 * S, self.h - 70 * S, 60 * S
         pw = (self.w - 2 * side - gap) / 2
         ph = (bottom - top - gap) / 2
@@ -563,6 +633,8 @@ class ListScreen(Screen):
                     ("Recording (V)", f"audio {self.app.recorder.settings['capture_audio_device']} ch {self.app.recorder.settings['capture_audio_channels']}"
                                       f" · camera '{self.app.recorder.settings['capture_camera']}' · ~/Movies/drumhero"),
                     ("Edit a take with Claude", "pick a take and a style; Claude Code cuts it with ffmpeg"),
+                    ("Progress (S)", "streak, minutes, trends, records"),
+                    ("Coach (C)", "Claude reads your stats: strengths, weaknesses, focus, playlists"),
                     ("Quit", "")]
         return [(ch.name, f"{ch.bpm:.0f} bpm · {len(ch.notes):3d} notes · {ch.desc}" + ("  ♪ audio" if ch.audio else "")) for ch in self.app.items_for(self.cat)]
 
@@ -611,6 +683,10 @@ class ListScreen(Screen):
                 self.app.toggle_recording()
             elif self.sel == 10:
                 self.app.go(EditScreen(self.app))
+            elif self.sel == 11:
+                self.app.go(StatsScreen(self.app))
+            elif self.sel == 12:
+                self.app.go(CoachScreen(self.app))
             else:
                 return False
         elif self.items():
@@ -682,6 +758,229 @@ class ListScreen(Screen):
             self.f.center(surf, items[self.sel][1], self.f.small, TEXT, self.h - 84 * S)   # the selected one in full
         self.legend(surf, [("hihat", "down"), ("crash", "up"), ("snare", "select"), ("kick", "back")],
                     keys="arrows or j k · Enter or l · Esc or h")
+
+
+def wrap(fonts, text, font, max_w):
+    """Word-wrap text into lines that fit max_w pixels."""
+    lines = []
+    for para in str(text).split("\n"):
+        words = para.split()
+        cur = ""
+        for w in words:
+            trial = (cur + " " + w).strip()
+            if fonts.text(trial, font, TEXT).get_width() <= max_w or not cur:
+                cur = trial
+            else:
+                lines.append(cur); cur = w
+        lines.append(cur)
+    return lines
+
+
+def sparkline(surf, values, x, y, w, h, color, lo=None, hi=None, S=1.0):
+    if len(values) < 2:
+        return
+    lo = min(values) if lo is None else lo
+    hi = max(values) if hi is None else hi
+    span = (hi - lo) or 1.0
+    pts = [(x + i * w / (len(values) - 1), y + h - (v - lo) / span * h) for i, v in enumerate(values)]
+    pygame.draw.lines(surf, color, False, pts, max(1, int(2 * S)))
+    pygame.draw.circle(surf, color, (int(pts[-1][0]), int(pts[-1][1])), int(4 * S))
+
+
+# ---------------------------------------------------------------------------
+class StatsScreen(Screen):
+    """Progress at a glance: streak, minutes, this week, trends, records, last runs."""
+
+    def on_drum(self, inst):
+        if NAV.get(inst) == "back":
+            self.app.go(HubScreen(self.app))
+        elif NAV.get(inst) == "accept":
+            self.app.go(CoachScreen(self.app))
+        return True
+
+    def on_key(self, key):
+        if key in (pygame.K_ESCAPE, pygame.K_h, pygame.K_s):
+            self.app.go(HubScreen(self.app))
+        elif key in (pygame.K_c, pygame.K_RETURN, pygame.K_l):
+            self.app.go(CoachScreen(self.app))
+        return True
+
+    def draw(self, surf, fps):
+        surf.fill(BG)
+        S = self.s; f = self.f
+        sm = self.app.stats_summary()
+        self.f.center(surf, "Progress", f.large, TEXT, 44 * S)
+        if not sm["runs"]:
+            f.center(surf, "Nothing played yet. Every level you finish lands here.", f.mid, DIM, self.h * 0.42)
+            self.legend(surf, [("snare", "coach"), ("kick", "back")], keys="C coach · Esc back")
+            return
+        # headline numbers
+        cols = [(f"{sm['streak']}", "day streak" + (f" (best {sm['best_streak']})" if sm["best_streak"] > sm["streak"] else "")),
+                (f"{sm['today_minutes']:.0f}", "minutes today"),
+                (f"{sm['total_minutes']:.0f}", f"minutes in {sm['days']} days"),
+                (f"{sm['total_notes']:,}", "notes hit"),
+                (f"{sum(self.app.results.get(n, {}).get('stars', 0) for n in self.app.results)}", "stars")]
+        cw = (self.w - 120 * S) / len(cols)
+        for i, (big, label) in enumerate(cols):
+            cx = 60 * S + (i + 0.5) * cw
+            f.center(surf, big, f.big, ACCENT, 112 * S, cx)
+            f.center(surf, label, f.small, DIM, 152 * S, cx)
+        # this week
+        x0, y0, bw, bh = 60 * S, 200 * S, (self.w * 0.42 - 60 * S), 130 * S
+        surf.blit(f.text("this week", f.small, TEXT), (x0, y0 - 24 * S))
+        top = max([m for _, m in sm["week"]] + [10.0])
+        for i, (d, m) in enumerate(sm["week"]):
+            bx = x0 + i * bw / 7
+            hgt = m / top * bh
+            col = ACCENT if d == sm["today"] else lerp(ACCENT, LANE_BG, 0.45)
+            pygame.draw.rect(surf, LANE_BG, (bx + 6 * S, y0, bw / 7 - 12 * S, bh), border_radius=int(5 * S))
+            if hgt > 0:
+                pygame.draw.rect(surf, col, (bx + 6 * S, y0 + bh - hgt, bw / 7 - 12 * S, hgt), border_radius=int(5 * S))
+            f.center(surf, time.strftime("%a", time.strptime(d, "%Y-%m-%d"))[:2], f.small, DIM, y0 + bh + 14 * S, bx + bw / 14)
+            if m >= 1:
+                f.center(surf, f"{m:.0f}", f.small, TEXT, y0 + bh - hgt - 12 * S, bx + bw / 14)
+        gw, gp = sm["grade_week"], sm["grade_prev_week"]
+        if gw is not None:
+            delta = f"  ({gw - gp:+.0f} vs last week)" if gp is not None else ""
+            surf.blit(f.text(f"mean grade this week {gw:.0f}{delta}", f.small, DIM), (x0, y0 + bh + 34 * S))
+        # trends
+        tx, tw = self.w * 0.5, self.w * 0.5 - 60 * S
+        for j, (label, vals, col, lo, hi, fmt) in enumerate([
+                ("accuracy, last runs", [v * 100 for v in sm["trend_accuracy"]], JUDGE_COLORS["PERFECT"], 0, 100, "{:.0f}%"),
+                ("timing std ms, last runs (lower is tighter)", sm["trend_std_ms"], JUDGE_COLORS["GOOD"], 0, None, "{:.0f} ms"),
+                ("grade, last runs", sm["trend_grade"], ACCENT, 0, 100, "{:.0f}")]):
+            ty = y0 - 24 * S + j * 70 * S
+            surf.blit(f.text(label, f.small, TEXT), (tx, ty))
+            if vals:
+                sparkline(surf, vals, tx, ty + 22 * S, tw - 70 * S, 34 * S, col, lo, hi, S)
+                surf.blit(f.text(fmt.format(vals[-1]), f.small, col), (tx + tw - 60 * S, ty + 30 * S))
+        # records and last runs
+        ry = 410 * S
+        recs = []
+        if sm["best_run"]:
+            b = sm["best_run"]; recs.append(f"best run  {b['chart']['name']}  grade {b['stats']['grade']:.0f}, {b['stats']['stars']} stars")
+        if sm["tightest"]:
+            t = sm["tightest"]; recs.append(f"tightest timing  {t['chart']['name']}  std {t['stats']['std_ms']:.1f} ms")
+        if sm["longest_combo"] and sm["longest_combo"]["stats"].get("max_combo"):
+            c = sm["longest_combo"]; recs.append(f"longest combo  {c['stats']['max_combo']} on {c['chart']['name']}")
+        surf.blit(f.text("records", f.small, TEXT), (x0, ry))
+        for i, r in enumerate(recs):
+            surf.blit(f.text(r, f.small, DIM), (x0, ry + (22 + i * 20) * S))
+        surf.blit(f.text("last runs", f.small, TEXT), (tx, ry))
+        for i, r in enumerate(sm["last"][:6]):
+            when = time.strftime("%a %H:%M", time.localtime(r["started"]))
+            line = f"{when}  {r['chart']['name'][:22]:22}  {r['stats']['accuracy'] * 100:3.0f}%  {r['stats'].get('std_ms', 0):4.0f} ms"
+            surf.blit(f.text(line, f.small, DIM), (tx, ry + (22 + i * 20) * S))
+            draw_stars(surf, f, r["stats"].get("stars", 0), self.w - 60 * S, ry + (20 + i * 20) * S, S, size="small")
+        self.legend(surf, [("snare", "coach"), ("kick", "back")], keys="C coach · Esc back")
+
+
+# ---------------------------------------------------------------------------
+class CoachScreen(Screen):
+    """What Claude says about your playing, and the playlists it wrote as sessions."""
+
+    def __init__(self, app, done=None):
+        super().__init__(app)
+        self.sel = 0
+        self.done = done
+
+    def playlists(self):
+        r = self.app.coach.result
+        return r.get("playlists", []) if r else []
+
+    def on_drum(self, inst):
+        action = NAV.get(inst)
+        if action == "back":
+            self.app.go(HubScreen(self.app))
+        elif action == "next":
+            self.sel = (self.sel + 1) % max(1, len(self.playlists()))
+        elif action == "prev":
+            self.sel = (self.sel - 1) % max(1, len(self.playlists()))
+        elif action == "accept":
+            self.accept()
+        return True
+
+    def on_key(self, key):
+        if key in (pygame.K_ESCAPE, pygame.K_h):
+            self.app.go(HubScreen(self.app))
+        elif key in (pygame.K_DOWN, pygame.K_j):
+            self.sel = (self.sel + 1) % max(1, len(self.playlists()))
+        elif key in (pygame.K_UP, pygame.K_k):
+            self.sel = (self.sel - 1) % max(1, len(self.playlists()))
+        elif key in (pygame.K_RETURN, pygame.K_l):
+            self.accept()
+        elif key == pygame.K_a:
+            self.ask()
+        elif key == pygame.K_s:
+            self.app.go(StatsScreen(self.app))
+        return True
+
+    def ask(self):
+        if not self.app.coach.busy:
+            self.app.coach.start(self.app.coach_report(), self.app.level_names())
+
+    def accept(self):
+        pls = self.playlists()
+        if pls:
+            self.app.start_session(pls[self.sel])
+        else:
+            self.ask()
+
+    def draw(self, surf, fps):
+        surf.fill(BG)
+        S = self.s; f = self.f
+        f.center(surf, "Coach", f.large, TEXT, 44 * S)
+        r = self.app.coach.result
+        if self.done:
+            f.center(surf, f"session '{self.done}' done", f.mid, JUDGE_COLORS["PERFECT"], 84 * S)
+        if self.app.coach.busy:
+            f.center(surf, self.app.coach.status, f.mid, JUDGE_COLORS["GOOD"], self.h * 0.42)
+            f.center(surf, "Claude is reading your run logs; this takes a minute or two", f.small, DIM, self.h * 0.42 + 36 * S)
+        elif not r:
+            f.center(surf, "No analysis yet.", f.mid, TEXT, self.h * 0.40)
+            f.center(surf, "Snare or Enter: ask Claude for strengths, weaknesses, the focus for next session and playlists.",
+                     f.small, DIM, self.h * 0.40 + 36 * S)
+            if self.app.coach.error:
+                f.center(surf, self.app.coach.error, f.small, JUDGE_COLORS["MISS"], self.h * 0.40 + 64 * S)
+        else:
+            x0, colw = 60 * S, self.w * 0.5 - 80 * S
+            y = 84 * S if not self.done else 108 * S
+            when = time.strftime("%Y-%m-%d %H:%M", time.localtime(r.get("generated", 0)))
+            surf.blit(f.text(f"from {when}  ·  A ask again", f.small, DIM), (x0, y)); y += 26 * S
+            surf.blit(f.text("focus next session", f.mid, ACCENT), (x0, y)); y += 30 * S
+            for line in wrap(f, r.get("focus_next_session", ""), f.small, colw)[:5]:
+                surf.blit(f.text(line, f.small, TEXT), (x0, y)); y += 20 * S
+            y += 10 * S
+            for title, key, col in (("strengths", "strengths", JUDGE_COLORS["PERFECT"]), ("weaknesses", "weaknesses", JUDGE_COLORS["OK"])):
+                surf.blit(f.text(title, f.mid, col), (x0, y)); y += 30 * S
+                for item in r.get(key, [])[:5]:
+                    lines = wrap(f, "· " + item, f.small, colw)[:2]
+                    for line in lines:
+                        surf.blit(f.text(line, f.small, TEXT), (x0, y)); y += 20 * S
+                y += 8 * S
+            # right: diet and playlists
+            rx = self.w * 0.5 + 20 * S
+            y = 84 * S if not self.done else 108 * S
+            surf.blit(f.text("diet", f.mid, ACCENT), (rx, y)); y += 30 * S
+            for line in wrap(f, r.get("diet", ""), f.small, colw)[:7]:
+                surf.blit(f.text(line, f.small, TEXT), (rx, y)); y += 20 * S
+            y += 12 * S
+            surf.blit(f.text("sessions  ·  snare or Enter to start", f.mid, ACCENT), (rx, y)); y += 32 * S
+            for i, pl in enumerate(self.playlists()):
+                selected = i == self.sel
+                if selected:
+                    pygame.draw.rect(surf, lerp(LANE_BG, ACCENT, 0.18), (rx - 12 * S, y - 6 * S, colw + 24 * S, 46 * S), border_radius=int(8 * S))
+                n = len(pl.get("items", []))
+                surf.blit(f.text(f"{pl.get('name', 'session')}  ·  {n} levels · {pl.get('minutes', '?')} min", f.small, ACCENT if selected else TEXT), (rx, y))
+                surf.blit(f.text(wrap(f, pl.get("goal", ""), f.small, colw)[0] if pl.get("goal") else "", f.small, DIM), (rx, y + 20 * S))
+                y += 50 * S
+            if self.playlists():
+                pl = self.playlists()[self.sel]
+                items = ", ".join(f"{it['level']} @{it.get('rate', 1.0):.2g}x" + (f" x{it['reps']}" if it.get('reps', 1) > 1 else "") for it in pl["items"])
+                for line in wrap(f, items, f.small, colw)[:3]:
+                    surf.blit(f.text(line, f.small, DIM), (rx, y)); y += 20 * S
+        self.legend(surf, [("hihat", "down"), ("crash", "up"), ("snare", "start session" if r else "ask Claude"), ("kick", "back")],
+                    keys="A ask Claude · S progress · Esc back")
 
 
 # ---------------------------------------------------------------------------
@@ -1139,6 +1438,11 @@ class PlayScreen(Screen):
 
     def to_list(self):
         self.leave()
+        if self.app.session is not None:
+            self.app.session = None
+            self.app.rate = 1.0
+            self.app.go(CoachScreen(self.app))
+            return
         self.app.go(ListScreen(self.app, self.cat, self.index))
 
     def retry(self):
@@ -1147,6 +1451,8 @@ class PlayScreen(Screen):
 
     def next_level(self):
         self.leave()
+        if self.app.session_advance():
+            return
         nxt = self.index + 1
         if nxt < len(self.app.items_for(self.cat)):
             self.app.go(PlayScreen(self.app, self.cat, nxt))
@@ -1187,6 +1493,14 @@ class PlayScreen(Screen):
 
     def draw(self, surf, fps):
         self.renderer.draw(surf, fps)
+        ss = self.app.session
+        if ss is not None:
+            cat, index, rate, reps, why = ss["items"][ss["pos"]]
+            S = self.s
+            label = f"session {ss['name']}  ·  {ss['pos'] + 1}/{len(ss['items'])}" + (f"  ·  rep {ss['rep']}/{reps}" if reps > 1 else "")
+            self.f.center(surf, label, self.f.small, ACCENT, 112 * S)
+            if why:
+                self.f.center(surf, why, self.f.small, DIM, 132 * S)
         if self.game.finished:
             self.legend(surf, [("snare", "next"), ("hihat", "retry"), ("kick", "back")], y=self.h - 30 * self.s,
                         keys=None)
