@@ -155,6 +155,10 @@ def build(dest_dir):
         "CFBundleShortVersionString": VERSION,
         "CFBundleVersion": VERSION,
         "CFBundleInfoDictionaryVersion": "6.0",
+        # without these macOS denies camera and microphone access silently (no prompt): the
+        # take's camera (ffmpeg) and its audio input (sounddevice) run as this app's children
+        "NSCameraUsageDescription": "drumhero records the camera picture-in-picture in your takes.",
+        "NSMicrophoneUsageDescription": "drumhero records the audio interface's mix in your takes and meters it in the camera check.",
         "LSMinimumSystemVersion": "12.0",
         "NSHighResolutionCapable": True,
         "LSApplicationCategoryType": "public.app-category.music",
