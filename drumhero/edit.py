@@ -1,6 +1,7 @@
 """Edit a take with Claude Code: pick a style, no typing, and Claude cuts the video.
 
-The game writes a job folder next to the take (~/Movies/drumhero/edits/<take>/) with
+The game writes a job folder inside the take's folder (<take>/edits/<edition>-<style>/; for the
+flat takes recorded before the folders existed, ~/Movies/drumhero/edits/<take>/) with
 job.json (the take, its sidecar with timing and the run logs of the levels played during
 it, the chosen style and its brief) and starts `claude -p` there, allowed to use ffmpeg,
 ffprobe and files only. Claude produces edit-<style>.mp4 in that folder and writes
@@ -54,8 +55,9 @@ installed; the h264_videotoolbox encoder is available and fast) and write files 
 delete the inputs.
 
 job.json fields:
-- take: the recorded mp4 (the game's picture, the mix the drummer heard, and a camera picture-in-picture
-  if one was present). take_meta: its sidecar: t0 (epoch seconds of the first frame), duration, fps, size.
+- take: the recorded mp4 (the game's picture, the mix the drummer heard, and the camera, picture-in-picture
+  or under the game in the 9:16 social edition). take_meta: its sidecar: t0 (epoch seconds of the first
+  frame), duration, fps, size (of the computer raw; the mp4's own size may differ, check it with ffprobe).
 - run_logs: JSON-lines files, one per level played during the take. Line 1 is a header (chart with every
   note: t in chart seconds, key, accent; stats with grade and stars; offset). The other lines are events
   with "wall" = epoch seconds: kind "hit" (judge PERFECT/GOOD/OK/STRAY, error_ms, velocity, dyn
@@ -72,7 +74,8 @@ take's own size, 30 fps, h264_videotoolbox at 12M, AAC 192k, faststart. Check th
 
 
 def sidecar_for(take):
-    p = take[:-4] + ".json"
+    """take.json of a take folder, or the legacy <take>.json next to a flat mp4."""
+    p = os.path.join(take, "take.json") if os.path.isdir(take) else take[:-4] + ".json"
     try:
         with open(p) as f:
             return json.load(f)
@@ -81,9 +84,36 @@ def sidecar_for(take):
 
 
 def takes():
-    """Recorded takes, newest first."""
-    out = [p for p in glob.glob(os.path.join(OUT_DIR, "*.mp4"))]
+    """Recorded takes, newest first: take folders (raws and editions, see capture.py) and the
+    flat mp4 files of takes recorded before the folders existed."""
+    out = [p for p in glob.glob(os.path.join(OUT_DIR, "*")) if os.path.isdir(p) and os.path.exists(os.path.join(p, "take.json"))]
+    out += glob.glob(os.path.join(OUT_DIR, "*.mp4"))
     return sorted(out, key=os.path.getmtime, reverse=True)
+
+
+def label(take):
+    return os.path.basename(take) if os.path.isdir(take) else os.path.basename(take)[:-4]
+
+
+def editions(take):
+    """{edition: mp4 path} rendered so far; a legacy flat take is its own computer edition."""
+    if not os.path.isdir(take):
+        return {"computer": take}
+    meta = sidecar_for(take) or {}
+    return {k: os.path.join(take, v) for k, v in meta.get("editions", {}).items() if os.path.exists(os.path.join(take, v))}
+
+
+def has_raws(take):
+    """True for a take folder whose screen raw is still there (editions can be rendered again)."""
+    meta = sidecar_for(take) or {}
+    raw = meta.get("raws", {}).get("screen")
+    return bool(os.path.isdir(take) and raw and os.path.exists(os.path.join(take, raw["file"])))
+
+
+def video_for(take, prefer="computer"):
+    """The edition to hand to Claude: the preferred one, else any rendered one, else None."""
+    eds = editions(take)
+    return eds.get(prefer) or next(iter(eds.values()), None)
 
 
 class Editor:
@@ -103,19 +133,27 @@ class Editor:
     def busy(self):
         return self.thread is not None and self.thread.is_alive()
 
-    def start(self, take, style_key):
+    def start(self, take, style_key, prefer="computer"):
+        """take: a take folder or a legacy mp4; the edition `prefer` (else any rendered one) is edited."""
         if self.busy or not take:
             return False
         if not self.claude_bin or not os.path.exists(self.claude_bin):
             self.error = "claude CLI not found"
             return False
+        video = video_for(take, prefer)
+        if video is None:
+            self.error = "no edition rendered yet: render one first (computer or social)"
+            return False
         style = next(s for s in STYLES if s[0] == style_key)
-        base = os.path.basename(take)[:-4]
-        self.job_dir = os.path.join(EDITS_DIR, base)
+        base = label(take)
+        if os.path.isdir(take):                  # the edit lives in the take's folder: edits/<edition>-<style>/
+            self.job_dir = os.path.join(take, "edits", f"{os.path.basename(video)[:-4]}-{style_key}")
+        else:                                    # a take recorded before the folders: ~/Movies/drumhero/edits/<take>/
+            self.job_dir = os.path.join(EDITS_DIR, base)
         os.makedirs(self.job_dir, exist_ok=True)
         meta = sidecar_for(take) or {}
         output = os.path.join(self.job_dir, f"edit-{style_key}.mp4")
-        job = {"take": os.path.abspath(take), "take_meta": meta, "run_logs": meta.get("run_logs", []),
+        job = {"take": os.path.abspath(video), "take_meta": meta, "run_logs": meta.get("run_logs", []),
                "style": style_key, "brief": style[3], "output": output, "created": time.time()}
         with open(os.path.join(self.job_dir, "job.json"), "w") as f:
             json.dump(job, f, indent=1)

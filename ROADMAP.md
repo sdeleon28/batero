@@ -6,32 +6,34 @@ Related ground truth lives in `CLAUDE.md` (hi-hat gesture, filter rules) and
 
 ## Next up (in this order, decided 2026-09-09)
 
-### 1. Phone layout: switch between the desktop layout and a social-media one
+### 1. Social (9:16) edition of every take (done 2026-09-09)
 
-**Goal.** A second layout for takes meant for Reels / TikTok / Shorts, switchable from the
-game (a key plus a persisted `layout` setting, values `desktop` and `phone`), so the same
-run can be recorded either way. Target aspect ratio **9:16** (1080x1920): today's phones are
-19.5:9 to 20:9, and every short-video platform crops to 9:16, so 9:16 is the frame that fits
-all of them; keep the important UI inside the central ~80 % of the height because the apps
-overlay captions and buttons at the top and bottom.
+**What it became.** Not a second in-game layout: the capture shows exactly what was on
+screen, and the phone version is an *edition* rendered from the raws. Decided while
+building it (a full portrait re-layout of every screen was prototyped and thrown away:
+the user wants the take to show what the screen showed, and both versions of every take
+without choosing one).
 
-**How the app is built today.** Everything scales from the window height
-(`App.scale = size[1] / 720`, `app.py`); `App.on_resize` relayouts on any size change and
-the window is `RESIZABLE`. The highway geometry lives in `render.py` (~line 147, `lane_x` /
-`lane_w` from the width), the other screens draw against `app.size` with the same scale.
-The recorder captures `self.surface` at `self.size`, so a portrait window already yields a
-portrait mp4; the camera PiP (`capture.py`, 1280x720 feed scaled by `capture_pip`, corner
-`capture_corner`) will need a portrait-friendly placement (top or bottom band rather than a
-corner). Fullscreen is the desktop Spaces mode; in phone layout the window should be a
-portrait window of the display's full height (or letterboxed inside the 16:9 screen when
-fullscreen), and the take should be the 9:16 area only.
+- A take is a folder, `~/Movies/drumhero/<stamp> <name>/`: `take.json`, `raw/screen.mp4`
+  (the window as it was), `raw/camera.mp4`, `raw/audio.wav`, and the editions
+  `computer.mp4` (16:9, camera picture-in-picture) and `social.mp4` (1080x1920: the screen
+  as a thumbnail across the top, the camera under it `capture_split` of the height, half by
+  default, cropped to fill; the pair centred vertically). Both editions render when the
+  take stops; the raws stay. `capture.render_edition` / `python -m drumhero.capture
+  --render DIR social` render one again; the Setup screen "Takes: editions, Claude edits"
+  does the same from the game, and its Claude styles edit an edition (the job folder is
+  `edits/<edition>-<style>/` inside the take's folder). The camera check previews both
+  editions; S cycles the social camera share.
+- Legacy flat takes (`<stamp> take.mp4` + `.json`) still list and can be edited with
+  Claude, but have no raws to re-render from.
+- Readability of the social thumbnail: notes, judgement words and combo are fine on a
+  phone; the HUD's small text (24 px on the 1080p capture) is about 13 px in the reel.
+  If that matters later, the fix is a bigger HUD font while recording, not a new layout.
 
-**Work.** Decide per screen what changes in portrait: highway narrower lanes and a taller
-scroll, judgement text and combo above the highway, menus as a single column, coach /
-takes screens can stay readable at the same scale. Give `Fonts` / `scale` a width-aware
-factor so text does not overflow the narrow frame. Add the key (suggested `L`, free in all
-screens; check `on_key` in every Screen class) and a line in Setup showing the current
-layout.
+Not done, by choice: the in-game layout switch (a `layout` setting, `P` key, portrait
+variants of every screen). If it ever comes back, the prototype's ideas were: draw the
+game into a 9:16 frame centred in the window, scale from the frame width (540 design px),
+compact hub/list/wizard variants, and a live camera band under the game.
 
 ### 2. In-game volume on the curly braces (done 2026-09-09)
 
@@ -176,6 +178,8 @@ Remote Protocol", the XR18 mirrors X32 addresses for routing: `/config/routing/C
 - Gameplay with the 2026-09-09 ghost rules: play a fast hi-hat level and count
   `ghost` entries per reason in the runlog (`drumhero.audit --hits`); the rules were
   validated on recorded takes, not yet inside a level.
+- Social edition: check a real take's social.mp4 on the phone (thumbnail readability,
+  camera crop at split 0.5; S in the camera check changes it).
 - hhmapper: run `hhmapper.py --probe --out` against both GGD tracks (One Kit
   Wonder, Modern & Massive 2). Open question: closed hats HH2 = 59 vs preset's
   Closed Tip = 53; switch "mid body/edge" to 53 if closed hats are silent.

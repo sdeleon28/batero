@@ -231,8 +231,28 @@ for four, and for five the full victory fanfare with drums.
 ## Recording a take (V)
 
 Press V anywhere (or "Recording" in Setup) to start a take, V again to stop.
-The take becomes one edited file in `~/Movies/drumhero/`: the game's picture,
-the sound card's output, and the camera picture-in-picture in the corner.
+Every take is its own folder in `~/Movies/drumhero/`, the raws in `raw/` and
+two editions rendered from them when the take stops (both, every time; you
+manage the disk):
+
+```
+20260909-173554 Paradiddle/
+    take.json          when, how long, the levels played, where everything is
+    raw/screen.mp4     the game exactly as it was on screen
+    raw/camera.mp4     the iPhone, 1280x720
+    raw/audio.wav      the interface's mix
+    computer.mp4       16:9: the screen with the camera picture-in-picture
+    social.mp4         1080x1920 for Reels / TikTok / Shorts: the screen as a
+                       thumbnail across the top, the camera under it
+    edits/             what Claude cuts from an edition (see below)
+```
+
+The social edition keeps the screen as it was (the notes, the judgement words
+and the combo stay readable on a phone; the HUD's small text gets small) and
+gives the camera `capture_split` of the height (half by default, cropped to
+fill; 0.32 shows the whole camera picture), the pair centred vertically. Either
+edition can be rendered again later from the raws: "Takes" in Setup, or
+`python -m drumhero.capture --render "<take folder>" social`.
 
 - **Picture**: the game hands a copy of its own frame to a writer thread 30
   times a second, piped into ffmpeg (H.264 by VideoToolbox). No screen
@@ -248,11 +268,14 @@ the sound card's output, and the camera picture-in-picture in the corner.
   ffmpeg to its own file and overlaid at stop, aligned by wall clock. The first
   time, macOS asks the app for camera permission; without a camera the take is
   picture and sound only.
-- At stop a compose pass runs in the background ("rendering take..." bottom
-  right); parts are kept next to the result if it fails.
+- At stop the raws move into the take's folder and both editions render in
+  the background ("rendering ... edition" bottom right); the raws stay either
+  way.
 
 Settings: `capture_audio_device`, `capture_audio_channels`, `capture_camera`,
-`capture_pip` (camera height as a fraction of the picture, 0.28).
+`capture_pip` (camera height as a fraction of the picture, 0.28) and
+`capture_corner` for the computer edition, `capture_split` (the camera's share
+of the height, 0.5) for the social one.
 
 ## Devices: hot-plug and toasts
 
@@ -294,17 +317,21 @@ settings).
 
 Setup has "Camera & take check", the soundcheck of takes: the game picture on
 the left, the camera live on the right (ffmpeg feeds the iPhone's frames into
-the game at 15 fps), the composed take below with the picture-in-picture where
-it will land, and the take's audio channels metered next to it, with a hint
-when they are silent. Hi-hat and crash change the camera size (20, 28, 36 or
-45 % of the height), `[` and `]` move it between the four corners, R rescans
-the cameras, and snare or Enter records a 3-second test take, renders it and
-shows the result. Sizes and corner are saved.
+the game at 15 fps), both editions below as they will land (the computer one
+with the picture-in-picture, the social one with the screen thumbnail over the
+camera), and the take's audio channels metered next to them, with a hint when
+they are silent. Hi-hat and crash change the picture-in-picture size (20, 28,
+36 or 45 % of the height), `[` and `]` move it between the four corners, S
+cycles the camera's share of the social edition (32, 40, 50 or 60 %), R
+rescans the cameras, and snare or Enter records a 3-second test take, renders
+its editions and shows the result. Sizes, corner and share are saved.
 
-## Edit a take with Claude
+## Takes: editions and Claude edits
 
-Setup has "Edit a take with Claude". Pick a take (newest first, `[` and `]`
-change it) and a style, no typing:
+Setup has "Takes: editions, Claude edits". Pick a take (newest first, `[` and
+`]` change it; the line under it says which editions exist) and either an
+edition to render again from the raws (computer or social) or a style for
+Claude, no typing:
 
 | style | what Claude makes |
 |---|---|
@@ -314,9 +341,12 @@ change it) and a style, no typing:
 | Lesson | the whole take, every fill repeated at half speed with captions, wrong dynamics and misses captioned |
 | Raw with a title | a title card and an end card with the stars |
 
-The game writes a job folder in `~/Movies/drumhero/edits/<take>/` with
-`job.json` (the take, its sidecar, the run logs of the levels played during
-it, the style and its brief) and starts Claude Code there in print mode,
+Claude edits the edition of the take that matches your window (the computer
+one), or the other if only that one exists. The game writes a job folder in
+the take's folder, `edits/<edition>-<style>/` (`~/Movies/drumhero/edits/<take>/`
+for takes recorded before the folders existed) with `job.json` (the edition,
+the take's `take.json`, the run logs of the levels played during it, the style
+and its brief) and starts Claude Code there in print mode,
 allowed to use ffmpeg, ffprobe and files only. The run logs give Claude every
 hit with a wall-clock time, so it can cut on downbeats, find PERFECT streaks
 and caption misses. The result is `edit-<style>.mp4` next to `notes.md`
@@ -389,7 +419,7 @@ timing errors; the mean is your latency, the deviation is you.
 | [ / ]         | tempo -/+ 10 % (restarts the level) |
 | , / .         | input offset -/+ 5 ms              |
 | D             | drum sounds on/off (saved)         |
-| V             | start / stop a take (video + mix)  |
+| V             | start / stop a take (screen + mix + camera, both editions rendered) |
 | { / }         | game volume -/+ 5 % (saved), any screen; the mixer fader stays the overall level |
 | S / C (hub)   | progress / coach                   |
 | 1..9, 0       | hit lanes from the keyboard        |

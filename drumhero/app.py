@@ -552,8 +552,8 @@ class App:
         if self.recorder.active:
             path = self.recorder.stop()
             self.watcher.paused = False
-            self.toasts.add(f"take stopped, rendering {os.path.basename(path)}", DIM)
-            print(f"recording stopped, composing {path}")
+            self.toasts.add(f"take stopped: {os.path.basename(path)}, rendering both editions", DIM)
+            print(f"recording stopped, finishing {path}")
         else:
             name = self.screen_obj.chart.name if isinstance(self.screen_obj, PlayScreen) else "take"
             self.watcher.paused = True                     # the camera is ffmpeg's now
@@ -824,8 +824,8 @@ class ListScreen(Screen):
                     (f"Start fullscreen: {'on' if self.app.settings.get('fullscreen', True) else 'off'}", "F11 or Cmd+F toggles any time, saved"),
                     ("Recording (V)", f"audio {self.app.recorder.settings['capture_audio_device']} ch {self.app.recorder.settings['capture_audio_channels']}"
                                       f" · camera '{self.app.recorder.settings['capture_camera']}' · ~/Movies/drumhero"),
-                    ("Camera & take check", "the iPhone next to the game picture, the PiP layout, the take's audio meter, a test take"),
-                    ("Edit a take with Claude", "pick a take and a style; Claude Code cuts it with ffmpeg"),
+                    ("Camera & take check", "the iPhone next to the game picture, both editions' layout, the take's audio meter, a test take"),
+                    ("Takes: editions, Claude edits", "every take renders a computer (16:9) and a social (9:16) edition; render one again, or have Claude cut it"),
                     ("Progress (S)", "streak, minutes, trends, records"),
                     ("Coach (C)", "Claude reads your stats: strengths, weaknesses, focus, playlists"),
                     ("Quit", "")]
@@ -1238,6 +1238,8 @@ class CameraCheckScreen(Screen):
             self.save()
         elif key in (pygame.K_RETURN, pygame.K_l):
             self.test_take()
+        elif key == pygame.K_s:
+            self.cycle_split()
         elif key == pygame.K_r:
             self.close()
             self.__init__(self.app, self.sample)
@@ -1249,8 +1251,14 @@ class CameraCheckScreen(Screen):
         self.settings["capture_pip"] = sizes[(cur + d) % 4]
         self.save()
 
+    def cycle_split(self):
+        """The social edition: the camera's share of the 9:16 height (0.32 = the whole camera picture)."""
+        cur = min(range(len(CP.SPLITS)), key=lambda i: abs(CP.SPLITS[i] - self.settings["capture_split"]))
+        self.settings["capture_split"] = CP.SPLITS[(cur + 1) % len(CP.SPLITS)]
+        self.save()
+
     def save(self):
-        self.app.settings.update({k: self.settings[k] for k in ("capture_pip", "capture_corner")})
+        self.app.settings.update({k: self.settings[k] for k in ("capture_pip", "capture_corner", "capture_split")})
         save_settings(self.app.settings)
         self.app.recorder.settings.update(self.settings)
 
@@ -1315,9 +1323,11 @@ class CameraCheckScreen(Screen):
             for i, line in enumerate(wrap(f, msg, f.small, pw - 20 * S)[:4]):
                 f.center(surf, line, f.small, DIM, y + ph / 2 - 20 * S + i * 20 * S, rx + pw / 2)
         pygame.draw.rect(surf, (60, 60, 70), (rx, y, pw, ph), 1)
-        # composed preview
+        # the two editions: computer (16:9, the camera picture-in-picture) and social (9:16, the
+        # screen as a thumbnail on top, the camera under it)
         cy = int(y + ph + 46 * S)
-        f.center(surf, f"composed take  ·  camera {self.settings['capture_pip']:.0%} high, corner {self.settings['capture_corner']}  ·  hats/crash size, [ ] corner",
+        f.center(surf, f"computer edition: camera {self.settings['capture_pip']:.0%} high, corner {self.settings['capture_corner']} (hats/crash, [ ])"
+                       f"      social edition: camera {self.settings['capture_split']:.0%} of the height (S)",
                  f.small, TEXT, cy - 18 * S)
         ch = int(avail * 0.44); cw = int(ch * 16 / 9)
         cx = int(self.w / 2 - cw / 2 - 120 * S)
@@ -1335,8 +1345,21 @@ class CameraCheckScreen(Screen):
             pygame.draw.rect(surf, lerp(LANE_BG, ACCENT, 0.3), (px, py, pip_w, pip_h))
         pygame.draw.rect(surf, ACCENT, (px, py, pip_w, pip_h), 2)
         pygame.draw.rect(surf, (60, 60, 70), (cx, cy, cw, ch), 1)
-        # audio meter, to the right of the composed preview
-        mx = cx + cw + 36 * S
+        sx, sh = cx + cw + int(24 * S), ch
+        sw = int(sh * 9 / 16)
+        pygame.draw.rect(surf, (0, 0, 0), (sx, cy, sw, sh))
+        (gx, gy, gw, gh), (bx, by, bw, bh) = CP.social_layout(self.sample.get_size() if self.sample is not None else (16, 9),
+                                                              self.settings["capture_split"], size=(sw, sh))
+        if self.sample is not None and gw > 0 and gh > 0:
+            surf.blit(pygame.transform.smoothscale(self.sample, (gw, gh)), (sx + gx, cy + gy))
+        if cam is not None and bw > 0 and bh > 0:
+            surf.blit(CP.cover(cam, (bw, bh)), (sx + bx, cy + by))
+        else:
+            pygame.draw.rect(surf, lerp(LANE_BG, ACCENT, 0.3), (sx + bx, cy + by, bw, bh))
+        pygame.draw.rect(surf, ACCENT, (sx + bx, cy + by, bw, bh), 2)
+        pygame.draw.rect(surf, (60, 60, 70), (sx, cy, sw, sh), 1)
+        # audio meter, to the right of the previews
+        mx = sx + sw + 36 * S
         surf.blit(f.text(f"take audio: {self.settings['capture_audio_device']} ch {self.settings['capture_audio_channels']}", f.small, TEXT), (mx, cy))
         levels = self.meter.levels if self.meter else None
         if levels:
@@ -1355,30 +1378,40 @@ class CameraCheckScreen(Screen):
         if self.app.recorder.active and self.test_at is not None:
             f.center(surf, f"test take recording {3 - int(time.perf_counter() - self.test_at)}...", f.mid, (235, 70, 70), self.h - 92 * S)
         elif self.app.recorder.composing is not None and self.test_at is not None:
-            f.center(surf, "rendering the test take...", f.mid, JUDGE_COLORS["GOOD"], self.h - 92 * S)
+            f.center(surf, "rendering the test take's editions...", f.mid, JUDGE_COLORS["GOOD"], self.h - 92 * S)
         elif self.test_result:
             f.center(surf, self.test_result, f.mid, JUDGE_COLORS["PERFECT"] if "saved" in self.test_result else JUDGE_COLORS["MISS"], self.h - 92 * S)
         self.legend(surf, [("hihat", "size"), ("crash", "size"), ("snare", "test take 3 s"), ("kick", "back")],
-                    keys="[ ] corner · R rescan · Enter test take · Esc back · results in ~/Movies/drumhero")
+                    keys="[ ] corner · S social camera share · R rescan · Enter test take · Esc back · takes in ~/Movies/drumhero")
 
 
 # ---------------------------------------------------------------------------
+EDITIONS = [("computer", "Computer edition (16:9)", "render again: the screen, the camera picture-in-picture"),
+            ("social", "Social edition (9:16)", "render again: the screen on top, the iPhone under it")]
+
+
 class EditScreen(Screen):
-    """Pick a take (newest first) and a style, and hand it to Claude Code. Hi-hat / crash
-    move through the styles, snare starts, kick goes back; [ and ] change the take."""
+    """Pick a take (newest first) and what to make of it: an edition rendered again from its raws
+    (both are made when a take stops), or a style for Claude Code to cut. Hi-hat / crash move
+    through the options, snare starts, kick goes back; [ and ] change the take."""
 
     def __init__(self, app):
         super().__init__(app)
         self.takes = E.takes()
         self.take_i = 0
         self.sel = 0
+        self.message = None
+
+    def options(self):
+        """[(key, label, blurb, kind)], kind "edition" or "claude"."""
+        return [(k, l, b, "edition") for k, l, b in EDITIONS] + [(k, l, b, "claude") for k, l, b, _ in E.STYLES]
 
     def on_drum(self, inst):
         action = NAV.get(inst)
         if action == "next":
-            self.sel = (self.sel + 1) % len(E.STYLES)
+            self.sel = (self.sel + 1) % len(self.options())
         elif action == "prev":
-            self.sel = (self.sel - 1) % len(E.STYLES)
+            self.sel = (self.sel - 1) % len(self.options())
         elif action == "accept":
             self.accept()
         elif action == "back":
@@ -1389,9 +1422,9 @@ class EditScreen(Screen):
         if key in (pygame.K_ESCAPE, pygame.K_h):
             self.app.go(ListScreen(self.app, "crash", 12))
         elif key in (pygame.K_DOWN, pygame.K_j):
-            self.sel = (self.sel + 1) % len(E.STYLES)
+            self.sel = (self.sel + 1) % len(self.options())
         elif key in (pygame.K_UP, pygame.K_k):
-            self.sel = (self.sel - 1) % len(E.STYLES)
+            self.sel = (self.sel - 1) % len(self.options())
         elif key in (pygame.K_LEFTBRACKET, pygame.K_LEFT) and self.takes:
             self.take_i = (self.take_i + 1) % len(self.takes)
         elif key in (pygame.K_RIGHTBRACKET, pygame.K_RIGHT) and self.takes:
@@ -1401,41 +1434,55 @@ class EditScreen(Screen):
         return True
 
     def accept(self):
-        if not self.takes or self.app.editor.busy:
+        if not self.takes:
             return
-        if self.app.editor.start(self.takes[self.take_i], E.STYLES[self.sel][0]):
-            self.app.go(HubScreen(self.app, 3))
+        take = self.takes[self.take_i]
+        key, label, blurb, kind = self.options()[self.sel]
+        self.message = None
+        if kind == "edition":
+            if not E.has_raws(take):
+                self.message = "this take has no raws (recorded before take folders): nothing to render from"
+            elif not self.app.recorder.render(take, key):
+                self.message = "the recorder is busy, try again in a moment"
+        elif not self.app.editor.busy:
+            if self.app.editor.start(take, key):
+                self.app.go(HubScreen(self.app, 3))
 
     def draw(self, surf, fps):
         surf.fill(BG)
         S = self.s
-        self.f.center(surf, "Edit with Claude", self.f.large, TEXT, 60 * S)
+        self.f.center(surf, "Takes: editions and Claude edits", self.f.large, TEXT, 60 * S)
         if not self.takes:
             self.f.center(surf, "No takes yet. Press V during play to record one.", self.f.mid, DIM, self.h * 0.42)
         else:
             take = self.takes[self.take_i]
             meta = E.sidecar_for(take) or {}
             levels = ", ".join(l["chart"] for l in meta.get("run_logs", [])) or "no levels logged"
-            self.f.center(surf, os.path.basename(take)[:-4], self.f.mid, ACCENT, 110 * S)
+            eds = ", ".join(sorted(E.editions(take))) or "no edition yet"
+            self.f.center(surf, E.label(take), self.f.mid, ACCENT, 110 * S)
             self.f.center(surf, f"{meta.get('duration', 0):.0f} s · {levels}" + ("  · camera" if meta.get("camera") else ""),
                           self.f.small, DIM, 138 * S)
-            self.f.center(surf, f"take {self.take_i + 1} of {len(self.takes)}  ·  [ ] or ← → to change", self.f.small, DIM, 160 * S)
+            self.f.center(surf, f"editions: {eds}  ·  take {self.take_i + 1} of {len(self.takes)}  ·  [ ] or ← → to change", self.f.small, DIM, 160 * S)
+        opts = self.options()
+        step = 60 * S if len(opts) * 60 * S <= self.h - 330 * S else (self.h - 330 * S) / len(opts)
         y = 210 * S
-        for i, (key, label, blurb, _) in enumerate(E.STYLES):
+        for i, (key, label, blurb, kind) in enumerate(opts):
             selected = i == self.sel
             x = self.w * 0.18
             if selected:
-                pygame.draw.rect(surf, lerp(LANE_BG, ACCENT, 0.18), (x - 20 * S, y - 8 * S, self.w * 0.64 + 40 * S, 52 * S), border_radius=int(10 * S))
-                pygame.draw.rect(surf, ACCENT, (x - 20 * S, y - 8 * S, 6 * S, 52 * S), border_radius=int(3 * S))
+                pygame.draw.rect(surf, lerp(LANE_BG, ACCENT, 0.18), (x - 20 * S, y - 8 * S, self.w * 0.64 + 40 * S, step - 8 * S), border_radius=int(10 * S))
+                pygame.draw.rect(surf, ACCENT, (x - 20 * S, y - 8 * S, 6 * S, step - 8 * S), border_radius=int(3 * S))
+            if i == len(EDITIONS):
+                pygame.draw.line(surf, (50, 50, 60), (x, y - 12 * S), (self.w * 0.82, y - 12 * S))
             surf.blit(self.f.text(label, self.f.mid, ACCENT if selected else TEXT), (x, y))
-            surf.blit(self.f.text(blurb, self.f.small, DIM), (x + 300 * S, y + 6 * S))
-            y += 60 * S
-        if self.app.editor.busy:
-            self.f.center(surf, self.app.editor.status, self.f.small, JUDGE_COLORS["GOOD"], self.h - 84 * S)
-        elif self.app.editor.error:
-            self.f.center(surf, self.app.editor.error, self.f.small, JUDGE_COLORS["MISS"], self.h - 84 * S)
-        self.legend(surf, [("hihat", "down"), ("crash", "up"), ("snare", "edit"), ("kick", "back")],
-                    keys="arrows or j k · Enter or l · Esc or h · edits land in ~/Movies/drumhero/edits")
+            surf.blit(self.f.text(blurb, self.f.small, DIM), (x + 340 * S, y + 6 * S))
+            y += step
+        note = self.message or (self.app.editor.status if self.app.editor.busy else self.app.editor.error)
+        if note:
+            self.f.center(surf, note, self.f.small, JUDGE_COLORS["GOOD"] if self.app.editor.busy and not self.message else JUDGE_COLORS["MISS"],
+                          self.h - 84 * S)
+        self.legend(surf, [("hihat", "down"), ("crash", "up"), ("snare", "go"), ("kick", "back")],
+                    keys="arrows or j k · Enter or l · Esc or h · everything lands in the take's folder in ~/Movies/drumhero")
 
 
 # ---------------------------------------------------------------------------

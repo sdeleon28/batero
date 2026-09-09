@@ -1,7 +1,22 @@
-"""Recording: the game's own frames, the sound card's output and an optional camera
-(the iPhone) into one edited file with the camera picture-in-picture.
+"""Recording: the game's own frames, the sound card's output and an optional camera (the
+iPhone), each to its own file, and editions rendered from those raws.
 
-    V in the game starts and stops a take. Files land in ~/Movies/drumhero/.
+    V in the game starts and stops a take. Every take is its own folder in ~/Movies/drumhero/:
+
+        <stamp> <name>/
+            take.json                 when, how long, what was played, where everything is
+            raw/screen.mp4            the game exactly as it was on screen (the window's size)
+            raw/camera.mp4            the iPhone, 1280x720
+            raw/audio.wav             the interface's mix
+            computer.mp4              edition: the screen, 16:9, the camera picture-in-picture
+            social.mp4                edition: 1080x1920 for Reels / TikTok / Shorts: the screen as a
+                                      thumbnail across the top, the camera under it (capture_split
+                                      of the height, cropped to fill), the pair centred vertically
+            edits/<edition>-<style>/  what Claude cut from an edition (edit.py)
+
+    Both editions are rendered when the take stops (the user manages the disk). They can be
+    rendered again from the raws at any time: the Edit screen, or
+    `python -m drumhero.capture --render "<take folder>" social`.
 
 How it works, and why not a screen recorder:
 - Video: the game hands a copy of its surface to a writer thread 30 times a second; the
@@ -14,9 +29,9 @@ How it works, and why not a screen recorder:
   signal.
 - Camera (optional): ffmpeg's avfoundation records the first video device whose name
   matches the camera setting ("iPhone" by default, so Continuity Camera or Camo) to its
-  own file, with wall-clock timestamps.
-- Stop: a compose pass muxes video and audio and overlays the camera in the corner,
-  aligned by wall clock. The result is the only file left.
+  own file, on the same clock as the game's frames.
+- Editions: ffmpeg overlays the camera on the game raw and muxes the audio, aligned by
+  wall clock (render_edition). The raws stay, so both editions can be made from one take.
 """
 import glob
 import json
@@ -34,18 +49,52 @@ import numpy as np
 
 OUT_DIR = os.path.expanduser("~/Movies/drumhero")
 FPS = 30
-DEFAULTS = {"capture_audio_device": "X18/XR18", "capture_audio_channels": [17, 18],
+DEFAULTS = {"capture_audio_device": "X18/XR18", "capture_audio_channels": [17, 18], "capture_split": 0.5,
             "capture_camera": "iPhone", "capture_pip": 0.28, "capture_corner": "br", "capture_camera_delay_ms": 0}
 CORNERS = ["br", "bl", "tr", "tl"]
+SPLITS = [0.32, 0.4, 0.5, 0.6]     # social edition: the camera's share of the 1920 px height (0.32 = the whole 16:9 picture)
+SOCIAL_SIZE = (1080, 1920)
 PREVIEW_SIZE = (640, 360)
 CAMERA_FPS = 30              # what cameras accept (Continuity Camera: 30 or 60)
 
 
-def overlay_xy(corner, margin=24):
-    """ffmpeg overlay expression for a corner."""
-    x = f"W-w-{margin}" if corner in ("br", "tr") else f"{margin}"
-    y = f"H-h-{margin}" if corner in ("br", "bl") else f"{margin}"
-    return f"{x}:{y}"
+def pip_rect(frame, pip, corner, margin=24):
+    """Computer layout: where the camera goes on a landscape frame of size `frame` (w, h), a 16:9
+    picture `pip` of the frame height tall in `corner`. (x, y, w, h) in frame pixels, even sizes."""
+    w, h = frame
+    ph = int(pip * h) // 2 * 2
+    pw = int(ph * 16 / 9) // 2 * 2
+    x = w - pw - margin if corner in ("br", "tr") else margin
+    y = h - ph - margin if corner in ("br", "bl") else margin
+    return int(x), int(y), pw, ph
+
+
+def social_layout(screen, split, size=SOCIAL_SIZE):
+    """The social edition on a canvas of `size` (1080x1920): the screen (w, h) scaled to the full
+    width as a thumbnail, the camera under it `split` of the canvas height tall (cropped to fill),
+    the pair centred vertically. Returns the two rects (x, y, w, h), even sizes."""
+    W, H = size
+    sw, sh = screen
+    gh = int(W * sh / sw) // 2 * 2
+    ch = min(int(H * split) // 2 * 2, H - gh)
+    top = int((H - gh - ch) / 2) // 2 * 2
+    return (0, top, W, gh), (0, top + gh, W, ch)
+
+
+def cover(surface, size):
+    """`surface` scaled to fill `size` keeping its aspect, centred and cropped (what the take's
+    compose does with the camera in the social layout). Returns a new surface of `size`."""
+    import pygame
+    iw, ih = surface.get_size()
+    w, h = int(size[0]), int(size[1])
+    if iw == 0 or ih == 0 or w <= 0 or h <= 0:
+        return pygame.Surface((max(1, w), max(1, h)))
+    k = max(w / iw, h / ih)
+    sw, sh = max(w, int(iw * k + 0.5)), max(h, int(ih * k + 0.5))
+    scaled = pygame.transform.smoothscale(surface, (sw, sh))
+    out = pygame.Surface((w, h))
+    out.blit(scaled, (0, 0), pygame.Rect((sw - w) // 2, (sh - h) // 2, w, h))
+    return out
 AUDIO_SR = 44100
 
 
@@ -125,37 +174,116 @@ def audio_device_index(substring):
     return None
 
 
+def run_logs_between(t0, duration):
+    """The run logs of the levels played between t0 and t0 + duration (epoch seconds)."""
+    from .runlog import RUNS_DIR
+    logs = []
+    for path in sorted(glob.glob(os.path.join(RUNS_DIR, "*.jsonl"))):
+        try:
+            with open(path) as f:
+                head = json.loads(f.readline())
+            if head.get("ended", 0) >= t0 and head.get("started", 0) <= t0 + duration:
+                logs.append({"path": path, "chart": head["chart"]["name"], "started": head["started"],
+                             "ended": head.get("ended"), "stats": head.get("stats")})
+        except (OSError, ValueError, KeyError):
+            continue
+    return logs
+
+
+def render_edition(take_dir, edition, settings=None, log=print):
+    """Render one edition of a take from its raws, any time after the take:
+    "computer": the screen with the camera picture-in-picture (capture_pip / capture_corner);
+    "social": 1080x1920, the screen as a thumbnail across the top and the camera under it
+    (capture_split of the height, cropped to fill), the pair centred vertically.
+    The take's own settings apply unless `settings` overrides them. Writes
+    <take_dir>/<edition>.mp4, records it in take.json and returns the path. Paths in take.json
+    are relative to the take folder."""
+    with open(os.path.join(take_dir, "take.json")) as f:
+        meta = json.load(f)
+    st = {**DEFAULTS, **meta.get("settings", {}),
+          **{k: v for k, v in (settings or {}).items() if k in ("capture_pip", "capture_corner", "capture_split")}}
+    raw = meta.get("raws", {}).get("screen")
+    if raw is None:
+        raise ValueError("this take has no screen raw")
+    if edition not in ("computer", "social"):
+        raise ValueError(f"unknown edition {edition!r}")
+    w, h = raw["size"]
+    cmd = [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-y", "-i", os.path.join(take_dir, raw["file"])]
+    cam_i = aud_i = None
+    n = 1
+    cam, aud = meta.get("camera"), meta.get("audio")
+    if cam and os.path.exists(os.path.join(take_dir, cam["file"])):
+        cmd += ["-itsoffset", f"{-float(cam.get('delay_ms', 0)) / 1000:.3f}", "-i", os.path.join(take_dir, cam["file"])]
+        cam_i, n = n, n + 1
+    if aud and os.path.exists(os.path.join(take_dir, aud["file"])):
+        cmd += ["-itsoffset", f"{float(aud.get('offset', 0)):.3f}", "-i", os.path.join(take_dir, aud["file"])]
+        aud_i, n = n, n + 1
+    encode = ["-c:v", "h264_videotoolbox", "-b:v", "14M", "-pix_fmt", "yuv420p"]
+    if edition == "social":
+        W, H = SOCIAL_SIZE
+        (_, gy, gw, gh), (_, cy, cw, ch) = social_layout((w, h), float(st["capture_split"]))
+        if cam_i is not None:
+            cmd += ["-filter_complex", f"[0:v]scale={gw}:{gh},pad={W}:{H}:0:{gy}:black[g];"
+                                       f"[{cam_i}:v]scale={cw}:{ch}:force_original_aspect_ratio=increase,crop={cw}:{ch}[cam];"
+                                       f"[g][cam]overlay=0:{cy}:eof_action=pass[v]", "-map", "[v]"] + encode
+        else:
+            cmd += ["-filter_complex", f"[0:v]scale={gw}:{gh},pad={W}:{H}:0:{(H - gh) // 2 // 2 * 2}:black[v]", "-map", "[v]"] + encode
+    elif cam_i is not None:
+        x, y, pw, ph = pip_rect((w, h), float(st["capture_pip"]), st.get("capture_corner", "br"))
+        cmd += ["-filter_complex", f"[{cam_i}:v]scale={pw}:{ph}[pip];[0:v][pip]overlay={x}:{y}:eof_action=pass[v]", "-map", "[v]"] + encode
+    else:
+        cmd += ["-map", "0:v", "-c:v", "copy"]
+    if aud_i is not None:
+        cmd += ["-map", f"{aud_i}:a", "-c:a", "aac", "-b:a", "192k"]
+    out = os.path.join(take_dir, f"{edition}.mp4")
+    cmd += ["-t", f"{float(meta['duration']):.3f}", "-movflags", "+faststart", out]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"ffmpeg: {r.stderr.strip()[-300:]}")
+    meta.setdefault("editions", {})[edition] = f"{edition}.mp4"
+    with open(os.path.join(take_dir, "take.json"), "w") as f:
+        json.dump(meta, f, indent=1)
+    log(f"edition saved: {out}")
+    return out
+
+
 class Recorder:
-    """One take at a time. push(surface) from the main loop; start/stop from anywhere."""
+    """One take: the screen, the interface's mix and the camera, each to its own file (the raws)
+    in a take folder, then both editions rendered from them; an edition can be rendered again
+    any time later (`render`). Start/stop from the main loop; `push` takes the frames."""
 
     def __init__(self, settings, log=print):
         self.settings = {**DEFAULTS, **{k: v for k, v in settings.items() if k in DEFAULTS}}
         self.log = log
         self.active = False
-        self.composing = None          # (thread, final path) while the compose pass runs
+        self.composing = None          # (thread, label) while the raws are finished or an edition renders
         self.error = None
+        self.result = None             # the last file written (a take folder or an edition)
         self.started_at = None
+        self.feed = None               # the camera while recording
+        self.size = None
         self._next_frame = 0.0
         self._q = None
 
     # --- start ---------------------------------------------------------------------
     def start(self, size, name="take"):
+        """size: (w, h) of the surfaces the game will push (the window's size)."""
         if self.active or not ffmpeg_path():
             self.error = None if self.active else "ffmpeg not found"
             return False
         self.error = None
-        self.size = size
+        self.size = (int(size[0]) // 2 * 2, int(size[1]) // 2 * 2)   # the encoder wants even sizes
         self.tmp = tempfile.mkdtemp(prefix="drumhero-take-")
         self.name = "".join(c if c.isalnum() or c in "-_ " else "_" for c in name).strip() or "take"
         self.t0 = time.time()
         self.started_at = time.perf_counter()
+        self._next_frame = 0.0
         # video: raw frames piped to ffmpeg
-        w, h = size
-        self.video_path = os.path.join(self.tmp, "screen.mp4")
+        w, h = self.size
         self.ff_video = subprocess.Popen(
             [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-y",
              "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(FPS), "-i", "pipe:0",
-             "-c:v", "h264_videotoolbox", "-b:v", "14M", "-pix_fmt", "yuv420p", self.video_path],
+             "-c:v", "h264_videotoolbox", "-b:v", "14M", "-pix_fmt", "yuv420p", os.path.join(self.tmp, "screen.mp4")],
             stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         self._q = queue.Queue(maxsize=8)
         self.frames = 0
@@ -270,8 +398,10 @@ class Recorder:
                 break
             self._afile.write(block)
 
-    # --- stop and compose ---------------------------------------------------------------
+    # --- stop, the take folder, the editions -------------------------------------------
     def stop(self):
+        """Stop and finish in the background: the raws move to ~/Movies/drumhero/<stamp> <name>/raw/
+        with take.json beside them, then every edition is rendered. Returns the take folder."""
         if not self.active:
             return None
         self.active = False
@@ -294,78 +424,89 @@ class Recorder:
                 pass
         stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(self.t0))
         os.makedirs(OUT_DIR, exist_ok=True)
-        final = os.path.join(OUT_DIR, f"{stamp} {self.name}.mp4")
-        t = threading.Thread(target=self._compose, args=(final, duration), daemon=True)
-        self.composing = (t, final)
+        take_dir = os.path.join(OUT_DIR, f"{stamp} {self.name}")
+        t = threading.Thread(target=self._finish, args=(take_dir, duration), daemon=True)
+        self.composing = (t, os.path.basename(take_dir))
         t.start()
-        return final
+        return take_dir
 
-    def _compose(self, final, duration):
-        err = self.ff_video.wait(timeout=60)
+    def _finish(self, take_dir, duration):
+        try:
+            self.ff_video.wait(timeout=60)
+        except subprocess.TimeoutExpired:
+            self.ff_video.kill()
         if self.ff_cam is not None:
             try:
                 self.ff_cam.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 self.ff_cam.kill()
-        cam_ok = self.cam_path and os.path.exists(self.cam_path) and os.path.getsize(self.cam_path) > 1000 and self.cam_frames > 0
-        cmd = [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-y", "-i", self.video_path]
-        if cam_ok:
-            delay = float(self.settings.get("capture_camera_delay_ms", 0)) / 1000   # camera pipeline lag to trim, if any
-            cmd += ["-itsoffset", f"{-delay:.3f}", "-i", self.cam_path]
+        raw_dir = os.path.join(take_dir, "raw")
+        os.makedirs(raw_dir, exist_ok=True)
+        raws = {}
+        src = os.path.join(self.tmp, "screen.mp4")
+        if os.path.exists(src) and os.path.getsize(src) > 1000:
+            shutil.move(src, os.path.join(raw_dir, "screen.mp4"))
+            raws["screen"] = {"file": "raw/screen.mp4", "size": list(self.size)}
+        camera = None
+        if self.cam_path and os.path.exists(self.cam_path) and os.path.getsize(self.cam_path) > 1000 and self.cam_frames > 0:
+            shutil.move(self.cam_path, os.path.join(raw_dir, "camera.mp4"))
+            camera = {"file": "raw/camera.mp4", "frames": self.cam_frames, "size": [1280, 720],
+                      "delay_ms": float(self.settings.get("capture_camera_delay_ms", 0))}
+        audio = None
         if self.audio_path and os.path.exists(self.audio_path):
-            cmd += ["-itsoffset", f"{self.audio_t0 - self.t0:.3f}", "-i", self.audio_path]
-        if cam_ok:
-            pip = float(self.settings["capture_pip"])
-            cmd += ["-filter_complex", f"[1:v]scale=-2:{int(pip * self.size[1])}[pip];"
-                                       f"[0:v][pip]overlay={overlay_xy(self.settings.get('capture_corner', 'br'))}:eof_action=pass[v]", "-map", "[v]"]
-            if self.audio_path:
-                cmd += ["-map", "2:a"]
-            cmd += ["-c:v", "h264_videotoolbox", "-b:v", "14M", "-pix_fmt", "yuv420p"]
-        else:
-            cmd += ["-map", "0:v", "-c:v", "copy"]
-            if self.audio_path:
-                cmd += ["-map", "1:a"]
-        cmd += ["-c:a", "aac", "-b:a", "192k", "-t", f"{duration:.3f}", "-movflags", "+faststart", final]
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        if r.returncode != 0:
-            self.error = f"compose failed: {r.stderr.strip()[-300:]}"
-            self.log(self.error)
-            keep = os.path.join(OUT_DIR, f"{os.path.basename(final)[:-4]} (parts)")
-            shutil.copytree(self.tmp, keep, dirs_exist_ok=True)
-        else:
-            self.log(f"recording saved: {final} ({self.frames} frames, {self.dropped} dropped, {getattr(self, 'audio_overflows', 0)} audio overflows)")
-            self._write_sidecar(final, duration)
+            shutil.move(self.audio_path, os.path.join(raw_dir, "audio.wav"))
+            audio = {"file": "raw/audio.wav", "offset": self.audio_t0 - self.t0, "overflows": getattr(self, "audio_overflows", 0)}
+        meta = {"take": take_dir, "t0": self.t0, "duration": duration, "fps": FPS, "size": list(self.size),
+                "frames": self.frames, "dropped": self.dropped, "raws": raws, "camera": camera, "audio": audio,
+                "settings": {k: self.settings[k] for k in ("capture_pip", "capture_corner", "capture_split")},
+                "run_logs": run_logs_between(self.t0, duration), "editions": {}}
+        with open(os.path.join(take_dir, "take.json"), "w") as f:
+            json.dump(meta, f, indent=1)
         shutil.rmtree(self.tmp, ignore_errors=True)
+        self.log(f"take saved: {take_dir} ({self.frames} frames, {self.dropped} dropped, "
+                 f"{getattr(self, 'audio_overflows', 0)} audio overflows, camera {'yes' if camera else 'no'}, audio {'yes' if audio else 'no'})")
+        self.result = take_dir
+        for edition in (("computer", "social") if raws else ()):   # both editions, every time; the user manages the disk
+            self.composing = (threading.current_thread(), f"{edition} edition of {os.path.basename(take_dir)}")
+            try:
+                self.result = render_edition(take_dir, edition, log=self.log)
+            except (OSError, ValueError, RuntimeError) as e:
+                self.error = f"{edition} edition failed: {e}"
+                self.log(self.error)
         self.composing = None
 
-    def _write_sidecar(self, final, duration):
-        """<take>.json: when it started, how long, and the run logs of levels played meanwhile."""
-        from .runlog import RUNS_DIR
-        logs = []
-        for path in sorted(glob.glob(os.path.join(RUNS_DIR, "*.jsonl"))):
+    def render(self, take_dir, edition):
+        """Render an edition of an earlier take in the background (the Edit screen)."""
+        if self.active or self.composing is not None:
+            return False
+        self.error = None
+
+        def run():
             try:
-                with open(path) as f:
-                    head = json.loads(f.readline())
-                if head.get("ended", 0) >= self.t0 and head.get("started", 0) <= self.t0 + duration:
-                    logs.append({"path": path, "chart": head["chart"]["name"], "started": head["started"],
-                                 "ended": head.get("ended"), "stats": head.get("stats")})
-            except (OSError, ValueError, KeyError):
-                continue
-        meta = {"take": final, "t0": self.t0, "duration": duration, "fps": FPS, "size": list(self.size),
-                "frames": self.frames, "dropped": self.dropped, "camera": bool(self.cam_path), "camera_frames": self.cam_frames,
-                "run_logs": logs}
-        with open(final[:-4] + ".json", "w") as f:
-            json.dump(meta, f, indent=1)
+                self.result = render_edition(take_dir, edition, settings=self.settings, log=self.log)
+            except (OSError, ValueError, RuntimeError) as e:
+                self.error = f"{edition} edition failed: {e}"
+                self.log(self.error)
+            self.composing = None
+
+        t = threading.Thread(target=run, daemon=True)
+        self.composing = (t, f"{edition} edition of {os.path.basename(take_dir)}")
+        t.start()
+        return True
 
     @property
     def status(self):
-        """Short text for the HUD: recording time, or composing, or the last error."""
+        """Short text for the HUD: recording time, or what is being rendered, or the last result."""
         if self.active:
             s = int(time.perf_counter() - self.started_at)
             return f"REC {s // 60:02d}:{s % 60:02d}"
         if self.composing is not None:
-            return "rendering take..."
-        return self.error
+            return f"rendering {self.composing[1]}..."
+        if self.error:
+            return self.error
+        if self.result:
+            return f"saved {os.path.relpath(self.result, OUT_DIR)}"
+        return ""
 
 
 class CameraFeed:
@@ -514,4 +655,12 @@ def check(settings=None, seconds=2.0):
 
 
 if __name__ == "__main__":
-    check()
+    import argparse
+    ap = argparse.ArgumentParser(description="drumhero takes: check the devices, or render an edition of a take")
+    ap.add_argument("--check", action="store_true", help="record a moment and report the channel levels and cameras (default)")
+    ap.add_argument("--render", nargs=2, metavar=("TAKE_DIR", "EDITION"), help="render computer or social from a take folder's raws")
+    a = ap.parse_args()
+    if a.render:
+        print(render_edition(*a.render))
+    else:
+        check()
