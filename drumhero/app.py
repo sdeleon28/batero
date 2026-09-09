@@ -35,7 +35,6 @@ from .sounds import (BACKING_GAIN, METRONOME_GAIN, PROGRESSIONS, SoundBank, Trac
 
 TARGET_FPS = 240
 CAPTURE_S = 1.5           # wizard: keep collecting note numbers this long after the first hit
-NAV_DEBOUNCE_S = 0.22     # a drum acts on its first hit, then again only after this much silence: a roll is one press
 NAV_MIN_VELOCITY = 25     # softer hits never navigate (sticks resting on the snare read 4..14)
 NAV_SOUND_MIN_VELOCITY = 15  # ...but every hit above this is heard, undebounced, so rolls sound whole
 RESULTS_GRACE_S = 1.0     # after a level ends, ignore drum hits this long before they navigate
@@ -93,7 +92,6 @@ class App:
         trace = getattr(args, "midi_trace", None) or self.settings.get("midi_trace")
         if trace:
             self.midi_trace = open(os.path.expanduser(trace), "a")
-        self.last_nav = {}
         self.legend_flash = {}     # instrument -> wall time of its last navigation hit
 
         # display and fonts only: pygame.init() would open the mixer here, and opening an audio
@@ -361,9 +359,9 @@ class App:
                 self.midi_trace.flush()
 
     def nav_hit(self, note, velocity):
-        """A drum hit used as a button. Every hit is sounded (so a roll on a menu sounds
-        like a roll); the button action is velocity-gated and debounced, queued for the
-        main thread."""
+        """A drum hit used as a button. Every hit is sounded; every hit above the gate is
+        one action, immediately (no debounce: the game must feel instant, and MIDI hits
+        never bounce), queued for the main thread."""
         inst = self.instrument_for(note)
         if inst is None or velocity < NAV_SOUND_MIN_VELOCITY:
             return
@@ -372,12 +370,7 @@ class App:
             return
         if inst == "crash2":
             inst = "crash"                     # either crash is the "up" / Setup button
-        now = time.perf_counter()
-        quiet = now - self.last_nav.get(inst, 0)
-        self.last_nav[inst] = now              # every hit restarts the silence a new press needs
-        if quiet < NAV_DEBOUNCE_S:
-            return
-        self.legend_flash[inst] = now
+        self.legend_flash[inst] = time.perf_counter()
         self.drum_queue.append(inst)
 
     # --- screens ---------------------------------------------------------------

@@ -46,9 +46,8 @@ screen shows which does what, lighting up when you hit it:
 
 On the results screen the snare goes to the next level, the hi-hat retries and
 the kick goes back to the list. Hits are ignored for the first second after a
-level ends so the last fill does not navigate. A drum acts on its first hit and
-again only after 220 ms without hits, so a double trigger or a whole roll is one press,
-and hits softer than velocity 25
+level ends so the last fill does not navigate. Every hit is one action, immediately
+(no debounce), and hits softer than velocity 25
 never navigate, so resting the sticks on the snare does nothing. Every hit above
 velocity 15 is still heard, so a roll played on a menu sounds whole. The keyboard works everywhere too:
 arrows, Enter, Esc, and keys 1 to 4 on the hub. `h j k l` do the same as the
