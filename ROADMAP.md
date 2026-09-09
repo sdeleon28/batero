@@ -30,7 +30,24 @@ plays a prescribed simple exercise, then replay the log through `GhostFilter` an
 hhmapper's `State` with explicit timestamps before changing a number; the recorded
 takes' numbers are in `CLAUDE.md`.
 
-## B. Takes have no audio: XR18 does not send the mix to USB 17/18
+## B. Takes have no audio: XR18 does not send the mix to USB 17/18 (resolved 2026-09-09)
+
+**Fixed.** In X AIR Edit the page is Setup -> **In/Out** -> **USB Sends** tab, a matrix
+(rows USB 1..18, columns Channel / Aux In / FX / Bus / Effect / Main). USB 17/18 were
+tapping Bus 1/2 post fader, which carry nothing; moved to Main L / Main R post fader.
+Measured right after: USB 17/18 at -34 dBFS with Bitwig playing (was -180). Rows 1..16
+still tap the analog preamps. The user then set the game's `audio_device` to the XR18 and the first
+`V` take had 150 ms of game sound and silence after that: opening the take's PortAudio
+input silenced SDL's output on the same device. Cause and fix, measured the same day with
+a looping tone and the USB 17/18 loopback: PortAudio sets the CoreAudio device buffer to
+its own latency target (1024+ frames) and SDL's output, opened with 256 frames, dies within
+a second; the old `audio_input_opened` mixer reopen never restored it (and opening the
+mixer after such an input killed the input, PaMacCore err -50). Opening every input on
+the interface with `blocksize = MIXER_BUFFER` and `latency = MIXER_BUFFER / sr`
+(`capture.input_stream_kwargs`, used by the take and the camera-check meter) keeps both
+streams alive: a 5 s test take carried the tone at a constant level with 0 overflows and
+the mixer kept playing afterwards. The mixer reopen is gone. ffmpeg's avfoundation input
+also left SDL alone, kept as a fallback idea. Original notes kept for reference:
 
 **Goal.** A take (`V` key, `capture.py`) must contain what the user hears: the game's
 sounds plus Bitwig/GGD played through hhmapper, i.e. the audio interface's monitor
@@ -86,9 +103,8 @@ PY
 
 with music playing in Bitwig; anything above -60 dBFS means the sends work. Then
 Setup -> "Camera & take check" shows the same meter live, and a `V` take should
-have audio. Note: opening a PortAudio input on the X18 breaks SDL's output on the
-same device; `App.audio_input_opened` reopens the mixer afterwards (commit 5a06fde),
-keep that call whenever a new input path is added.
+have audio. Note: any PortAudio input on the X18 must be opened with
+`capture.input_stream_kwargs` (mixer-sized buffer), see the top of this item.
 
 ## C. XR18 network / OSC (optional, would let Claude configure the mixer)
 
@@ -109,9 +125,9 @@ Remote Protocol", the XR18 mirrors X32 addresses for routing: `/config/routing/C
 
 ## D. Smaller pending items
 
-- Verify game audio survives "Camera & take check" and takes (commit 5a06fde) and
-  that the camera PiP is in sync (commit 22b2331; `capture_camera_delay_ms` in
-  settings can shift it if not).
+- Verify in the app that game audio survives "Camera & take check" and a `V` take with
+  the mixer-sized input buffers (item B) and that the camera PiP is in sync
+  (commit 22b2331; `capture_camera_delay_ms` in settings can shift it if not).
 - iPhone Continuity Camera only appears while the phone is **unlocked/awake** on
   the tripod; it can take ~35 s to show up after unlocking. The camera check
   rescans every 5 s.

@@ -65,6 +65,18 @@ def _tool(name):
     return None
 
 
+
+def input_stream_kwargs(samplerate):
+    """Buffer settings for any PortAudio input opened on the interface the game also plays
+    through. PortAudio sets the CoreAudio device's buffer size to its own latency target
+    (1024+ frames) and SDL's output, opened with MIXER_BUFFER frames, goes silent within a
+    second and stays silent (measured 2026-09-09 on the X18; reopening the mixer did not
+    help, and opening the mixer after such an input killed the input instead). Asking
+    PortAudio for exactly the mixer's buffer keeps both streams alive."""
+    from .sounds import MIXER_BUFFER
+    return {"blocksize": MIXER_BUFFER, "latency": MIXER_BUFFER / float(samplerate)}
+
+
 def ffmpeg_path():
     return _tool("ffmpeg")
 
@@ -196,10 +208,15 @@ class Recorder:
         self._aq = queue.Queue()
         self._afile = sf.SoundFile(self.audio_path, "w", samplerate=sr, channels=len(chans), subtype="PCM_16")
 
+        self.audio_overflows = 0
+
         def cb(indata, frames, t, status):
+            if status.input_overflow:
+                self.audio_overflows += 1
             self._aq.put(indata[:, chans].copy())
 
-        self._audio = sd.InputStream(device=idx, channels=nin, samplerate=sr, blocksize=1024, dtype="float32", callback=cb)
+        self._audio = sd.InputStream(device=idx, channels=nin, samplerate=sr, dtype="float32", callback=cb,
+                                     **input_stream_kwargs(sr))
         self._audio.start()
         self.audio_t0 = time.time()
         self._awriter = threading.Thread(target=self._write_audio, daemon=True)
@@ -316,7 +333,7 @@ class Recorder:
             keep = os.path.join(OUT_DIR, f"{os.path.basename(final)[:-4]} (parts)")
             shutil.copytree(self.tmp, keep, dirs_exist_ok=True)
         else:
-            self.log(f"recording saved: {final} ({self.frames} frames, {self.dropped} dropped)")
+            self.log(f"recording saved: {final} ({self.frames} frames, {self.dropped} dropped, {getattr(self, 'audio_overflows', 0)} audio overflows)")
             self._write_sidecar(final, duration)
         shutil.rmtree(self.tmp, ignore_errors=True)
         self.composing = None
@@ -451,8 +468,9 @@ class AudioMeter:
         idx, info = dev
         nin = int(info["max_input_channels"])
         self.chans = [c - 1 for c in self.settings["capture_audio_channels"] if 0 <= c - 1 < nin]
-        self.stream = sd.InputStream(device=idx, channels=nin, samplerate=int(info["default_samplerate"]), blocksize=2048,
-                                     dtype="float32", callback=self._cb)
+        sr = int(info["default_samplerate"])
+        self.stream = sd.InputStream(device=idx, channels=nin, samplerate=sr, dtype="float32", callback=self._cb,
+                                     **input_stream_kwargs(sr))
         self.stream.start()
 
     def _cb(self, indata, frames, t, status):

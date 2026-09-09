@@ -439,13 +439,6 @@ class App:
             self.screen_obj.game.sounds = self.sounds
         self.update_menu_music()
 
-    def audio_input_opened(self):
-        """Opening an input stream on the interface (the take's audio, the camera check's meter)
-        breaks SDL's output on the same device (measured 2026-09-08 on the X18: playback slowed
-        to 40 % and stayed broken). Reopening the mixer while the input is open restores it."""
-        if self.sounds.ok:
-            self.reopen_sounds(self.settings.get("audio_device"))
-
     def draw_toasts(self):
         live = self.toasts.live()
         if not live:
@@ -542,8 +535,6 @@ class App:
             name = self.screen_obj.chart.name if isinstance(self.screen_obj, PlayScreen) else "take"
             self.watcher.paused = True                     # the camera is ffmpeg's now
             if self.recorder.start(self.size, name):
-                if self.recorder._audio is not None:
-                    self.audio_input_opened()
                 self.toasts.add("recording" + (f" with camera {self.camera_name}" if self.camera_name else ", no camera"), (235, 70, 70))
                 print("recording started")
             else:
@@ -1177,8 +1168,6 @@ class CameraCheckScreen(Screen):
             self.meter_error = str(e)
         else:
             self.meter_error = self.meter.error
-            if self.meter.stream is not None:
-                app.audio_input_opened()                         # the meter's input stream breaks SDL's output otherwise
         self.test_at = None
         self.test_result = None
 
@@ -1241,8 +1230,6 @@ class CameraCheckScreen(Screen):
         self.close()                                             # the camera and the device go to the recorder
         self.app.recorder.settings.update(self.settings)
         if self.app.recorder.start(self.app.size, "camera check"):
-            if self.app.recorder._audio is not None:
-                self.app.audio_input_opened()
             self.test_at = time.perf_counter()
             self.test_result = None
         else:
@@ -1269,8 +1256,6 @@ class CameraCheckScreen(Screen):
             self.preview = CP.CameraPreview(self.camera) if self.camera and CP.ffmpeg_path() else None   # back to live
             try:
                 self.meter = CP.AudioMeter(self.app.settings)
-                if self.meter.stream is not None:
-                    self.app.audio_input_opened()
             except Exception:                                  # noqa: BLE001
                 self.meter = None
 
