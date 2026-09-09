@@ -36,7 +36,8 @@ from .sounds import (BACKING_GAIN, METRONOME_GAIN, PROGRESSIONS, SoundBank, Trac
 TARGET_FPS = 240
 CAPTURE_S = 1.5           # wizard: keep collecting note numbers this long after the first hit
 NAV_DEBOUNCE_S = 0.22     # one drum hit = one menu action, at most this often per drum
-NAV_MIN_VELOCITY = 45     # softer hits (sticks resting on the snare) never navigate
+NAV_MIN_VELOCITY = 25     # softer hits never navigate (sticks resting on the snare read 4..14)
+NAV_SOUND_MIN_VELOCITY = 15  # ...but every hit above this is heard, undebounced, so rolls sound whole
 RESULTS_GRACE_S = 1.0     # after a level ends, ignore drum hits this long before they navigate
 KEY_LANES = {pygame.K_1: 0, pygame.K_2: 1, pygame.K_3: 2, pygame.K_4: 3, pygame.K_5: 4,
              pygame.K_6: 5, pygame.K_7: 6, pygame.K_8: 7, pygame.K_9: 8, pygame.K_0: 9}
@@ -360,9 +361,14 @@ class App:
                 self.midi_trace.flush()
 
     def nav_hit(self, note, velocity):
-        """A drum hit used as a button. Debounced, sounded, queued for the main thread."""
+        """A drum hit used as a button. Every hit is sounded (so a roll on a menu sounds
+        like a roll); the button action is velocity-gated and debounced, queued for the
+        main thread."""
         inst = self.instrument_for(note)
-        if inst is None or velocity < NAV_MIN_VELOCITY:
+        if inst is None or velocity < NAV_SOUND_MIN_VELOCITY:
+            return
+        self.sounds.play(inst, velocity, 0.8)
+        if velocity < NAV_MIN_VELOCITY:
             return
         if inst == "crash2":
             inst = "crash"                     # either crash is the "up" / Setup button
@@ -371,7 +377,6 @@ class App:
             return
         self.last_nav[inst] = now
         self.legend_flash[inst] = now
-        self.sounds.play(inst, velocity, 0.8)
         self.drum_queue.append(inst)
 
     # --- screens ---------------------------------------------------------------

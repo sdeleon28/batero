@@ -16,7 +16,7 @@ the measurements behind them are in `CLAUDE.md` (hi-hat gesture section); both
 repos carry them. Remaining, by design: a missed tap that reads under 25 is lost,
 and the 42 ms / 70..76 % crosstalk ghost after a hard edge accent is let through
 because real taps land in the same window. If the wizard still misses strokes, look
-at `NAV_MIN_VELOCITY` (45) and the runlog, not at the ghost filter.
+at `NAV_MIN_VELOCITY` (25) and the runlog, not at the ghost filter.
 
 ## B. Takes have no audio: XR18 does not send the mix to USB 17/18
 
