@@ -32,12 +32,14 @@ from . import ghost as GH
 from .ghost import GhostFilter
 from .sounds import (BACKING_GAIN, METRONOME_GAIN, PROGRESSIONS, SoundBank, Track, load_audio_track,
                      menu_music_sound, output_devices, render_backing_track, render_metronome, MENU_CHANNEL)
+from . import sounds as SND
 
 TARGET_FPS = 240
 CAPTURE_S = 1.5           # wizard: keep collecting note numbers this long after the first hit
 NAV_MIN_VELOCITY = 25     # softer hits never navigate (sticks resting on the snare read 4..14)
 NAV_SOUND_MIN_VELOCITY = 15  # ...but every hit above this is heard, undebounced, so rolls sound whole
 RESULTS_GRACE_S = 1.0     # after a level ends, ignore drum hits this long before they navigate
+VOLUME_STEP = 0.05        # { and } move the game's output level by this much
 KEY_LANES = {pygame.K_1: 0, pygame.K_2: 1, pygame.K_3: 2, pygame.K_4: 3, pygame.K_5: 4,
              pygame.K_6: 5, pygame.K_7: 6, pygame.K_8: 7, pygame.K_9: 8, pygame.K_0: 9}
 MODULE_HINTS = ("td-", "td1", "td2", "td5", "alesis", "nitro", "strike", "dtx", "roland", "drum")
@@ -59,6 +61,7 @@ class App:
         self.settings = load_settings()
         if args.audio_device:
             self.settings["audio_device"] = args.audio_device
+        SND.set_master(self.settings.get("volume", 1.0))
         kit = load_kit(args.kit) if args.kit else load_kit()
         self.first_run = kit is None
         self.set_kit(kit or default_kit())
@@ -181,6 +184,26 @@ class App:
         self.sounds.drums = on
         self.settings["drum_sounds"] = on
         save_settings(self.settings)
+
+    @property
+    def volume(self):
+        return SND.master()
+
+    def set_volume(self, v):
+        """The game's own output level ({ and }), independent of the mixer's fader. Applies to
+        the sounds already playing (menu music, a level's tracks) and to every new one; saved."""
+        SND.set_master(v)
+        self.settings["volume"] = SND.master()
+        save_settings(self.settings)
+        if self.menu_music is not None:
+            self.menu_music.set_volume(SND.MENU_MUSIC_GAIN * SND.master())
+        if isinstance(self.screen_obj, PlayScreen):
+            for track, _ in self.screen_obj.game.tracks.values():
+                track.apply_gain()
+        self.toasts.add(f"volume {SND.master():.0%}", ACCENT, key="volume")
+
+    def nudge_volume(self, d):
+        self.set_volume(round(SND.master() + d * VOLUME_STEP, 2))
 
     def cycle_audio_device(self):
         names = [None] + output_devices()
@@ -582,6 +605,10 @@ class App:
                         self.toggle_fullscreen()
                     elif ev.key == pygame.K_v:
                         self.toggle_recording()
+                    elif ev.unicode == "{" or (ev.key == pygame.K_LEFTBRACKET and ev.mod & pygame.KMOD_SHIFT):
+                        self.nudge_volume(-1)              # the plain brackets belong to the screens (tempo, corner)
+                    elif ev.unicode == "}" or (ev.key == pygame.K_RIGHTBRACKET and ev.mod & pygame.KMOD_SHIFT):
+                        self.nudge_volume(+1)
                     elif self.screen_obj.on_key(ev.key) is False:
                         running = False
             while self.drum_queue:
@@ -793,6 +820,7 @@ class ListScreen(Screen):
                     (f"Metronome: {self.app.metronome_mode}", "congas: full follows the subdivision, beats only marks the beats"),
                     (f"Menu music: {'on' if self.app.menu_music_on else 'off'}", "ambient texture outside the game"),
                     (f"Audio output: {self.app.sounds.device or 'system default'}", "select cycles through the outputs, saved"),
+                    (f"Volume: {self.app.volume:.0%}", "{ and } lower / raise the game's own level anywhere, saved; select raises, wraps to 5 %"),
                     (f"Start fullscreen: {'on' if self.app.settings.get('fullscreen', True) else 'off'}", "F11 or Cmd+F toggles any time, saved"),
                     ("Recording (V)", f"audio {self.app.recorder.settings['capture_audio_device']} ch {self.app.recorder.settings['capture_audio_channels']}"
                                       f" · camera '{self.app.recorder.settings['capture_camera']}' · ~/Movies/drumhero"),
@@ -842,17 +870,19 @@ class ListScreen(Screen):
             elif self.sel == 7:
                 self.app.cycle_audio_device()
             elif self.sel == 8:
+                self.app.set_volume(VOLUME_STEP if self.app.volume >= 1.0 else self.app.volume + VOLUME_STEP)
+            elif self.sel == 9:
                 self.app.settings["fullscreen"] = not self.app.settings.get("fullscreen", True)
                 save_settings(self.app.settings)
-            elif self.sel == 9:
-                self.app.toggle_recording()
             elif self.sel == 10:
-                self.app.go(CameraCheckScreen(self.app, self.app.surface))
+                self.app.toggle_recording()
             elif self.sel == 11:
-                self.app.go(EditScreen(self.app))
+                self.app.go(CameraCheckScreen(self.app, self.app.surface))
             elif self.sel == 12:
-                self.app.go(StatsScreen(self.app))
+                self.app.go(EditScreen(self.app))
             elif self.sel == 13:
+                self.app.go(StatsScreen(self.app))
+            elif self.sel == 14:
                 self.app.go(CoachScreen(self.app))
             else:
                 return False
@@ -1180,7 +1210,7 @@ class CameraCheckScreen(Screen):
 
     def leave(self):
         self.close()
-        self.app.go(ListScreen(self.app, "crash", 10))
+        self.app.go(ListScreen(self.app, "crash", 11))
 
     def on_drum(self, inst):
         action = NAV.get(inst)
@@ -1352,12 +1382,12 @@ class EditScreen(Screen):
         elif action == "accept":
             self.accept()
         elif action == "back":
-            self.app.go(ListScreen(self.app, "crash", 11))
+            self.app.go(ListScreen(self.app, "crash", 12))
         return True
 
     def on_key(self, key):
         if key in (pygame.K_ESCAPE, pygame.K_h):
-            self.app.go(ListScreen(self.app, "crash", 11))
+            self.app.go(ListScreen(self.app, "crash", 12))
         elif key in (pygame.K_DOWN, pygame.K_j):
             self.sel = (self.sel + 1) % len(E.STYLES)
         elif key in (pygame.K_UP, pygame.K_k):

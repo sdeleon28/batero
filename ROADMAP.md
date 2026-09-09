@@ -33,22 +33,15 @@ factor so text does not overflow the narrow frame. Add the key (suggested `L`, f
 screens; check `on_key` in every Screen class) and a line in Setup showing the current
 layout.
 
-### 2. In-game volume on the curly braces
+### 2. In-game volume on the curly braces (done 2026-09-09)
 
-**Goal.** `{` lowers and `}` raises the game's own output level while playing, independent
-of the XR18's fader (which the user keeps for the overall level). Persist it in settings as
-`volume` (0..1, default 1.0), show a toast with the percentage, work on every screen.
-
-**Where.** pygame has no master volume, so add a `master` factor to `SoundBank`
-(`sounds.py`) that multiplies every `set_volume` call: kit hits (`SoundBank.play`, line
-~288, per-channel volume from velocity), the backing `Track` (`Track.gain`, ~771), menu
-music (`MENU_MUSIC_GAIN`, ~851) and the count-in / metronome. Changing it must also
-re-apply to channels already playing (`pygame.mixer.Channel(i).set_volume` on the live
-backing / menu music channels; a held drum hit can keep its level). Bind it in
-`App.run` (`app.py`, the global KEYDOWN branch next to `K_v`), before the screens' `on_key`:
-the plain brackets are taken (tempo in `PlayScreen`, corner in Setup, take browsing), so
-match on `ev.unicode in ("{", "}")` or `K_LEFTBRACKET` / `K_RIGHTBRACKET` with
-`KMOD_SHIFT`. Steps of 0.05, clamp 0..1.
+`{` lowers and `}` raises the game's own output level on every screen, steps of 5 %,
+clamped 0..1, persisted as `volume` in settings (default 1.0), one toast that updates in
+place. Implemented as a module-level master factor in `sounds.py` (`set_master` /
+`master`) that every `set_volume` multiplies; `App.set_volume` re-applies it to the menu
+music and to a running level's tracks (`Track.apply_gain`), a held drum hit keeps its
+level. Setup shows a "Volume" row (select raises, wraps to 5 %). The XR18's fader stays
+the overall level.
 
 
 ## A. Hi-hat detection drops notes (resolved 2026-09-09)

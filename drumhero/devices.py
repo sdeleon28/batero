@@ -105,13 +105,17 @@ class Toasts:
     """Short messages stacked in a corner, fading out."""
 
     def __init__(self):
-        self.items = []          # (t0, text, color)
+        self.items = []          # (t0, text, color, key)
 
-    def add(self, text, color):
-        self.items.append((time.perf_counter(), text, color))
+    def add(self, text, color, key=None):
+        """key: a toast with a key replaces the live one with the same key (a value that
+        changes on every key press, like the volume, shows one toast, not a stack)."""
+        if key is not None:
+            self.items = [it for it in self.items if it[3] != key]
+        self.items.append((time.perf_counter(), text, color, key))
         self.items = self.items[-5:]
 
     def live(self):
         now = time.perf_counter()
-        self.items = [(t0, tx, c) for t0, tx, c in self.items if now - t0 < TOAST_S]
-        return [(now - t0, tx, c) for t0, tx, c in self.items]
+        self.items = [it for it in self.items if now - it[0] < TOAST_S]
+        return [(now - t0, tx, c) for t0, tx, c, _ in self.items]

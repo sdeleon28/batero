@@ -390,6 +390,7 @@ timing errors; the mean is your latency, the deviation is you.
 | , / .         | input offset -/+ 5 ms              |
 | D             | drum sounds on/off (saved)         |
 | V             | start / stop a take (video + mix)  |
+| { / }         | game volume -/+ 5 % (saved), any screen; the mixer fader stays the overall level |
 | S / C (hub)   | progress / coach                   |
 | 1..9, 0       | hit lanes from the keyboard        |
 

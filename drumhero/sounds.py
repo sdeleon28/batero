@@ -13,6 +13,20 @@ MENU_CHANNEL = 0
 TRACK_CHANNELS = {"backing": 1, "metronome": 2, "music": 3}
 RESERVED = 4
 
+# The game's own output level, 0..1 (the { and } keys). pygame has no master volume, so
+# every set_volume in this module multiplies by it; App.set_volume re-applies it to the
+# sounds already playing.
+_master = 1.0
+
+
+def master():
+    return _master
+
+
+def set_master(v):
+    global _master
+    _master = max(0.0, min(1.0, float(v)))
+
 
 def _t(seconds):
     return np.arange(int(seconds * SR)) / SR
@@ -266,7 +280,7 @@ class SoundBank:
             self.sounds[key] = _to_sound(jingle(stars))
         ch = self.sounds[key].play()
         if ch is not None:
-            ch.set_volume(0.9)
+            ch.set_volume(0.9 * _master)
 
     def _get(self, key):
         s = self.sounds.get(key)
@@ -285,7 +299,7 @@ class SoundBank:
             return
         ch = s.play()
         if ch is not None:
-            ch.set_volume(max(0.05, min(1.0, gain * (0.3 + 0.7 * velocity / 127))))
+            ch.set_volume(max(0.05, min(1.0, gain * (0.3 + 0.7 * velocity / 127))) * _master)
 
 
 # ---------------------------------------------------------------------------
@@ -666,7 +680,7 @@ def backing_sound(bpm, prog_index=0, bars=4, lead_in_s=0.0):
     pcm = (data * 32767).astype(np.int16)
     stereo = np.ascontiguousarray(np.column_stack([pcm, pcm]))
     snd = pygame.sndarray.make_sound(stereo)
-    snd.set_volume(BACKING_GAIN)
+    snd.set_volume(BACKING_GAIN * _master)
     return snd, length
 
 
@@ -768,12 +782,17 @@ class Track:
         if i >= len(self.pcm):
             return
         self.sound = pygame.sndarray.make_sound(np.ascontiguousarray(self.pcm[i:]))
-        self.sound.set_volume(self.gain)
+        self.apply_gain()
         if self.channel is not None:
             pygame.mixer.Channel(self.channel).play(self.sound)
         else:
             self.sound.play()
         self.playing = True
+
+    def apply_gain(self):
+        """Track gain times the master level, on the sound that is playing (if any)."""
+        if self.sound is not None:
+            self.sound.set_volume(self.gain * _master)
 
     def stop(self):
         if self.sound is not None:
@@ -848,7 +867,7 @@ def menu_music_sound():
     data = make_menu_music()
     pcm = (data * 32767).astype(np.int16)
     snd = pygame.sndarray.make_sound(np.ascontiguousarray(np.column_stack([pcm, pcm])))
-    snd.set_volume(MENU_MUSIC_GAIN)
+    snd.set_volume(MENU_MUSIC_GAIN * _master)
     return snd
 
 
