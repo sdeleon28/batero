@@ -2,13 +2,17 @@
 
 Working the pedal shakes the hat and the module sends stick notes that nobody
 played. Measured on 2026-09-06 while stomping:
-  - ~30 ms BEFORE the chick: note 46 at velocity 9..22 with the pedal still up
-  - 3..5 ms AFTER the chick: note 46 at velocity 60..78 with the pedal moving fast
-  - up to ~250 ms after: note 42 at velocity 30..36 while the pedal settles
-The softest real hi-hat stroke seen was velocity 23.
+  - ~30 ms BEFORE the chick: note 46 at velocity 7..22 with the pedal still up
+  - 3..8 ms AFTER the chick: note 46 at velocity 48..94 with the pedal moving fast
+  - up to ~250 ms after: note 42 at velocity 22..36 while the pedal settles
 Measured 2026-09-07 hitting the edge with the pedal closed: nearly every hard stroke is
 followed by one or two bow notes (42, sometimes 46), 42 ms later at 70..76 % of the
 stroke's velocity and/or 73..93 ms later at 35..56 %; soft strokes get them rarely.
+Re-tuned 2026-09-09 on real playing (paradiddles, fast bow/edge alternation, chick and
+stroke together, open hats): the softest real tap read 29; real bow taps land as close
+as 44 ms after an edge accent at 63..85 % of it; a stick landing with the chick reads
+113..126 within 5 ms of it, or 56..127 as a 42 up to 52 ms later; real strokes while
+the pedal is opening read 116..127. Every rule below keeps those.
 """
 import time
 from collections import deque
@@ -17,20 +21,26 @@ HIHAT_STICK_NOTES = {22, 26, 42, 46}   # bow and edge, closed and open
 CHICK_NOTES = {44}
 PEDAL_CC = 4
 
-HIHAT_MIN_VELOCITY = 25      # softer hi-hat notes are ghosts (also covers most pre-chick ghosts)
-CHICK_SPLASH_MS = 60         # hi-hat notes this soon after a chick are ghosts
+HIHAT_MIN_VELOCITY = 25      # softer hi-hat notes are ghosts (also covers the pre-chick ghosts)
+CHICK_SPLASH_MS = 10         # hi-hat notes this soon after a chick are ghosts...
+CHICK_SPLASH_VELOCITY_MIN = 100  # ...unless this loud: a stick landing with the chick reads 113..126
 PEDAL_MOTION_CC = 20         # hi-hat notes are ghosts if the pedal moved at least this much...
-PEDAL_MOTION_MS = 50         # ...within this many milliseconds before the note
+PEDAL_MOTION_MS = 50         # ...within this many milliseconds before the note...
+PEDAL_MOTION_VELOCITY_MIN = 50   # ...unless this loud: real strokes while opening read 116..127
+PEDAL_SETTLE_MS = 250        # closed-hat notes (42/22) this long after a chick...
+PEDAL_SETTLE_VELOCITY_MAX = 40   # ...at or below this velocity are the pedal settling (real: >= 56)
 ANY_MIN_VELOCITY = 8         # below this nothing counts, on any pad
 # A hard stroke on one zone makes the other zone fire late: measured 42 ms after the stroke at
-# 70..76 % of its velocity, and 73..93 ms after at 35..56 %. Real strokes on the other zone
-# never come that fast and soft. (window ms, max velocity ratio) tiers, checked in order.
-ZONE_CROSSTALK = [(50, 0.85), (100, 0.65)]
+# 70..76 % of its velocity, and 73..93 ms after at 35..56 %. Real bow taps after an edge accent
+# come as close as 44 ms at 63..85 %, so only the soft tier is separable; the 42 ms one is
+# accepted. (window ms, max velocity ratio) tiers, checked in order.
+ZONE_CROSSTALK = [(95, 0.58)]
 
 PEDAL_CLOSED_CC = 90         # fully closed on this pedal (0 = fully open)
 TIGHT_MIN = 80               # closedness >= this -> tight
 OPEN_MAX = 10                # closedness <= this -> open; between -> mid
 EDGE_NOTES = {22, 26}
+CLOSED_NOTES = {42, 22}      # what the module sends when its own threshold says closed
 
 
 def openness_label(cc):
@@ -82,9 +92,14 @@ class GhostFilter:
             return None
         if velocity < HIHAT_MIN_VELOCITY:
             return self._flag("soft hi-hat", t, note, velocity)
-        if self.last_chick_t is not None and (t - self.last_chick_t) * 1000 <= CHICK_SPLASH_MS:
-            return self._flag("chick splash", t, note, velocity)
-        if self.pedal_motion(t) >= PEDAL_MOTION_CC:
+        if self.last_chick_t is not None:
+            since_chick = (t - self.last_chick_t) * 1000
+            if since_chick <= CHICK_SPLASH_MS and velocity < CHICK_SPLASH_VELOCITY_MIN:
+                return self._flag("chick splash", t, note, velocity)
+            if (since_chick <= PEDAL_SETTLE_MS and velocity <= PEDAL_SETTLE_VELOCITY_MAX
+                    and note in CLOSED_NOTES):
+                return self._flag("pedal settling", t, note, velocity)
+        if self.pedal_motion(t) >= PEDAL_MOTION_CC and velocity < PEDAL_MOTION_VELOCITY_MIN:
             return self._flag("pedal moving", t, note, velocity)
         zone = "edge" if note in EDGE_NOTES else "bow"
         ls = self.last_stroke

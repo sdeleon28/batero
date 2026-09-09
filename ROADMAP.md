@@ -4,55 +4,19 @@ Loose ends as of 2026-09-09. Each item carries the context needed to pick it up 
 Related ground truth lives in `CLAUDE.md` (hi-hat gesture, filter rules) and
 `../hhmapper/CLAUDE.md` (GGD output map).
 
-## A. Hi-hat detection drops notes (setup menu, probably gameplay too)
+## A. Hi-hat detection drops notes (resolved 2026-09-09)
 
-**Symptom.** In the Setup kit wizard the hi-hat steps do not always register strokes,
-and the user suspects the same during gameplay: fast hi-hat notes go missing.
-
-**Suspect: the ghost filter eats real notes.** `drumhero/ghost.py` is applied in
-`App.on_midi` (app.py ~line 341-354) to *every* screen, the wizard included, before
-any screen sees the note. Rules, with the ones most likely to eat fast real strokes marked:
-
-| rule | constant | risk on fast playing |
-|---|---|---|
-| hi-hat stick note velocity < 25 | `HIHAT_MIN_VELOCITY` | soft ghost-note rolls at 23..24 |
-| stick note within 60 ms after a chick (44) | `CHICK_SPLASH_MS` | **"chick + stroke" figures, hat barks, fast foot/hand alternation** |
-| stick note while CC4 moved >= 20 in the last 50 ms | `PEDAL_MOTION_CC/MS` | **any stroke played while opening/closing (open-hat accents, foot splashes)** |
-| stroke on the other zone than the previous one: <= 85 % of its velocity within 50 ms, <= 65 % within 100 ms | `ZONE_CROSSTALK` | **bow/edge alternation: a 16th at 150 bpm is 100 ms apart, so a softer edge after a hard bow (or vice versa) is dropped** |
-| chained reference: the reference stays the last *accepted* stroke | `GhostFilter` state | after one wrong drop the next stroke is compared against an older, harder note and can fall too |
-| any note velocity < 8 | `ANY_MIN_VELOCITY` | none |
-| menu navigation ignores velocity < 45 | `NAV_MIN_VELOCITY` (app.py) | wizard/menu only: soft taps do not register there by design |
-
-The rules were tuned on 2026-09-07 by listening to *isolated* hard edge strokes and
-chicks (see the ghost table in CLAUDE.md); they were never validated against fast
-hi-hat rolls, alternating bow/edge patterns, or the hi-hat control lessons
-(`chart.HIHAT_LESSONS`). hhmapper has the same rules (`hhmapper.py`), so a Bitwig
-performance would lose the same notes.
-
-**How to diagnose.** Play a fast hi-hat passage in a level, then:
-
-```
-.venv/bin/python -m drumhero.audit --hits      # last run log, ~/Library/Logs/drumhero/runs
-```
-
-Every dropped note is logged as `ghost` with its `why` (app.py runlog.add("ghost", ...)),
-so count `ghost` entries per reason during the passage. The same can be seen live: the
-wizard and the play screen show "ignored note N vel V: reason" for 1.5 s
-(`PlayScreen.on_ghost`). `~/Library/Logs/drumhero-midi.log` (setting `midi_trace`) has
-the raw MIDI with timestamps to compare against.
-
-**Candidate fixes** (change both repos and the CLAUDE.md filter section together):
-- Zone crosstalk: shrink the 100 ms tier (ghosts measured at 73..93 ms, so 95 ms
-  might do) and/or require the ghost to be the *same* note the crosstalk produces
-  (measured: 42 or 46 after an edge stroke, i.e. bow ghosts after edge, never
-  edge ghosts after bow). Compare bow-after-edge only.
-- Chick splash: the measured ghost is a 46 at 60..78 within 3..5 ms; a 60 ms window
-  is generous. 15..20 ms would keep real "chick then stroke" figures.
-- Pedal motion: only drop when the note is *soft* (measured ghosts 30..36), keep
-  strokes >= ~50 while the pedal moves.
-- Wizard: bypass the ghost filter entirely in the kit wizard steps (a wizard only
-  needs to see note numbers; crosstalk ghosts are harmless there since bow/edge
-  steps assign both notes anyway).
+Confirmed and fixed by recording real playing (paradiddles slow and fast, bow/edge
+single strokes accelerating, chick alone, chick + stroke together, open hats) and
+replaying the takes through `drumhero/ghost.py` and hhmapper's `State`. The old
+rules ate real strokes in three places: bow taps 44..90 ms after an edge accent
+(zone crosstalk), every stroke played together with a chick (60 ms chick splash),
+and strokes played while the pedal was still opening (pedal motion). New rules and
+the measurements behind them are in `CLAUDE.md` (hi-hat gesture section); both
+repos carry them. Remaining, by design: a missed tap that reads under 25 is lost,
+and the 42 ms / 70..76 % crosstalk ghost after a hard edge accent is let through
+because real taps land in the same window. If the wizard still misses strokes, look
+at `NAV_MIN_VELOCITY` (45) and the runlog, not at the ghost filter.
 
 ## B. Takes have no audio: XR18 does not send the mix to USB 17/18
 

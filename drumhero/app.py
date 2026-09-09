@@ -1721,7 +1721,10 @@ class PlayScreen(Screen):
             "offset_ms": app.offset_ms, "guide": self.game.guide, "metronome": app.metronome_mode,
             "backing": app.backing_on, "drum_sounds": app.sounds.drums, "dyn_thresholds": self.game.dyn_thresholds(),
             "ghost_filter": {"hihat_min_velocity": GH.HIHAT_MIN_VELOCITY, "chick_splash_ms": GH.CHICK_SPLASH_MS,
+                             "chick_splash_velocity_min": GH.CHICK_SPLASH_VELOCITY_MIN,
                              "pedal_motion_cc": GH.PEDAL_MOTION_CC, "pedal_motion_ms": GH.PEDAL_MOTION_MS,
+                             "pedal_motion_velocity_min": GH.PEDAL_MOTION_VELOCITY_MIN,
+                             "pedal_settle_ms": GH.PEDAL_SETTLE_MS, "pedal_settle_velocity_max": GH.PEDAL_SETTLE_VELOCITY_MAX,
                              "zone_crosstalk": GH.ZONE_CROSSTALK, "any_min_velocity": GH.ANY_MIN_VELOCITY},
         })
         prog = None if cat == "hihat" else index + (0 if cat == "kick" else 2)   # songs bring their own music
