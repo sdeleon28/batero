@@ -68,14 +68,12 @@ routing anything to those USB sends. Inputs 1..16 carry the analog preamps.
 Everything else in the pipeline works: 1080p video, camera PiP in sync, wav
 muxing (an empty wav is muxed, so the files exist but are silent).
 
-**What the user changed so far (wrong direction).** In X-AIR Edit, Input tab, on
-channels 15 and 16 (labelled "L OUT_64" / "R OUT_65", the faders that drive the
-Main L/R and monitoring): Channel Source = USB, USB Return = USB 17 / USB 18,
-USB Trim -4 dB. That is *computer -> mixer* (the mixer now plays back whatever the
-Mac sends to its USB outputs 17/18 through channels 15/16); it does not make the
-mixer send anything *to* the Mac. **Undo it**: set channels 15/16 back to their
-previous source (analog / A/D) or they will feed silence, or feedback if the game
-ever outputs to the XR18's 17/18.
+**Already tried and reverted (2026-09-09).** In X-AIR Edit, Input tab, channels 15/16
+(labelled "L OUT_64" / "R OUT_65", the faders that drive Main L/R and monitoring) were
+set to Channel Source = USB, USB Return = USB 17/18. That is *computer -> mixer*
+(it plays the Mac's USB outputs 17/18 through channels 15/16) and does not send
+anything *to* the Mac; the user has restored channels 15/16 to their previous
+(analog / A/D) source. Do not go down that road again.
 
 **What has to happen on the XR18 (firmware 1.17).** The mixer -> computer routing
 is "USB Sends" (a.k.a. USB Out / card outputs): 18 selectors, one per USB send,
