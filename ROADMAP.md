@@ -15,8 +15,20 @@ and strokes played while the pedal was still opening (pedal motion). New rules a
 the measurements behind them are in `CLAUDE.md` (hi-hat gesture section); both
 repos carry them. Remaining, by design: a missed tap that reads under 25 is lost,
 and the 42 ms / 70..76 % crosstalk ghost after a hard edge accent is let through
-because real taps land in the same window. If the wizard still misses strokes, look
-at `NAV_MIN_VELOCITY` (25) and the runlog, not at the ghost filter.
+because real taps land in the same window.
+
+Same day, the menus: a hit only sounded when it also counted as a button press, and
+presses were debounced to one per drum per 220 ms, so a roll on a menu lost its
+doubles. Now every hit above velocity 15 is heard and every hit above 25 is one
+action, immediately, with no debounce at all (`app.nav_hit`): the user wants the
+game to feel instant and MIDI hits never bounce, so a five-stroke roll on a menu
+moves five items, on purpose. Do not bring a debounce or a hold back in either repo.
+
+Still to check: gameplay and the hi-hat lessons with the new rules (item D). To
+diagnose a dropped stroke, log the TD-17 with mido and ms timestamps while the user
+plays a prescribed simple exercise, then replay the log through `GhostFilter` and
+hhmapper's `State` with explicit timestamps before changing a number; the recorded
+takes' numbers are in `CLAUDE.md`.
 
 ## B. Takes have no audio: XR18 does not send the mix to USB 17/18
 
@@ -105,6 +117,9 @@ Remote Protocol", the XR18 mirrors X32 addresses for routing: `/config/routing/C
   rescans every 5 s.
 - Hi-hat control lessons (`chart.HIHAT_LESSONS`): user has not yet played them
   with hhmapper -> Bitwig; check that the articulation labels feel natural.
+- Gameplay with the 2026-09-09 ghost rules: play a fast hi-hat level and count
+  `ghost` entries per reason in the runlog (`drumhero.audit --hits`); the rules were
+  validated on recorded takes, not yet inside a level.
 - hhmapper: run `hhmapper.py --probe --out` against both GGD tracks (One Kit
   Wonder, Modern & Massive 2). Open question: closed hats HH2 = 59 vs preset's
   Closed Tip = 53; switch "mid body/edge" to 53 if closed hats are silent.
