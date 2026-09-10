@@ -1,4 +1,5 @@
 """Drawing: the play field, flashes, HUD, results. Also shared fonts and helpers."""
+import bisect
 import math
 import time
 
@@ -140,10 +141,14 @@ class Fonts:
         return ts.get_height()
 
 
+STRIP_ROW = 24                  # strokes per row of the sticking strip
+
+
 class Renderer:
     def __init__(self, game: Game, size, fonts: Fonts, ghosts=None):
         self.ghosts = ghosts
         self.game = game
+        self.note_times = None                # chart note times, built on first use by the sticking strip
         self.w, self.h = size
         self.f = fonts
         self.judge_surfs = {k: fonts.big.render(k, True, c) for k, c in JUDGE_COLORS.items()}
@@ -353,21 +358,29 @@ class Renderer:
     def metronome(self, surf, t):
         """Four beat squares, each split into the current subdivision, lit in time."""
         g, f, S = self.game, self.f, self.s
-        sub = g.chart.subdivision_at(t)
-        labels = COUNT_LABELS.get(sub, [str(i + 1) for i in range(sub)])
+        pos = g.chart.beat_pos(t)                # in beats, negative during the count-in
+        bar_beat = math.floor(pos / 4) * 4
+        # subdivision per beat of the current bar: mixed rudiments switch inside the bar
+        subs = [g.chart.subdivision_at(g.chart.beat_time(bar_beat + b)) for b in range(4)]
         size, gap = 74 * S, 10 * S
         total = 4 * size + 3 * gap
         x0, y0 = self.w / 2 - total / 2, 10 * S
-        panel = pygame.Surface((int(total + 40 * S), int(size + 44 * S)))
+        strip_rows = math.ceil(len(g.chart.sticking) / STRIP_ROW) if g.chart.sticking else 0
+        strip_h = (30 + 32 * (strip_rows - 1) + (10 if g.chart.accents else 0)) * S if strip_rows else 0
+        strip_w = min(len(g.chart.sticking), STRIP_ROW) * 26 * S if strip_rows else 0
+        panel_w = max(total, strip_w) + 40 * S
+        panel = pygame.Surface((int(panel_w), int(size + 44 * S + strip_h)))
         panel.fill(BG)
         panel.set_alpha(215)
-        surf.blit(panel, (int(x0 - 20 * S), 0))
-        pos = g.chart.beat_pos(t)                # in beats, negative during the count-in
+        surf.blit(panel, (int(self.w / 2 - panel_w / 2), 0))
         beat_i = int(math.floor(pos)) % 4
         frac = pos - math.floor(pos)
+        sub = subs[beat_i]
         sub_i = min(sub - 1, int(frac * sub))
         prog = frac * sub - sub_i                # 0..1 inside the current cell
         for b in range(4):
+            sub = subs[b]
+            labels = COUNT_LABELS.get(sub, [str(i + 1) for i in range(sub)])
             x = x0 + b * (size + gap)
             rect = pygame.Rect(int(x), int(y0), int(size), int(size))
             pygame.draw.rect(surf, LANE_BG, rect, border_radius=int(8 * S))
@@ -382,33 +395,53 @@ class Renderer:
                 color = (20, 20, 24) if (b == beat_i and k == sub_i and prog < 0.5) else (TEXT if k == 0 else DIM)
                 f.center(surf, label, f.small if sub > 2 else f.mid, color, y0 + size / 2, x + (k + 0.5) * cw)
             pygame.draw.rect(surf, ACCENT if b == beat_i else (50, 50, 60), rect, 3 if b == beat_i else 1, border_radius=int(8 * S))
+        sub = subs[beat_i]
         name = {1: "quarter notes", 2: "eighth notes", 3: "triplets", 4: "sixteenth notes", 6: "sextuplets"}.get(sub, f"{sub} per beat")
         f.center(surf, name, f.small, DIM, y0 + size + 12 * S)
         if g.chart.sticking:
-            self.sticking_strip(surf, pos, sub, y0 + size + (44 if g.chart.accents else 34) * S)
+            self.sticking_strip(surf, t, y0 + size + (44 if g.chart.accents else 34) * S)
 
-    def sticking_strip(self, surf, pos, sub, y):
-        """The rudiment's hand pattern, the stroke being played lit up."""
+    def sticking_strip(self, surf, t, y):
+        """The rudiment's hand pattern, the stroke being played lit up. The lit stroke is
+        the last chart note at or before t, so mixed subdivisions need no arithmetic."""
         f, S = self.f, self.s
         pattern = self.game.chart.sticking
         n = len(pattern)
-        idx = int(math.floor(pos * sub)) % n if pos >= 0 else -1
+        if self.note_times is None:
+            self.note_times = [nt.t for nt in self.game.notes]
+        k = bisect.bisect_right(self.note_times, t) - 1
+        idx = k % n if k >= 0 else -1
+        groups = self.game.chart.sticking_groups or []
         cw = 26 * S
-        x0 = self.w / 2 - n * cw / 2
         accents = self.game.chart.accents or set()
-        for i, hand in enumerate(pattern):
-            cx = x0 + (i + 0.5) * cw
-            hot = i == idx
-            color = (255, 255, 255) if hot else ((245, 90, 90) if hand == "R" else (80, 200, 230))
-            if hot:
-                pygame.draw.circle(surf, lerp(LANE_BG, color, 0.5), (int(cx), int(y)), int(12 * S))
-            if i in accents:
-                f.center(surf, ">", f.small, (255, 255, 255) if hot else TEXT, y - 17 * S, cx)
-                f.center(surf, hand, f.large, color, y + 4 * S, cx)
-            else:
-                f.center(surf, hand, f.small, lerp(color, LANE_BG, 0.35), y + 2 * S, cx)
-            if i % (n // max(1, n // 4) if n >= 4 else n) == 0 and i > 0:
-                pygame.draw.line(surf, (60, 60, 70), (int(cx - cw / 2), int(y - 12 * S)), (int(cx - cw / 2), int(y + 12 * S)))
+        # long patterns wrap: rows of at most STRIP_ROW strokes, split on a cell boundary
+        # when there is one (a two-bar phrase then shows one bar per row)
+        rows, start = [], 0
+        while n - start > STRIP_ROW:
+            target = start + (n - start) / math.ceil((n - start) / STRIP_ROW)     # balanced rows
+            fits = [gi for gi in groups if start < gi <= start + STRIP_ROW]
+            cut = min(fits, key=lambda gi: abs(gi - target)) if fits else start + STRIP_ROW
+            rows.append(range(start, cut))
+            start = cut
+        rows.append(range(start, n))
+        for r, idxs in enumerate(rows):
+            x0 = self.w / 2 - len(idxs) * cw / 2
+            yr = y + r * 32 * S
+            for i in idxs:
+                hand = pattern[i]
+                cx = x0 + (i - idxs[0] + 0.5) * cw
+                hot = i == idx
+                color = (255, 255, 255) if hot else ((245, 90, 90) if hand == "R" else (80, 200, 230))
+                if hot:
+                    pygame.draw.circle(surf, lerp(LANE_BG, color, 0.5), (int(cx), int(yr)), int(12 * S))
+                if i in accents:
+                    f.center(surf, ">", f.small, (255, 255, 255) if hot else TEXT, yr - 17 * S, cx)
+                    f.center(surf, hand, f.large, color, yr + 4 * S, cx)
+                else:
+                    f.center(surf, hand, f.small, lerp(color, LANE_BG, 0.35), yr + 2 * S, cx)
+                sep = (i in groups) if groups else (i % (n // max(1, n // 4) if n >= 4 else n) == 0)
+                if sep and i != idxs[0]:
+                    pygame.draw.line(surf, (60, 60, 70), (int(cx - cw / 2), int(yr - 12 * S)), (int(cx - cw / 2), int(yr + 12 * S)))
 
     def results(self, surf):
         g = self.game

@@ -159,12 +159,14 @@ class Chart:
     notes: list
     bpm: float = 120.0
     desc: str = ""
-    segments: list = None       # [(start_bar, subdivision), ...] sorted; inferred when None
+    segments: list = None       # [(start_bar, subdivision), ...] sorted; inferred when None.
+                                # start_bar may be fractional (0.5 = beat 3) for mixed rudiments
     beats: list = None          # beat times in chart seconds when the tempo is not constant (songs)
     audio: str = None           # audio file played along (songs)
     audio_offset: float = 0.0   # audio time of chart time 0 (the first charted downbeat)
     sticking: list = None       # ["R", "L", ...] pattern shown as a strip (rudiments)
     accents: set = None         # indices within the sticking pattern that are accented
+    sticking_groups: list = None  # indices where a new cell of the pattern starts (strip separators)
     dynamics: bool = False      # judge accents vs taps by velocity
     expression: bool = False    # judge hi-hat articulations (openness, zone, chick)
     rate: float = 1.0           # tempo multiplier this chart was scaled by (see at_rate)
@@ -230,11 +232,12 @@ class Chart:
         return self.segments
 
     def subdivision_at(self, t: float) -> int:
-        """Subdivisions per beat for chart time t (negative t = count-in uses the first)."""
-        bar = int(self.beat_pos(t) // 4)
+        """Subdivisions per beat for chart time t (negative t = count-in uses the first).
+        Segments may start on a fraction of a bar, so this can change from beat to beat."""
+        pos = self.beat_pos(t) / 4 + 1e-6       # bars; the epsilon absorbs beat_time rounding
         sub = self.segment_list()[0][1]
         for start, n in self.segment_list():
-            if start <= bar:
+            if start <= pos:
                 sub = n
             else:
                 break
@@ -435,16 +438,61 @@ def _rudiment(name, desc, bpm, bars, sticking, sub, accents=(0,), lanes=None):
     return ch
 
 
+def _swap(sticking):
+    return sticking.translate(str.maketrans("RL", "LR"))
+
+
+def _reversed(cells):
+    return [(_swap(s), sub, acc) for s, sub, acc in cells]
+
+
+def _rudiment_mix(name, desc, bpm, bars, phrase, lanes=None):
+    """A rudiment whose beats can differ in subdivision. phrase: cells (sticking, sub,
+    accents), each lasting len(sticking) / sub beats, repeated to `bars`. The chart's
+    segments carry the subdivision per cell (fractional bar starts), so the count panel,
+    the congas and the sticking strip follow every switch."""
+    beat = 60 / bpm
+    lanes = lanes or {"R": "snare", "L": "snare"}
+    phrase_beats = sum(len(s) / sub for s, sub, _ in phrase)
+    assert abs(phrase_beats - round(phrase_beats)) < 1e-9 and (4 * bars) % round(phrase_beats) == 0, (name, phrase_beats)
+    notes, segments, sticking, accents, groups = [], [], [], set(), []
+    pos = 0.0                                   # in beats
+    for rep_i in range(int(4 * bars // round(phrase_beats))):
+        for s, sub, acc in phrase:
+            if rep_i == 0:
+                groups.append(len(sticking))
+                accents |= {len(sticking) + a for a in acc}
+                sticking += list(s)
+            if not segments or segments[-1][1] != sub:
+                segments.append((pos / 4, sub))
+            for i, hand in enumerate(s):
+                accent = i in acc
+                notes.append(ChartNote((pos + i / sub) * beat, lanes[hand], ACCENT_VELOCITY if accent else TAP_VELOCITY,
+                                       hand=hand, accent=accent))
+            pos += len(s) / sub
+    ch = Chart(name, notes, bpm, desc, segments)
+    ch.sticking, ch.accents, ch.dynamics = sticking, accents, True
+    ch.sticking_groups = groups[1:]
+    return ch
+
+
 # Chart velocities for accented and unaccented strokes; also what the guide plays.
 ACCENT_VELOCITY = 115
 TAP_VELOCITY = 70
 
 
+# cells for the mixed rudiments: (sticking, subdivision, accented indices)
+_SINGLES = ("RLRL", 4, (0,))
+_PD, _PD_L = ("RLRR", 4, (0,)), ("LRLL", 4, (0,))
+_SSR, _SSR_L = ("RLLRRL", 6, (0, 5)), ("LRRLLR", 6, (0, 5))
+_DP, _DP_L = ("RLRLRR", 6, (0,)), ("LRLRLL", 6, (0,))
+_PDD = ("RLRRLL", 6, (0,))
+_PPSP = [_PD, _PD_L, _SSR, _PD]           # paradiddle, paradiddle, six stroke roll, paradiddle
+
 RUDIMENTS = [
     _rudiment("Single strokes 8ths", "Alternate hands on the eighths.", 80, 8, "RL", 2),
     _rudiment("Single strokes 16ths", "Alternate hands on the sixteenths, accent on the beat.", 70, 8, "RLRL", 4),
     _rudiment("Paradiddle", "R L R R  L R L L, accent on the first of each group.", 70, 8, "RLRRLRLL", 4, accents=(0, 4)),
-    _rudiment("Paradiddle faster", "The same paradiddle at 90.", 90, 12, "RLRRLRLL", 4, accents=(0, 4)),
     _rudiment("Paradiddle hat / snare", "Right hand on the hi-hat, left on the snare.", 75, 8, "RLRRLRLL", 4, accents=(0, 4),
               lanes={"R": "hihat", "L": "snare"}),
     _rudiment("Triplets", "Eighth-note triplets, alternating, accent on the beat.", 70, 8, "RLRLRL", 3, accents=(0, 3)),
@@ -452,13 +500,24 @@ RUDIMENTS = [
     _rudiment("Double paradiddle", "R L R L R R  L R L R L L in triplets.", 70, 8, "RLRLRRLRLRLL", 3, accents=(0, 6)),
     _rudiment("Paradiddle-diddle", "R L R R L L in triplets, accent on the first.", 75, 8, "RLRRLL", 3, accents=(0,)),
     # six stroke roll: R L L R R L, the two singles accented, the doubles soft
-    _rudiment("Six stroke roll slow", "R L L R R L over two beats of triplets: accent the singles, keep the doubles soft.",
+    _rudiment("Six stroke roll in triplets", "R L L R R L over two beats of triplets: accent the singles, keep the doubles soft.",
               70, 8, "RLLRRL", 3, accents=(0, 5)),
     _rudiment("Six stroke roll", "The same six strokes inside one beat: a sextuplet, accents on the first and the last.",
               60, 8, "RLLRRL", 6, accents=(0, 5)),
-    _rudiment("Six stroke roll faster", "Sextuplets at 75.", 75, 12, "RLLRRL", 6, accents=(0, 5)),
     _rudiment("Six stroke roll R L R R L L", "Singles first: the two accents land together, then the two doubles.",
               60, 8, "RLRRLL", 6, accents=(0, 1)),
+    # combinations: the six stroke roll inside sixteenth flow or next to other sextuplet rudiments.
+    # Tempo is one number each; the game's rate control is the speed ladder.
+    _rudiment_mix("Sixteenths + six stroke roll", "Single strokes on the sixteenths, a six stroke roll as a sextuplet on beat 4.",
+                  60, 8, [_SINGLES, _SINGLES, _SINGLES, _SSR]),
+    _rudiment_mix("Paradiddle + six stroke roll", "Paradiddle on the sixteenths, six stroke roll as a sextuplet, alternating beats and hands: the subdivision switches on every beat.",
+                  60, 8, [_PD, _SSR_L, _PD_L, _SSR]),
+    _rudiment_mix("Paradiddle x2, six stroke, paradiddle", "Two paradiddles, a six stroke roll as a sextuplet, one more paradiddle: the bar ends on the right, so the next one starts on the left and the whole thing plays reversed.",
+                  60, 8, _PPSP + _reversed(_PPSP)),
+    _rudiment_mix("Double paradiddle + six stroke roll", "All sextuplets: a double paradiddle, then a six stroke roll, alternating beats and hands.",
+                  60, 8, [_DP, _SSR_L, _DP_L, _SSR]),
+    _rudiment_mix("Six stroke roll + paradiddle-diddle", "All sextuplets: the same six strokes with the doubles in two different places, one beat each.",
+                  60, 8, [_SSR, _PDD, _SSR, _PDD]),
     _rudiment("Doubles 16ths", "R R L L on the sixteenths.", 70, 8, "RRLL", 4, accents=(0,)),
     # accent control: same hands, the accent walks through the sixteenth
     _rudiment("Accent on 1", "Sixteenths, accent on the beat, taps in between.", 70, 8, "RLRL", 4, accents=(0,)),
