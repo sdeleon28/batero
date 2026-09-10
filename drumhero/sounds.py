@@ -370,6 +370,17 @@ BASS_PATTERNS = {                          # (sixteenth index, degree, gain); de
     "funk": [(0, 0, 1.0), (3, 12, 0.7), (6, 7, 0.9), (8, 0, 0.9), (11, 12, 0.7), (13, 10, 0.6), (14, 0, 0.9)],
     "pump": [(e, 0, 1.0 if e % 4 == 0 else 0.7) for e in range(16)],
 }
+# The same for levels in triplets ("triplet" feel): indices are twelfths of a bar, beat q
+# at 3q, its third triplet (the shuffle "a") at 3q + 2. Nothing here falls on a straight
+# eighth or sixteenth, so the music only ever confirms the subdivision being practised.
+BASS_PATTERNS_TRIPLET = {
+    "quarters": [(q * 3, 0, 1.0 if q % 2 == 0 else 0.85) for q in range(4)],
+    "shuffle": [(q * 3 + k, 0, 1.0 if k == 0 else 0.7) for q in range(4) for k in (0, 2)],
+    "shuffle_fifth": [(q * 3 + k, 0 if k == 0 else 7, 1.0 if k == 0 else 0.7) for q in range(4) for k in (0, 2)],
+    "triplets": [(q * 3 + k, 0, 1.0 if k == 0 else 0.65) for q in range(4) for k in range(3)],
+    "sparse": [(0, 0, 1.0), (9, 0, 0.6)],
+    "whole": [(0, 0, 1.0)],
+}
 # What plays per 4-bar section: (bass pattern, chord part, chord pattern, lead, pad).
 # chord part: "pad" (sustained), "arp" (pluck, pattern = order), "chug" (power-chord
 # stabs on the bass rhythm), "stab" (short chord hits on a rhythm), "strum" (chord on
@@ -420,16 +431,26 @@ STYLES = {
             ("octave", "stab", None, True, True), ("funk", None, None, False, False),
             ("funk", "stab", None, True, False), ("sync", "arp", "broken", True, True)]),
 }
+# Triplet levels always get this one: a plain shuffle. Bass on the beat and the third
+# triplet from the first bar, then an arpeggio that plays all three triplets of every
+# beat, so the ear hears the subdivision the hands are learning.
+SHUFFLE_STYLE = dict(
+    progressions=("soul", "pop"), pad="organ", bass="pick", chord="clav", lead="triangle", lead_kind="phrase",
+    scale="pentatonic", plan=[
+        ("shuffle", None, None, False, True), ("shuffle", "arp", "triplets", False, True),
+        ("shuffle_fifth", "stab", None, False, True), ("shuffle", "arp", "triplets", True, True),
+        ("quarters", "stab", None, True, True), ("shuffle_fifth", "arp", "triplets", True, True)])
 STYLE_ORDER = ["synth", "metal", "chiptune", "punk", "organ", "strings", "funk"]
 STAB_RHYTHMS = [[0, 6, 8, 14], [2, 6, 10, 14], [0, 3, 6, 10, 12], [4, 12], [0, 7, 10]]   # sixteenth indices
+STAB_RHYTHMS_TRIPLET = [[3, 9], [0, 2, 6, 8], [3, 5, 9, 11], [2, 5, 8, 11]]              # twelfth indices
 SCALES = {"natural": {"M": [0, 2, 4, 5, 7, 9, 11], "m": [0, 2, 3, 5, 7, 8, 10]},
           "pentatonic": {"M": [0, 2, 4, 7, 9], "m": [0, 3, 5, 7, 10]},
           "dorian": {"M": [0, 2, 4, 5, 7, 9, 11], "m": [0, 2, 3, 5, 7, 9, 10]},
           "phrygian": {"M": [0, 2, 4, 5, 7, 9, 11], "m": [0, 1, 3, 5, 7, 8, 10]}}
 
 
-def style_for(prog_index):
-    return STYLE_ORDER[prog_index % len(STYLE_ORDER)]
+def style_for(prog_index, feel="straight"):
+    return "shuffle" if feel == "triplet" else STYLE_ORDER[prog_index % len(STYLE_ORDER)]
 
 
 def _midi_hz(n):
@@ -465,6 +486,8 @@ def _arp_order(pattern, chord):
         return [top[0], top[2], top[1], top[2]]
     if pattern == "sixteenths":
         return top + [top[2] + 12]
+    if pattern == "triplets":
+        return top                                    # one chord tone per triplet, a triad per beat
     return top + [top[1]]
 
 
@@ -472,20 +495,25 @@ def _lowpass(sig, n):
     return np.convolve(sig, np.ones(n) / n, mode="same") if n > 1 else sig
 
 
-def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None):
+def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, feel="straight"):
     """Mono float32 of (intro_bars + bars) bars at bpm: intro (thin) then the arrangement,
-    bar 0 of the level at intro_bars * bar seconds. Deterministic per prog_index."""
+    bar 0 of the level at intro_bars * bar seconds. Deterministic per prog_index.
+    feel: "straight" (sixteenth grid, style by prog_index) or "triplet" (twelfth grid,
+    the shuffle style) for levels whose subdivision is 3."""
     rng = np.random.default_rng(prog_index if seed is None else seed)
-    style_name = style_for(prog_index)
-    st = STYLES[style_name]
+    triplet = feel == "triplet"
+    style_name = style_for(prog_index, feel)
+    st = SHUFFLE_STYLE if triplet else STYLES[style_name]
+    bass_patterns = BASS_PATTERNS_TRIPLET if triplet else BASS_PATTERNS
+    stab_rhythms = STAB_RHYTHMS_TRIPLET if triplet else STAB_RHYTHMS
     family = st["progressions"][int(rng.integers(0, len(st["progressions"])))]
     prog = PROGRESSIONS[family][int(rng.integers(0, len(PROGRESSIONS[family])))]
     transpose = int(rng.integers(-4, 4))
-    stab_rhythm = STAB_RHYTHMS[int(rng.integers(0, len(STAB_RHYTHMS)))]
+    stab_rhythm = stab_rhythms[int(rng.integers(0, len(stab_rhythms)))]
     riff = None                                             # built on first use, then transposed
     beat = 60 / bpm
     bar = 4 * beat
-    six = bar / 16
+    step = bar / (12 if triplet else 16)                    # one grid slot of the pattern tables
     total_bars = intro_bars + bars
     n = int(round(total_bars * bar * sr))
     out = np.zeros(n + int(1.5 * sr))
@@ -525,9 +553,9 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None):
 
     # --- bass ----------------------------------------------------------------------
     def bass(t0, root_note, pattern, kind):
-        for e, degree, gain in BASS_PATTERNS[pattern]:
+        for e, degree, gain in bass_patterns[pattern]:
             f = _midi_hz(root_note + degree)
-            dur = {"whole": bar, "sparse": beat}.get(pattern, beat / 2)
+            dur = {"whole": bar, "sparse": beat}.get(pattern, 2 * beat / 3 if triplet else beat / 2)
             tb = np.arange(int(dur * sr)) / sr
             if kind == "sine":
                 sig = (np.sin(2 * np.pi * f * tb) * 0.8 + np.sin(4 * np.pi * f * tb) * 0.25 + _saw(tb * f) * 0.15) * env_ad(tb, 0.004, 6)
@@ -541,7 +569,7 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None):
             else:  # dist: chugging power root, palm-muted
                 raw = _saw(tb * f) + _saw(tb * f * 1.5) * 0.6 + _saw(tb * f * 2) * 0.4
                 sig = _lowpass(np.tanh(3.0 * raw), 14) * env_ad(tb, 0.002, 18 if pattern in ("chug", "gallop", "pump") else 6)
-            add(t0 + e * six, sig, 0.55 * gain)
+            add(t0 + e * step, sig, 0.55 * gain)
 
     # --- chord parts -----------------------------------------------------------------
     def pluck_tone(f, ta, kind):
@@ -557,33 +585,34 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None):
 
     def arp(t0, chord, pattern, kind):
         order = _arp_order(pattern, chord)
-        steps = 16 if pattern == "sixteenths" else 8
+        steps = {"sixteenths": 16, "triplets": 12}.get(pattern, 8)
+        per_beat = steps // 4
         seq = order + order[-2:0:-1] if pattern == "updown" else order
         for e in range(steps):
             f = _midi_hz(seq[e % len(seq)])
             ta = np.arange(int(0.25 * sr)) / sr
-            add(t0 + e * bar / steps, pluck_tone(f, ta, kind), (0.22 if steps == 8 else 0.17) * (1.0 if e % 4 == 0 else 0.8))
+            add(t0 + e * bar / steps, pluck_tone(f, ta, kind), (0.22 if steps == 8 else 0.17) * (1.0 if e % per_beat == 0 else 0.8))
 
     def stab(t0, chord, kind, rhythm):
         for e in rhythm:
             ta = np.arange(int(0.22 * sr)) / sr
             sig = sum(pluck_tone(_midi_hz(m + 12), ta, kind) for m in chord)
-            add(t0 + e * six, sig, 0.16 / max(1, len(chord) / 3))
+            add(t0 + e * step, sig, 0.16 / max(1, len(chord) / 3))
 
     def power(t0, root_note, pattern_or_rhythm, strum):
         """Distorted power chord: root, fifth, octave through tanh; on the bass rhythm
         (chug) or on every eighth (strum)."""
         steps = [(e * 2, 1.0 if e % 2 == 0 else 0.8) for e in range(8)] if strum else \
-                [(e, g) for e, _, g in BASS_PATTERNS[pattern_or_rhythm]]
+                [(e, g) for e, _, g in bass_patterns[pattern_or_rhythm]]
         for e, gain in steps:
-            dur = beat / 2 if strum else six * 1.6
+            dur = beat / 2 if strum else step * 1.6
             ta = np.arange(int(max(dur, 0.12) * sr)) / sr
             raw = np.zeros_like(ta)
             for m in (root_note, root_note + 7, root_note + 12):
                 f = _midi_hz(m)
                 raw += _saw(ta * f * 1.002) + _saw(ta * f * 0.998)
             sig = _lowpass(np.tanh(2.2 * raw), 6) * env_ad(ta, 0.003, 4 if strum else 16, dur)
-            add(t0 + e * six, sig, 0.10 * gain)
+            add(t0 + e * step, sig, 0.10 * gain)
 
     # --- lead ------------------------------------------------------------------------
     def tone(f, tl, kind):
@@ -614,6 +643,10 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None):
             events = [(sl * 0.25, d, ln * 0.25) for sl, d, ln in riff]
         elif kind == "long":
             events = [(0, None, 2.0), (2, None, 2.0)] if bar_in_section % 2 == 0 else [(0, None, 4.0)]
+        elif triplet:  # phrase, swung: nothing lands on a straight eighth
+            rhythm = [(0, 1.0), (1 + 2 / 3, 1 / 3), (2, 1.0), (3, 2 / 3), (3 + 2 / 3, 1 / 3)] if bar_in_section % 2 == 0 \
+                else [(2 / 3, 1 / 3), (1, 1.0), (2, 2.0)]
+            events = [(start, None, length) for start, length in rhythm]
         else:  # phrase
             rhythm = [(0, 1.0), (1.5, 0.5), (2, 1.0), (3, 0.5), (3.5, 0.5)] if bar_in_section % 2 == 0 else [(0.5, 1.5), (2, 2.0)]
             events = [(start, None, length) for start, length in rhythm]
@@ -743,12 +776,13 @@ def render_metronome(chart, lead_in_s, total_s, mode="full"):
     return _mix_events(events, lead_in_s + total_s)
 
 
-def render_backing_track(bpm, prog_index, lead_in_s, total_s):
-    """The arrangement from the count-in to total_s, bar 0 landing on chart time 0."""
+def render_backing_track(bpm, prog_index, lead_in_s, total_s, feel="straight"):
+    """The arrangement from the count-in to total_s, bar 0 landing on chart time 0.
+    feel: see make_arrangement; "triplet" for levels whose subdivision is 3."""
     bar = 240 / bpm
     intro_bars = int(round(lead_in_s / bar))
     bars = int(np.ceil(total_s / bar)) + 1
-    data = make_arrangement(bpm, prog_index, bars, intro_bars)
+    data = make_arrangement(bpm, prog_index, bars, intro_bars, feel=feel)
     n = int((lead_in_s + total_s) * SR) + SR
     if len(data) < n:
         data = np.concatenate([data, np.zeros(n - len(data), dtype=np.float32)])
