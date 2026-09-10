@@ -532,7 +532,9 @@ class CameraFeed:
         self.proc = subprocess.Popen(
             [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-framerate", str(CAMERA_FPS),
              "-pixel_format", "uyvy422", "-video_size", "%dx%d" % size, "-i", f"{camera[0]}:none",
-             "-vf", f"scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+             # one output frame per camera frame: with the default cfr sync ffmpeg fills the camera's
+             # timestamp gaps with duplicates (2x at 720p, at 1080p one frozen frame 450 times a second)
+             "-fps_mode", "passthrough", "-vf", f"scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL)
         self.thread = threading.Thread(target=self._read, daemon=True)
         self.thread.start()
