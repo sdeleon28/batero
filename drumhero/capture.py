@@ -55,6 +55,7 @@ CORNERS = ["br", "bl", "tr", "tl"]
 SPLITS = [0.32, 0.4, 0.5, 0.6]     # social edition: the camera's share of the 1920 px height (0.32 = the whole 16:9 picture)
 SOCIAL_SIZE = (1080, 1920)
 PREVIEW_SIZE = (640, 360)
+AUDIO_STALL_S = 1.0          # input stream silent this long: reopen it (Recorder._watch_audio)
 CAMERA_FPS = 30              # what cameras accept (Continuity Camera: 30 or 60)
 CAMERA_SIZE = (1920, 1080)   # what the take records from the camera (the social edition shows it 960 px tall)
 # Raws: HEVC by VideoToolbox at a high bitrate. Measured 2026-09-09 on the M1 Max on fresh camera
@@ -302,6 +303,9 @@ class Recorder:
         # audio: sounddevice input -> wav
         self.audio_path = None
         self._audio = None
+        self.audio_blocks = self.audio_restarts = self.audio_overflows = 0
+        self.audio_t0 = None
+        self._audio_started = self.t0
         dev = audio_device_index(self.settings["capture_audio_device"])
         if dev is not None:
             try:
@@ -346,19 +350,77 @@ class Recorder:
         self._afile = sf.SoundFile(self.audio_path, "w", samplerate=sr, channels=len(chans), subtype="PCM_16")
 
         self.audio_overflows = 0
+        self.audio_blocks = 0            # callbacks that delivered samples (0 at the end = a silent wav)
+        self.audio_restarts = 0
+        self.audio_t0 = None             # wall time of the first sample, set by the first callback
+        self._audio_started = time.time()
+        self._audio_last = None          # perf_counter of the last callback
+        self._audio_gap_from = None      # perf_counter the stream stalled at: the next block is preceded by that much silence
+        self._audio_restarting = False
+        self._audio_spec = (idx, nin, sr, chans)
+        self._open_audio()
+        self._awriter = threading.Thread(target=self._write_audio, daemon=True)
+        self._awriter.start()
+        self.log(f"recording: audio {info['name']} channels {[c + 1 for c in chans]} at {sr} Hz")
+
+    def _open_audio(self):
+        import sounddevice as sd
+        idx, nin, sr, chans = self._audio_spec
 
         def cb(indata, frames, t, status):
+            now = time.perf_counter()
             if status.input_overflow:
                 self.audio_overflows += 1
+            if self.audio_t0 is None:                    # the first sample's wall time: now, minus this buffer and the input latency
+                self.audio_t0 = time.time() - frames / sr - float(self._audio.latency or 0)
+            if self._audio_gap_from is not None:          # the stream was reopened: keep the wav aligned with silence for the gap
+                gap = int((now - self._audio_gap_from) * sr) - frames
+                if gap > 0:
+                    self._aq.put(np.zeros((gap, len(chans)), dtype="float32"))
+                self._audio_gap_from = None
+            self.audio_blocks += 1
+            self._audio_last = now
             self._aq.put(indata[:, chans].copy())
 
         self._audio = sd.InputStream(device=idx, channels=nin, samplerate=sr, dtype="float32", callback=cb,
                                      **input_stream_kwargs(sr))
         self._audio.start()
-        self.audio_t0 = time.time()
-        self._awriter = threading.Thread(target=self._write_audio, daemon=True)
-        self._awriter.start()
-        self.log(f"recording: audio {info['name']} channels {[c + 1 for c in chans]} at {sr} Hz")
+        self._audio_started_pc = time.perf_counter()
+
+    def _watch_audio(self):
+        """Main thread, every frame: an input stream that stops delivering (seen 2026-09-09: the first
+        take of a freshly launched app opened its stream without error and got no callback at all,
+        44-byte wav; the ROADMAP also records the mixer reopening killing an input, PaMacCore -50)
+        is reopened, at most 3 times, and the wav gets silence for the gap."""
+        if self._audio is None or self._audio_restarting or self.audio_restarts >= 3:
+            return
+        last = self._audio_last or self._audio_started_pc
+        if time.perf_counter() - last < AUDIO_STALL_S:
+            return
+        self._audio_restarting = True
+        self.audio_restarts += 1
+        stalled_at = last
+
+        def restart():
+            try:
+                try:
+                    self._audio.abort(); self._audio.close()
+                except Exception:                           # noqa: BLE001
+                    pass
+                self._audio_gap_from = stalled_at if self.audio_blocks else None
+                self._open_audio()
+                if self.audio_blocks:
+                    self.log(f"recording: audio stream stalled after {self.audio_blocks} blocks, reopened (restart {self.audio_restarts}, gap padded)")
+                else:
+                    self._audio_started = time.time()
+                    self.log(f"recording: audio stream delivered nothing in {AUDIO_STALL_S:.1f} s, reopened (restart {self.audio_restarts})")
+            except Exception as e:                          # noqa: BLE001
+                self.log(f"recording: audio reopen failed ({e})")
+                self._audio = None
+            finally:
+                self._audio_restarting = False
+
+        threading.Thread(target=restart, daemon=True).start()
 
     # --- frames from the main loop ----------------------------------------------------
     def push(self, surface):
@@ -368,6 +430,8 @@ class Recorder:
         now = time.perf_counter()
         if now < self._next_frame:
             return
+        if self._audio is not None:
+            self._watch_audio()
         self._next_frame = max(self._next_frame + 1 / FPS, now - 0.5 / FPS)
         cam = self.feed.frame if self.feed is not None else None
         try:
@@ -421,8 +485,12 @@ class Recorder:
             self.ff_video.stdin.close()
         except OSError:
             pass
-        if self._audio is not None:
-            self._audio.stop(); self._audio.close()
+        if self.audio_path:
+            if self._audio is not None:
+                try:
+                    self._audio.stop(); self._audio.close()
+                except Exception:                           # noqa: BLE001
+                    pass
             self._aq.put(None); self._awriter.join(timeout=10); self._afile.close()
         if self.feed is not None:
             self.feed.stop()
@@ -464,7 +532,8 @@ class Recorder:
         audio = None
         if self.audio_path and os.path.exists(self.audio_path):
             shutil.move(self.audio_path, os.path.join(raw_dir, "audio.wav"))
-            audio = {"file": "raw/audio.wav", "offset": self.audio_t0 - self.t0, "overflows": getattr(self, "audio_overflows", 0)}
+            audio = {"file": "raw/audio.wav", "offset": (self.audio_t0 or self._audio_started) - self.t0,
+                     "overflows": self.audio_overflows, "blocks": self.audio_blocks, "restarts": self.audio_restarts}
         meta = {"take": take_dir, "t0": self.t0, "duration": duration, "fps": FPS, "size": list(self.size),
                 "frames": self.frames, "dropped": self.dropped, "raws": raws, "camera": camera, "audio": audio,
                 "settings": {k: self.settings[k] for k in ("capture_pip", "capture_corner", "capture_split")},
@@ -472,8 +541,9 @@ class Recorder:
         with open(os.path.join(take_dir, "take.json"), "w") as f:
             json.dump(meta, f, indent=1)
         shutil.rmtree(self.tmp, ignore_errors=True)
-        self.log(f"take saved: {take_dir} ({self.frames} frames, {self.dropped} dropped, "
-                 f"{getattr(self, 'audio_overflows', 0)} audio overflows, camera {'yes' if camera else 'no'}, audio {'yes' if audio else 'no'})")
+        self.log(f"take saved: {take_dir} ({self.frames} frames, {self.dropped} dropped, camera {'yes' if camera else 'no'}, "
+                 f"audio {'yes' if audio else 'no'}" + (f": {audio['blocks']} blocks, {audio['overflows']} overflows, "
+                                                        f"{audio['restarts']} restarts, offset {audio['offset'] * 1000:.0f} ms" if audio else "") + ")")
         self.result = take_dir
         for edition in (("computer", "social") if raws else ()):   # both editions, every time; the user manages the disk
             self.composing = (threading.current_thread(), f"{edition} edition of {os.path.basename(take_dir)}")

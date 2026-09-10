@@ -33,6 +33,21 @@ without choosing one).
   (SSIM 0.9984), hevc_videotoolbox at a high target matches libx264 crf 16 (0.9992).
   Budget about 300 MB per minute per raw with a moving drummer; the disk had 11 GB
   free that day. 60 fps takes would be the next step for the scrolling notes.
+- Silent takes (2026-09-09, takes 23:32 and 23:46, both the first take of a freshly launched
+  app): the input stream opened without error and never delivered a callback, 44-byte wav.
+  Not reproduced outside the app (mixer open first, meter close then recorder open, TCC was
+  allowed at that moment). `Recorder._watch_audio` now reopens a stream that delivers
+  nothing for 1 s (up to 3 times, silence padded for the gap so the wav stays aligned) and
+  the take log / take.json carry `blocks` and `restarts`; the app log has a clock per line.
+  If a take still logs `0 blocks` after restarts, the next suspect is the SDL mixer reopen
+  (item B: an output open on the X18 after a PortAudio input kills the input).
+- Audio timing: `audio.offset` is now the wall time of the first sample (first callback,
+  minus the buffer and the input latency) instead of the moment the stream was opened;
+  measured 147 ms vs the 25 ms the old stamp gave, so audio sat ~120 ms early in the
+  editions. The camera still records the latest frame that arrived (Continuity Camera's
+  own latency, `capture_camera_delay_ms` to compensate); automatic per-take measurement
+  (MIDI hit times vs drum transients in the wav vs motion in the camera) needs the run
+  logs, which are not being written (`~/Library/Logs/drumhero/runs` does not exist).
 - Legacy flat takes (`<stamp> take.mp4` + `.json`) still list and can be edited with
   Claude, but have no raws to re-render from.
 - Readability of the social thumbnail: notes, judgement words and combo are fine on a

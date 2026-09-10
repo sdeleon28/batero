@@ -33,11 +33,35 @@ import traceback
 REPO = {repo!r}
 
 
+class _Stamped:
+    """The log file with a clock on every line (a take's timeline has to be reconstructible)."""
+
+    def __init__(self, f):
+        self.f, self.at_bol = f, True
+
+    def write(self, text):
+        import time
+        out = []
+        for piece in text.splitlines(True):
+            if self.at_bol and piece.strip():
+                out.append(time.strftime("%H:%M:%S ") + piece)
+            else:
+                out.append(piece)
+            self.at_bol = piece.endswith("\\n")
+        self.f.write("".join(out))
+
+    def flush(self):
+        self.f.flush()
+
+    def fileno(self):
+        return self.f.fileno()
+
+
 def _run():
     log = os.path.expanduser("~/Library/Logs/drumhero.log")
     os.makedirs(os.path.dirname(log), exist_ok=True)
     f = open(log, "a", buffering=1)
-    sys.stdout = sys.stderr = f
+    sys.stdout = sys.stderr = _Stamped(f)
     if not hasattr(sys, "argv"):
         sys.argv = ["drumhero"]
     os.chdir(REPO)
