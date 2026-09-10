@@ -128,6 +128,7 @@ class ChartNote:
     error_ms: float = None  # hit time - note time (negative = early)
     sounded: bool = False   # guide sound already played
     hand: str = None        # "R" / "L" sticking hint for rudiments, shown on the note
+    strip: int = None       # index of this stroke in the chart's sticking strip (lit when played)
     accent: bool = False    # an accented stroke (judged when the chart has dynamics)
     hit_velocity: int = None
     dyn: str = None         # ACCENT / TAP (right) or SOFT / LOUD (wrong), set when hit
@@ -430,7 +431,7 @@ def _rudiment(name, desc, bpm, bars, sticking, sub, accents=(0,), lanes=None):
             hand = sticking[i % len(sticking)]
             accent = (i % len(sticking)) in accents
             notes.append(ChartNote((bar * 4 + i / sub) * beat, lanes[hand], ACCENT_VELOCITY if accent else TAP_VELOCITY,
-                                   hand=hand, accent=accent))
+                                   hand=hand, accent=accent, strip=i % len(sticking)))
     ch = Chart(name, notes, bpm, desc, [(0, sub)])
     ch.sticking = list(sticking)
     ch.accents = set(accents)
@@ -458,17 +459,18 @@ def _rudiment_mix(name, desc, bpm, bars, phrase, lanes=None):
     notes, segments, sticking, accents, groups = [], [], [], set(), []
     pos = 0.0                                   # in beats
     for rep_i in range(int(4 * bars // round(phrase_beats))):
-        for s, sub, acc in phrase:
+        for j, (s, sub, acc) in enumerate(phrase):
             if rep_i == 0:
                 groups.append(len(sticking))
                 accents |= {len(sticking) + a for a in acc}
                 sticking += list(s)
+            base = groups[j]                        # this cell's first index in the strip
             if not segments or segments[-1][1] != sub:
                 segments.append((pos / 4, sub))
             for i, hand in enumerate(s):
                 accent = i in acc
                 notes.append(ChartNote((pos + i / sub) * beat, lanes[hand], ACCENT_VELOCITY if accent else TAP_VELOCITY,
-                                       hand=hand, accent=accent))
+                                       hand=hand, accent=accent, strip=base + i))
             pos += len(s) / sub
     ch = Chart(name, notes, bpm, desc, segments)
     ch.sticking, ch.accents, ch.dynamics = sticking, accents, True
@@ -512,11 +514,11 @@ RUDIMENTS = [
                   60, 8, [_SINGLES, _SINGLES, _SINGLES, _SSR]),
     _rudiment_mix("Paradiddle + six stroke roll", "Paradiddle on the sixteenths, six stroke roll as a sextuplet, alternating beats and hands: the subdivision switches on every beat.",
                   60, 8, [_PD, _SSR_L, _PD_L, _SSR]),
-    _rudiment_mix("Paradiddle x2, six stroke, paradiddle", "Two paradiddles, a six stroke roll as a sextuplet, one more paradiddle: the bar ends on the right, so the next one starts on the left and the whole thing plays reversed.",
+    _rudiment_mix("2 paradiddles, six stroke, 1 more", "Two paradiddles, a six stroke roll as a sextuplet, one more paradiddle: the bar ends on the right, so the next one starts on the left and the whole thing plays reversed.",
                   60, 8, _PPSP + _reversed(_PPSP)),
-    _rudiment_mix("Double paradiddle + six stroke roll", "All sextuplets: a double paradiddle, then a six stroke roll, alternating beats and hands.",
+    _rudiment_mix("Double paradiddle + six stroke", "All sextuplets: a double paradiddle, then a six stroke roll, alternating beats and hands.",
                   60, 8, [_DP, _SSR_L, _DP_L, _SSR]),
-    _rudiment_mix("Six stroke roll + paradiddle-diddle", "All sextuplets: the same six strokes with the doubles in two different places, one beat each.",
+    _rudiment_mix("Six stroke + paradiddle-diddle", "All sextuplets: the same six strokes with the doubles in two different places, one beat each.",
                   60, 8, [_SSR, _PDD, _SSR, _PDD]),
     _rudiment("Doubles 16ths", "R R L L on the sixteenths.", 70, 8, "RRLL", 4, accents=(0,)),
     # accent control: same hands, the accent walks through the sixteenth
@@ -856,7 +858,60 @@ HIHAT_LESSONS = [
         {"hh": "t.t.t.t.t.t.t.A.", "pd": "....x.......x...", "kk": "x.......x.x.....", "sn": "....X.......xxxx"},
     ], bars=16),
 ]
-EXERCISES = EXERCISES + RUDIMENTS + HIHAT_LESSONS
+# --- double kick: a foot ostinato under simple hands ---------------------------------
+def _kick_ostinato(name, desc, bpm, bars, feet, sub, hands):
+    """A double-kick level. `feet`: the kick pattern for one bar on a grid of `sub` per
+    beat, R / L the foot, "." a rest; it is the sticking strip (rests shown as dots).
+    `hands`: GROOVE_KEYS key -> pattern on the same grid (x / X / .). Feet are judged on
+    time only, no dynamics."""
+    beat = 60 / bpm
+    slots = 4 * sub
+    assert len(feet) == slots and all(len(p) == slots for p in hands.values()), name
+    notes = []
+    for bar in range(bars):
+        for i, c in enumerate(feet):
+            if c in "RL":
+                notes.append(ChartNote((bar * 4 + i / sub) * beat, "kick", GROOVE_VEL["x"], hand=c, strip=i))
+        for k, pat in hands.items():
+            for i, c in enumerate(pat):
+                if c in GROOVE_VEL:
+                    notes.append(ChartNote((bar * 4 + i / sub) * beat, GROOVE_KEYS[k], GROOVE_VEL[c], accent=(c == "X")))
+    notes.sort(key=lambda n: (n.t, INSTRUMENTS.index(n.key)))
+    ch = Chart(name, notes, bpm, desc, [(0, sub)])
+    ch.sticking = list(feet)
+    ch.accents = set()
+    ch.sticking_groups = [sub * b for b in range(1, 4)]
+    return ch
+
+
+# hands for the double-kick levels: the pulse on the hats, the backbeat on the snare
+_DK_HANDS_16 = {"hh": "x...x...x...x...", "sn": "....X.......X..."}
+_DK_HANDS_8 = {"hh": "x.x.x.x.", "sn": "..X...X."}
+_DK_HANDS_12 = {"hh": "x..x..x..x..", "sn": "...X.....X.."}
+
+# The curriculum: the feet learn to alternate, then to burst, then to run; the hands
+# keep a plain beat on top so the feet become an ostinato, not a fill.
+KICK_OSTINATOS = [
+    _kick_ostinato("Double kick 8ths", "Right, left on the eighths; hats on the beat, snare on 2 and 4.", 80, 8,
+                   "RLRLRLRL", 2, _DK_HANDS_8),
+    _kick_ostinato("Double kick bursts of two", "Two sixteenths on every beat, right then left, then rest.", 80, 8,
+                   "RL..RL..RL..RL..", 4, _DK_HANDS_16),
+    _kick_ostinato("Double kick gallop", "Eighth, sixteenth, sixteenth on every beat: right, left, right.", 80, 8,
+                   "R.LRR.LRR.LRR.LR", 4, _DK_HANDS_16),
+    _kick_ostinato("Double kick 16ths", "Sixteenths on the feet, right foot on the beat, under the plain beat.", 80, 8,
+                   "RLRLRLRLRLRLRLRL", 4, _DK_HANDS_16),
+    _kick_ostinato("Double kick 16ths, left lead", "The same run leading with the left foot: the weak foot lands on the beat.", 80, 8,
+                   "LRLRLRLRLRLRLRLR", 4, _DK_HANDS_16),
+    _kick_ostinato("Double kick 16ths, hats 8ths", "Sixteenths on the feet with the hats on the eighths: hands and feet at different speeds.", 80, 8,
+                   "RLRLRLRLRLRLRLRL", 4, {"hh": "x.x.x.x.x.x.x.x.", "sn": "....X.......X..."}),
+    _kick_ostinato("Double kick triplets", "Eighth-note triplets on the feet, alternating, so the lead foot swaps every beat.", 80, 8,
+                   "RLRLRLRLRLRL", 3, _DK_HANDS_12),
+    _kick_ostinato("Double kick, bursts of four", "Four sixteenths on beats 2 and 4, rest on 1 and 3: start and stop cleanly.", 80, 8,
+                   "....RLRL....RLRL", 4, {"hh": "x...x...x...x...", "sn": "X.......X......."}),
+]
+
+
+EXERCISES = EXERCISES + RUDIMENTS + KICK_OSTINATOS + HIHAT_LESSONS
 LEVELS = EXERCISES + BEATS
 
 

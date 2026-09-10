@@ -942,7 +942,7 @@ class ListScreen(Screen):
             if selected:
                 pygame.draw.rect(surf, lerp(LANE_BG, self.color, 0.18), (x - 20 * S, y - 8 * S, self.w * 0.76 + 40 * S, row_h - 4 * S), border_radius=int(10 * S))
                 pygame.draw.rect(surf, self.color, (x - 20 * S, y - 8 * S, 6 * S, row_h - 4 * S), border_radius=int(3 * S))
-            shown = name if len(name) <= 22 else name[:21] + "…"
+            shown = name if len(name) <= 34 else name[:33] + "…"
             surf.blit(self.f.text(shown, self.f.mid, self.color if selected else TEXT), (x, y))
             best = self.app.results.get(name)
             right = self.w * 0.88
@@ -951,7 +951,7 @@ class ListScreen(Screen):
                 surf.blit(ts, (right - ts.get_width(), y + 4 * S))
                 right -= ts.get_width() + 12 * S
                 right -= draw_stars(surf, self.f, best.get("stars", 0), right, y + 2 * S, S, size="small") + 16 * S
-            surf.blit(self.f.text(self.fit(sub, right - (x + 370 * S)), self.f.small, DIM), (x + 370 * S, y + 4 * S))
+            surf.blit(self.f.text(self.fit(sub, right - (x + 500 * S)), self.f.small, DIM), (x + 500 * S, y + 4 * S))
             y += row_h
         if items:
             self.f.center(surf, items[self.sel][1], self.f.small, TEXT, self.h - 84 * S)   # the selected one in full

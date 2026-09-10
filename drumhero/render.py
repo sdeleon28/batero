@@ -408,9 +408,11 @@ class Renderer:
         pattern = self.game.chart.sticking
         n = len(pattern)
         if self.note_times is None:
-            self.note_times = [nt.t for nt in self.game.notes]
+            marked = [nt for nt in self.game.notes if nt.strip is not None]
+            self.note_times = [nt.t for nt in marked]
+            self.note_strips = [nt.strip for nt in marked]
         k = bisect.bisect_right(self.note_times, t) - 1
-        idx = k % n if k >= 0 else -1
+        idx = self.note_strips[k] if k >= 0 else -1
         groups = self.game.chart.sticking_groups or []
         cw = 26 * S
         accents = self.game.chart.accents or set()
@@ -430,6 +432,9 @@ class Renderer:
             for i in idxs:
                 hand = pattern[i]
                 cx = x0 + (i - idxs[0] + 0.5) * cw
+                if hand == ".":                                   # a rest in a foot pattern
+                    pygame.draw.circle(surf, (70, 70, 80), (int(cx), int(yr + 2 * S)), int(2.5 * S))
+                    continue
                 hot = i == idx
                 color = (255, 255, 255) if hot else ((245, 90, 90) if hand == "R" else (80, 200, 230))
                 if hot:
