@@ -24,6 +24,15 @@ without choosing one).
   does the same from the game, and its Claude styles edit an edition (the job folder is
   `edits/<edition>-<style>/` inside the take's folder). The camera check previews both
   editions; S cycles the social camera share.
+- Quality (2026-09-09, the user saw compression artifacts and wanted publishable output):
+  raws are HEVC by VideoToolbox at 40 Mbps target (`capture.RAW_ENCODE`), the camera at
+  1920x1080 (`CAMERA_SIZE`; 720p was being stretched to 960 px in the social edition);
+  editions are libx264 crf 16 medium, H.264 High, AAC 256k, lanczos scaling
+  (`EDITION_ENCODE`), ~5x real time on the M1 Max in the finish thread. Measured on
+  fresh camera frames: h264_videotoolbox tops out at ~2 Mbps whatever it is asked
+  (SSIM 0.9984), hevc_videotoolbox at a high target matches libx264 crf 16 (0.9992).
+  Budget about 300 MB per minute per raw with a moving drummer; the disk had 11 GB
+  free that day. 60 fps takes would be the next step for the scrolling notes.
 - Legacy flat takes (`<stamp> take.mp4` + `.json`) still list and can be edited with
   Claude, but have no raws to re-render from.
 - Readability of the social thumbnail: notes, judgement words and combo are fine on a

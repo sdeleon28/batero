@@ -239,7 +239,7 @@ manage the disk):
 20260909-173554 Paradiddle/
     take.json          when, how long, the levels played, where everything is
     raw/screen.mp4     the game exactly as it was on screen
-    raw/camera.mp4     the iPhone, 1280x720
+    raw/camera.mp4     the iPhone, 1920x1080
     raw/audio.wav      the interface's mix
     computer.mp4       16:9: the screen with the camera picture-in-picture
     social.mp4         1080x1920 for Reels / TikTok / Shorts: the screen as a

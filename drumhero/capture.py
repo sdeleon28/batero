@@ -6,7 +6,7 @@ iPhone), each to its own file, and editions rendered from those raws.
         <stamp> <name>/
             take.json                 when, how long, what was played, where everything is
             raw/screen.mp4            the game exactly as it was on screen (the window's size)
-            raw/camera.mp4            the iPhone, 1280x720
+            raw/camera.mp4            the iPhone, 1920x1080
             raw/audio.wav             the interface's mix
             computer.mp4              edition: the screen, 16:9, the camera picture-in-picture
             social.mp4                edition: 1080x1920 for Reels / TikTok / Shorts: the screen as a
@@ -56,6 +56,15 @@ SPLITS = [0.32, 0.4, 0.5, 0.6]     # social edition: the camera's share of the 1
 SOCIAL_SIZE = (1080, 1920)
 PREVIEW_SIZE = (640, 360)
 CAMERA_FPS = 30              # what cameras accept (Continuity Camera: 30 or 60)
+CAMERA_SIZE = (1920, 1080)   # what the take records from the camera (the social edition shows it 960 px tall)
+# Raws: HEVC by VideoToolbox at a high bitrate. Measured 2026-09-09 on the M1 Max on fresh camera
+# frames: h264_videotoolbox stops spending bits at ~2 Mbps whatever -b:v or -q:v says (SSIM 0.9984),
+# hevc_videotoolbox at a high target reaches libx264 crf 16 (SSIM 0.9992) with no CPU cost while the
+# game runs. The editions are the deliverables: libx264 crf 16, H.264 High, offline in the finish thread.
+RAW_ENCODE = ["-c:v", "hevc_videotoolbox", "-b:v", "40M", "-pix_fmt", "yuv420p", "-tag:v", "hvc1"]
+EDITION_ENCODE = ["-c:v", "libx264", "-preset", "medium", "-crf", "16", "-profile:v", "high", "-pix_fmt", "yuv420p"]
+EDITION_AUDIO = ["-c:a", "aac", "-b:a", "256k"]
+SCALE = "flags=lanczos"
 
 
 def pip_rect(frame, pip, corner, margin=24):
@@ -218,23 +227,23 @@ def render_edition(take_dir, edition, settings=None, log=print):
     if aud and os.path.exists(os.path.join(take_dir, aud["file"])):
         cmd += ["-itsoffset", f"{float(aud.get('offset', 0)):.3f}", "-i", os.path.join(take_dir, aud["file"])]
         aud_i, n = n, n + 1
-    encode = ["-c:v", "h264_videotoolbox", "-b:v", "14M", "-pix_fmt", "yuv420p"]
+    encode = list(EDITION_ENCODE)
     if edition == "social":
         W, H = SOCIAL_SIZE
         (_, gy, gw, gh), (_, cy, cw, ch) = social_layout((w, h), float(st["capture_split"]))
         if cam_i is not None:
-            cmd += ["-filter_complex", f"[0:v]scale={gw}:{gh},pad={W}:{H}:0:{gy}:black[g];"
-                                       f"[{cam_i}:v]scale={cw}:{ch}:force_original_aspect_ratio=increase,crop={cw}:{ch}[cam];"
+            cmd += ["-filter_complex", f"[0:v]scale={gw}:{gh}:{SCALE},pad={W}:{H}:0:{gy}:black[g];"
+                                       f"[{cam_i}:v]scale={cw}:{ch}:force_original_aspect_ratio=increase:{SCALE},crop={cw}:{ch}[cam];"
                                        f"[g][cam]overlay=0:{cy}:eof_action=pass[v]", "-map", "[v]"] + encode
         else:
-            cmd += ["-filter_complex", f"[0:v]scale={gw}:{gh},pad={W}:{H}:0:{(H - gh) // 2 // 2 * 2}:black[v]", "-map", "[v]"] + encode
+            cmd += ["-filter_complex", f"[0:v]scale={gw}:{gh}:{SCALE},pad={W}:{H}:0:{(H - gh) // 2 // 2 * 2}:black[v]", "-map", "[v]"] + encode
     elif cam_i is not None:
         x, y, pw, ph = pip_rect((w, h), float(st["capture_pip"]), st.get("capture_corner", "br"))
-        cmd += ["-filter_complex", f"[{cam_i}:v]scale={pw}:{ph}[pip];[0:v][pip]overlay={x}:{y}:eof_action=pass[v]", "-map", "[v]"] + encode
+        cmd += ["-filter_complex", f"[{cam_i}:v]scale={pw}:{ph}:{SCALE}[pip];[0:v][pip]overlay={x}:{y}:eof_action=pass[v]", "-map", "[v]"] + encode
     else:
-        cmd += ["-map", "0:v", "-c:v", "copy"]
+        cmd += ["-map", "0:v"] + encode          # the raw is HEVC: the edition is always H.264
     if aud_i is not None:
-        cmd += ["-map", f"{aud_i}:a", "-c:a", "aac", "-b:a", "192k"]
+        cmd += ["-map", f"{aud_i}:a"] + EDITION_AUDIO
     out = os.path.join(take_dir, f"{edition}.mp4")
     cmd += ["-t", f"{float(meta['duration']):.3f}", "-movflags", "+faststart", out]
     r = subprocess.run(cmd, capture_output=True, text=True)
@@ -283,7 +292,7 @@ class Recorder:
         self.ff_video = subprocess.Popen(
             [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-y",
              "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{w}x{h}", "-r", str(FPS), "-i", "pipe:0",
-             "-c:v", "h264_videotoolbox", "-b:v", "14M", "-pix_fmt", "yuv420p", os.path.join(self.tmp, "screen.mp4")],
+             *RAW_ENCODE, os.path.join(self.tmp, "screen.mp4")],
             stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         self._q = queue.Queue(maxsize=8)
         self.frames = 0
@@ -314,8 +323,8 @@ class Recorder:
                 self.cam_path = os.path.join(self.tmp, "camera.mp4")
                 self.ff_cam = subprocess.Popen(
                     [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-y",
-                     "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "1280x720", "-r", str(FPS), "-i", "pipe:0",
-                     "-c:v", "h264_videotoolbox", "-b:v", "8M", "-pix_fmt", "yuv420p", self.cam_path],
+                     "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", "%dx%d" % CAMERA_SIZE, "-r", str(FPS), "-i", "pipe:0",
+                     *RAW_ENCODE, self.cam_path],
                     stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
                 self.log(f"recording: camera {cam[1]}")
             except OSError as e:
@@ -383,7 +392,7 @@ class Recorder:
                 break
             if self.ff_cam is not None:
                 if cam is None:                                  # camera not streaming yet: black frame keeps sync
-                    black = black or bytes(1280 * 720 * 3)
+                    black = black or bytes(CAMERA_SIZE[0] * CAMERA_SIZE[1] * 3)
                     cam = black
                 try:
                     self.ff_cam.stdin.write(cam)
@@ -450,7 +459,7 @@ class Recorder:
         camera = None
         if self.cam_path and os.path.exists(self.cam_path) and os.path.getsize(self.cam_path) > 1000 and self.cam_frames > 0:
             shutil.move(self.cam_path, os.path.join(raw_dir, "camera.mp4"))
-            camera = {"file": "raw/camera.mp4", "frames": self.cam_frames, "size": [1280, 720],
+            camera = {"file": "raw/camera.mp4", "frames": self.cam_frames, "size": list(CAMERA_SIZE),
                       "delay_ms": float(self.settings.get("capture_camera_delay_ms", 0))}
         audio = None
         if self.audio_path and os.path.exists(self.audio_path):
@@ -514,7 +523,7 @@ class CameraFeed:
     own 30 Hz clock, the same clock that samples the game's picture, so the two streams are
     aligned by construction (no file offsets to guess)."""
 
-    def __init__(self, camera, size=(1280, 720)):
+    def __init__(self, camera, size=CAMERA_SIZE):
         self.size = size
         self.frame = None
         self.frames = 0
@@ -522,7 +531,7 @@ class CameraFeed:
         w, h = size
         self.proc = subprocess.Popen(
             [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-framerate", str(CAMERA_FPS),
-             "-pixel_format", "uyvy422", "-video_size", "1280x720", "-i", f"{camera[0]}:none",
+             "-pixel_format", "uyvy422", "-video_size", "%dx%d" % size, "-i", f"{camera[0]}:none",
              "-vf", f"scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL)
         self.thread = threading.Thread(target=self._read, daemon=True)
