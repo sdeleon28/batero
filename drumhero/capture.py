@@ -53,6 +53,7 @@ DEFAULTS = {"capture_audio_device": "X18/XR18", "capture_audio_channels": [17, 1
             "capture_camera": "iPhone", "capture_pip": 0.28, "capture_corner": "br", "capture_camera_delay_ms": 0}
 CORNERS = ["br", "bl", "tr", "tl"]
 SPLITS = [0.32, 0.4, 0.5, 0.6]     # social edition: the camera's share of the 1920 px height (0.32 = the whole 16:9 picture)
+PIPS = [0.2, 0.28, 0.36, 0.45, 0.55]  # computer edition: the camera picture's height as a share of the frame height
 SOCIAL_SIZE = (1080, 1920)
 PREVIEW_SIZE = (640, 360)
 AUDIO_STALL_S = 1.0          # input stream silent this long: reopen it (Recorder._watch_audio)

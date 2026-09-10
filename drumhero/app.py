@@ -1240,15 +1240,18 @@ class CameraCheckScreen(Screen):
             self.test_take()
         elif key == pygame.K_s:
             self.cycle_split()
+        elif key == pygame.K_p:
+            self.cycle_pip(1)
         elif key == pygame.K_r:
             self.close()
             self.__init__(self.app, self.sample)
         return True
 
-    def cycle_pip(self, d):
-        sizes = [0.2, 0.28, 0.36, 0.45]
-        cur = min(range(4), key=lambda i: abs(sizes[i] - self.settings["capture_pip"]))
-        self.settings["capture_pip"] = sizes[(cur + d) % 4]
+    def cycle_pip(self, d=1):
+        """The computer edition: the camera picture's height as a share of the frame (P, up/down, hats/crash)."""
+        sizes = CP.PIPS
+        cur = min(range(len(sizes)), key=lambda i: abs(sizes[i] - self.settings["capture_pip"]))
+        self.settings["capture_pip"] = sizes[(cur + d) % len(sizes)]
         self.save()
 
     def cycle_split(self):
@@ -1326,7 +1329,7 @@ class CameraCheckScreen(Screen):
         # the two editions: computer (16:9, the camera picture-in-picture) and social (9:16, the
         # screen as a thumbnail on top, the camera under it)
         cy = int(y + ph + 46 * S)
-        f.center(surf, f"computer edition: camera {self.settings['capture_pip']:.0%} high, corner {self.settings['capture_corner']} (hats/crash, [ ])"
+        f.center(surf, f"computer edition: camera {self.settings['capture_pip']:.0%} of the height (P), corner {self.settings['capture_corner']} ([ ])"
                        f"      social edition: camera {self.settings['capture_split']:.0%} of the height (S)",
                  f.small, TEXT, cy - 18 * S)
         ch = int(avail * 0.44); cw = int(ch * 16 / 9)
@@ -1382,7 +1385,7 @@ class CameraCheckScreen(Screen):
         elif self.test_result:
             f.center(surf, self.test_result, f.mid, JUDGE_COLORS["PERFECT"] if "saved" in self.test_result else JUDGE_COLORS["MISS"], self.h - 92 * S)
         self.legend(surf, [("hihat", "size"), ("crash", "size"), ("snare", "test take 3 s"), ("kick", "back")],
-                    keys="[ ] corner · S social camera share · R rescan · Enter test take · Esc back · takes in ~/Movies/drumhero")
+                    keys="P computer camera share · [ ] corner · S social camera share · R rescan · Enter test take · Esc back · takes in ~/Movies/drumhero")
 
 
 # ---------------------------------------------------------------------------
