@@ -146,7 +146,7 @@ class Lane:
 
 
 # Counting syllables per subdivision; the first one is replaced by the beat number.
-COUNT_LABELS = {1: ["1"], 2: ["1", "&"], 3: ["1", "&", "a"], 4: ["1", "e", "&", "a"]}
+COUNT_LABELS = {1: ["1"], 2: ["1", "&"], 3: ["1", "&", "a"], 4: ["1", "e", "&", "a"], 6: ["1", "2", "3", "4", "5", "6"]}
 GRIDS = [1, 2, 3, 4]            # subdivisions per beat we recognise, coarsest first
 GRID_TOLERANCE = 0.12           # of a grid step
 GRID_COVERAGE = 0.95            # fraction of onsets that must sit on the grid
@@ -451,6 +451,14 @@ RUDIMENTS = [
     _rudiment("Triplets R L L", "R L L on every beat: the shuffle hand pattern.", 70, 8, "RLL", 3),
     _rudiment("Double paradiddle", "R L R L R R  L R L R L L in triplets.", 70, 8, "RLRLRRLRLRLL", 3, accents=(0, 6)),
     _rudiment("Paradiddle-diddle", "R L R R L L in triplets, accent on the first.", 75, 8, "RLRRLL", 3, accents=(0,)),
+    # six stroke roll: R L L R R L, the two singles accented, the doubles soft
+    _rudiment("Six stroke roll slow", "R L L R R L over two beats of triplets: accent the singles, keep the doubles soft.",
+              70, 8, "RLLRRL", 3, accents=(0, 5)),
+    _rudiment("Six stroke roll", "The same six strokes inside one beat: a sextuplet, accents on the first and the last.",
+              60, 8, "RLLRRL", 6, accents=(0, 5)),
+    _rudiment("Six stroke roll faster", "Sextuplets at 75.", 75, 12, "RLLRRL", 6, accents=(0, 5)),
+    _rudiment("Six stroke roll R L R R L L", "Singles first: the two accents land together, then the two doubles.",
+              60, 8, "RLRRLL", 6, accents=(0, 1)),
     _rudiment("Doubles 16ths", "R R L L on the sixteenths.", 70, 8, "RRLL", 4, accents=(0,)),
     # accent control: same hands, the accent walks through the sixteenth
     _rudiment("Accent on 1", "Sixteenths, accent on the beat, taps in between.", 70, 8, "RLRL", 4, accents=(0,)),

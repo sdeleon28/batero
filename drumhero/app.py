@@ -299,8 +299,8 @@ class App:
         total = chart.length + TAIL_S + 0.5
         out = {}
         if prog_index is not None:
-            # triplet levels get the shuffle arrangement: the music must confirm the subdivision
-            feel = "triplet" if chart.subdivision_at(0) == 3 else "straight"
+            # triplet and sextuplet levels get the shuffle arrangement: the music must confirm the subdivision
+            feel = "triplet" if chart.subdivision_at(0) % 3 == 0 else "straight"
             key = ("backing", chart.name, round(chart.bpm, 3), prog_index, feel)
             if key not in self.track_cache:
                 self.track_cache[key] = Track(render_backing_track(chart.bpm, prog_index, lead_in, total, feel), -lead_in, BACKING_GAIN)

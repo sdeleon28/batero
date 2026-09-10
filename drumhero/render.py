@@ -382,7 +382,7 @@ class Renderer:
                 color = (20, 20, 24) if (b == beat_i and k == sub_i and prog < 0.5) else (TEXT if k == 0 else DIM)
                 f.center(surf, label, f.small if sub > 2 else f.mid, color, y0 + size / 2, x + (k + 0.5) * cw)
             pygame.draw.rect(surf, ACCENT if b == beat_i else (50, 50, 60), rect, 3 if b == beat_i else 1, border_radius=int(8 * S))
-        name = {1: "quarter notes", 2: "eighth notes", 3: "triplets", 4: "sixteenth notes"}.get(sub, f"{sub} per beat")
+        name = {1: "quarter notes", 2: "eighth notes", 3: "triplets", 4: "sixteenth notes", 6: "sextuplets"}.get(sub, f"{sub} per beat")
         f.center(surf, name, f.small, DIM, y0 + size + 12 * S)
         if g.chart.sticking:
             self.sticking_strip(surf, pos, sub, y0 + size + (44 if g.chart.accents else 34) * S)
