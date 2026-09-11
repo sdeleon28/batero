@@ -156,10 +156,12 @@ LOUD" are called out under the judgement, and a velocity in the band between
 the thresholds is neither. The thresholds come from measured paradiddles on the
 TD-17 snare: accents 88..124 (median 112), taps 29..84 (median 66). The hi-hat
 pad reads much hotter (taps 64..96, accents 120..127), so on the hi-hat a tap is
-104 or less and an accent 116 or more. From 22:00 to 08:00 local time the whole
-band slides down by a fifth (snare accent 70 / tap 67, hi-hat 93 / 83) so the
-accents can be played softer at night; the HUD says "night · softer accents" and
-the run log records the thresholds in force. Daytime thresholds do not change.
+104 or less and an accent 116 or more. The `;` and `'` keys scale that whole band
+(accent sensitivity, 5 % steps, 50..130 %, saved, also in Settings); from 22:00
+to 08:00 local time the game multiplies it by another 0.8 so the accents can be
+played softer at night. The HUD shows the thresholds in force ("accent >= 70
+tap <= 67 (100%, night)") and the run log records them, including a change
+made mid-level. At 100 % by day the thresholds are the measured ones above.
 
 The HUD counts accents and taps and shows the contrast: median accent velocity
 divided by median tap velocity over the last strokes, with the target (1.4x)
@@ -424,6 +426,7 @@ timing errors; the mean is your latency, the deviation is you.
 | D             | drum sounds on/off (saved)         |
 | V             | start / stop a take (screen + mix + camera, both editions rendered) |
 | { / }         | game volume -/+ 5 % (saved), any screen; the mixer fader stays the overall level |
+| ; / '         | accent sensitivity -/+ 5 % (saved), any screen: scales the accent and tap thresholds, 50..130 % |
 | S / C (hub)   | progress / coach                   |
 | 1..9, 0       | hit lanes from the keyboard        |
 

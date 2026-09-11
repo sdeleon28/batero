@@ -16,6 +16,7 @@ import pygame
 
 from . import chart as C
 from .chart import BEATS, EXERCISES, build_lanes, load_midi_chart, load_song_folder
+from . import game as GM
 from .game import Game
 from .kit import (default_kit, describe, describe_pads, load_kit, load_progress, load_settings, save_kit,
                   save_progress, save_settings)
@@ -204,6 +205,25 @@ class App:
 
     def nudge_volume(self, d):
         self.set_volume(round(SND.master() + d * VOLUME_STEP, 2))
+
+    @property
+    def dyn_scale(self):
+        return self.settings.get("dyn_scale", 1.0)
+
+    def set_dyn_scale(self, v):
+        """Accent sensitivity (; and '): scales the accent / tap thresholds of every level,
+        100 % = the measured ones. Applies to the level being played; saved."""
+        v = round(max(GM.DYN_SCALE_MIN, min(GM.DYN_SCALE_MAX, float(v))), 2)
+        self.settings["dyn_scale"] = v
+        save_settings(self.settings)
+        if isinstance(self.screen_obj, PlayScreen):
+            self.screen_obj.game.dyn_scale = v
+            if self.runlog is not None:
+                self.runlog.add("dyn_scale", thresholds=self.screen_obj.game.dyn_thresholds())
+        self.toasts.add(f"accent sensitivity {v:.0%}", ACCENT, key="dyn_scale")
+
+    def nudge_dyn_scale(self, d):
+        self.set_dyn_scale(self.dyn_scale + d * GM.DYN_SCALE_STEP)
 
     def cycle_audio_device(self):
         names = [None] + output_devices()
@@ -611,6 +631,10 @@ class App:
                         self.nudge_volume(-1)              # the plain brackets belong to the screens (tempo, corner)
                     elif ev.unicode == "}" or (ev.key == pygame.K_RIGHTBRACKET and ev.mod & pygame.KMOD_SHIFT):
                         self.nudge_volume(+1)
+                    elif ev.unicode == ";" or ev.key == pygame.K_SEMICOLON:
+                        self.nudge_dyn_scale(-1)           # softer accents count
+                    elif ev.unicode == "'" or ev.key == pygame.K_QUOTE:
+                        self.nudge_dyn_scale(+1)
                     elif self.screen_obj.on_key(ev.key) is False:
                         running = False
             while self.drum_queue:
@@ -823,6 +847,8 @@ class ListScreen(Screen):
                     (f"Menu music: {'on' if self.app.menu_music_on else 'off'}", "ambient texture outside the game"),
                     (f"Audio output: {self.app.sounds.device or 'system default'}", "select cycles through the outputs, saved"),
                     (f"Volume: {self.app.volume:.0%}", "{ and } lower / raise the game's own level anywhere, saved; select raises, wraps to 5 %"),
+                    (f"Accent sensitivity: {self.app.dyn_scale:.0%}", "; and ' lower / raise the accent and tap thresholds anywhere, saved; "
+                                                                      f"night (22:00-08:00) lowers them another 20 %; select raises, wraps"),
                     (f"Start fullscreen: {'on' if self.app.settings.get('fullscreen', True) else 'off'}", "F11 or Cmd+F toggles any time, saved"),
                     ("Recording (V)", f"audio {self.app.recorder.settings['capture_audio_device']} ch {self.app.recorder.settings['capture_audio_channels']}"
                                       f" · camera '{self.app.recorder.settings['capture_camera']}' · ~/Movies/drumhero"),
@@ -874,17 +900,19 @@ class ListScreen(Screen):
             elif self.sel == 8:
                 self.app.set_volume(VOLUME_STEP if self.app.volume >= 1.0 else self.app.volume + VOLUME_STEP)
             elif self.sel == 9:
+                self.app.set_dyn_scale(GM.DYN_SCALE_MIN if self.app.dyn_scale >= GM.DYN_SCALE_MAX else self.app.dyn_scale + GM.DYN_SCALE_STEP)
+            elif self.sel == 10:
                 self.app.settings["fullscreen"] = not self.app.settings.get("fullscreen", True)
                 save_settings(self.app.settings)
-            elif self.sel == 10:
-                self.app.toggle_recording()
             elif self.sel == 11:
-                self.app.go(CameraCheckScreen(self.app, self.app.surface))
+                self.app.toggle_recording()
             elif self.sel == 12:
-                self.app.go(EditScreen(self.app))
+                self.app.go(CameraCheckScreen(self.app, self.app.surface))
             elif self.sel == 13:
-                self.app.go(StatsScreen(self.app))
+                self.app.go(EditScreen(self.app))
             elif self.sel == 14:
+                self.app.go(StatsScreen(self.app))
+            elif self.sel == 15:
                 self.app.go(CoachScreen(self.app))
             else:
                 return False
@@ -1781,7 +1809,7 @@ class PlayScreen(Screen):
         # scroll speed follows the tempo so a beat is always the same distance on screen
         self.game = Game(self.chart, self.lanes, self.by_note, offset_ms=app.offset_ms, speed=app.rate,
                          sounds=app.sounds, guide=app.guide and not self.chart.audio,   # the record has its own drums
-                         log=app.runlog)
+                         log=app.runlog, dyn_scale=app.dyn_scale)
         self.game.metronome_mode = app.metronome_mode
         app.runlog.start(self.chart, self.lanes, app.kit, app.settings, {
             "offset_ms": app.offset_ms, "guide": self.game.guide, "metronome": app.metronome_mode,
