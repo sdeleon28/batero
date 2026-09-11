@@ -278,25 +278,36 @@ edition can be rendered again later from the raws: "Takes" in Setup, or
   edition" bottom right); the raws stay either way.
 
 **Sync.** Three clocks have to agree: the game's picture, the interface's
-sound and the camera. The picture is sampled by wall clock: frame *n* of the
-raw is the frame on screen at *n*/30 s after the take started, and a slot the
-main loop missed (a level loading, a stall) is filled with the previous frame,
-so the picture can never run ahead of the sound (the recorder before
-2026-09-11 skipped those slots: 1.2 s ahead after a six minute take;
-`--retime` repairs such a take, see below). The sound's start is estimated
-from the input stream and then *measured*: the hits in the run logs say when
-each stroke happened, the wav shows where it sounds (the guide sound of the
-note or the drum, whichever comes first), and the median difference over the
-isolated hits corrects the offset (`sync.audio` in take.json). The camera
-runs behind the picture by its own pipeline latency (Continuity Camera ~100
-ms); since the drummer faces the monitor, the camera sees the game too: the
-camera regions whose brightness follows the screen's are found and the lag
-that lines them up is measured (`sync.camera`), minus the monitor's own
-display lag (25 ms), and becomes `camera.delay_ms`. Both corrections are in
-take.json and `render_edition` applies them. `python -m drumhero.capture
---sync "<take folder>"` measures again and re-renders; `--retime "<take
-folder>" 60:7 970:30` inserts frozen frames before raw frames 60 and 970 (a
-take from the old recorder), then measures and renders.
+sound and the camera, and none of them runs at the rate it claims.
+
+- *Picture*: sampled by wall clock. Frame *n* of the raw is the frame on screen
+  *n*/30 s after the take started; a slot the main loop missed (a level
+  loading, a stall) is filled with the previous frame, so the picture can
+  never run ahead (the recorder before 2026-09-11 skipped those slots: 1.2 s
+  ahead after a six minute take; `--retime` repairs such a take).
+- *Sound*: the interface's sample clock is not the Mac's. Measured
+  2026-09-11 on the X18: 44071 samples per wall second instead of 44100, and
+  wandering, so a wav played at 44100 was 200 ms early after six minutes. The
+  recorder logs the arrival time of every audio block and, when the take
+  ends, rewrites the wav onto the take's clock (`audio.clock` in take.json;
+  the device's own file stays as `audio.device.wav`). Then the content is
+  checked: the strokes in the run logs say when each hit happened, and in 20 s
+  windows the offset that lines the wav's onsets up with them is tracked
+  (`sync.audio_curve`). If it moves more than 8 ms over the take the wav is
+  re-timed along that curve (`audio.synced.wav`); otherwise the median becomes
+  the offset. The strokes are the anchor because that is what a viewer
+  compares: the hands on the camera against the drum's sound.
+- *Camera*: Continuity Camera delivers its frames ~100 ms late. The drummer
+  faces the monitor, so the camera sees the game too: the camera regions whose
+  brightness follows the screen's are found and the lag that lines them up is
+  measured (`sync.camera`), minus the monitor's display lag (25 ms), and
+  becomes `camera.delay_ms`.
+
+Everything measured is in take.json and `render_edition` applies it.
+`python -m drumhero.capture --sync "<take folder>"` measures again from the
+raws and re-renders; `--retime "<take folder>" 60:7 970:30` inserts frozen
+frames before raw frames 60 and 970 (a take from the old recorder), then
+measures and renders.
 
 Settings: `capture_audio_device`, `capture_audio_channels`, `capture_camera`,
 `capture_pip` (camera height as a fraction of the picture, 0.28) and

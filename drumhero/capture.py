@@ -31,9 +31,11 @@ How it works, and why not a screen recorder:
   matches the camera setting ("iPhone" by default, so Continuity Camera or Camo) to its
   own file, on the same clock as the game's frames.
 - Sync: the picture is sampled by wall clock (frame n = n / FPS s after the start, missed
-  slots repeat the previous frame); when the take ends measure_sync corrects the audio offset
-  from the MIDI hits in the run logs and the camera delay from the camera's view of the
-  monitor, into take.json.
+  slots repeat the previous frame); the wav is rewritten onto the take's clock from the
+  arrival time of every audio block (the interface's sample clock is not ours); then
+  measure_sync tracks the drum's onsets against the MIDI strokes over the take (re-timing
+  the wav if the offset moves) and measures the camera delay from the camera's view of the
+  monitor, all into take.json.
 - Editions: ffmpeg overlays the camera on the game raw and muxes the audio with those
   corrections (render_edition). The raws stay, so both editions can be made from one take.
 """
@@ -69,6 +71,13 @@ SYNC_LAG_SPAN = 30           # frames each way searched for the camera lag (1 s)
 SYNC_MIN_HITS = 8            # isolated hits needed to trust the audio measurement
 SYNC_MAX_AUDIO_SHIFT = 0.25  # s; a larger correction means the measurement is wrong, keep the estimate
 SYNC_MIN_CAMERA_PEAK = 1.5   # the camera lag's correlation peak must beat the runner-up by this factor
+SYNC_WINDOW_S = 20           # the audio offset is tracked over the take in windows this long, every SYNC_STEP_S
+SYNC_STEP_S = 10
+SYNC_SEARCH_S = 0.15         # offset searched each way to lock on (under half a sixteenth at 60 bpm)
+SYNC_FOLLOW_S = 0.06         # then each window is searched this far from the previous one (the drift is slow)
+SYNC_RANGE_S = 0.6           # the grid the tracker can wander over during a take
+SYNC_WINDOW_PEAK = 1.8       # a window counts when its best offset beats the median score by this factor
+SYNC_WARP_MIN_MS = 8         # the wav is re-timed when the offset moves more than this over the take
 CAMERA_FPS = 30              # what cameras accept (Continuity Camera: 30 or 60)
 CAMERA_SIZE = (1920, 1080)   # what the take records from the camera (the social edition shows it 960 px tall)
 # Raws: HEVC by VideoToolbox at a high bitrate. Measured 2026-09-09 on the M1 Max on fresh camera
@@ -324,9 +333,10 @@ def measure_camera_lag(take_dir, meta):
 
 
 def measure_audio_offset(take_dir, meta):
-    """Where the hits sound in the interface's wav against when the MIDI said they happened
-    (the run logs' hit wall times): median onset minus expected position over isolated hits.
-    Returns {"hits", "shift_ms", "p10_ms", "p90_ms"} or None. shift > 0 = the audio sounds
+    """Where the drum sounds in the interface's wav against when the MIDI said the stroke
+    happened (the run logs' hit wall times): median onset minus expected position over isolated
+    hits (with the guide on, only hits early enough that the drum sounds before the guide).
+    Returns {"hits", "shift_ms", "p10_ms", "p90_ms"} or None. shift > 0 = the drum sounds
     earlier than the MIDI, so the wav must be delayed that much more."""
     aud = meta.get("audio")
     if not aud or not meta.get("run_logs"):
@@ -357,10 +367,9 @@ def measure_audio_offset(take_dir, meta):
             prev = wall
             if not isolated or h.get("judge") == "STRAY" or h.get("velocity", 0) < 40:
                 continue
-            first = wall
-            if guide and h.get("error_ms") is not None:
-                first = min(wall, wall - h["error_ms"] / 1000)   # whichever sounds first: the guide or the drum
-            t = first - t0 - offset
+            if guide and (h.get("error_ms") is None or h["error_ms"] > -40):
+                continue                                    # the guide's note would sound first; only clearly early hits
+            t = wall - t0 - offset
             i0, i1 = int((t - 0.08) * sr), int((t + 0.12) * sr)
             if i0 < 0 or i1 >= len(env):
                 continue
@@ -376,6 +385,143 @@ def measure_audio_offset(take_dir, meta):
             "p10_ms": round(float(np.percentile(d, 10)) * 1000, 1), "p90_ms": round(float(np.percentile(d, 90)) * 1000, 1)}
 
 
+def align_audio_to_clock(path, clock, started_pc, latency, log=print):
+    """Re-time a take's wav onto the take's clock from the recorder's callback log: the
+    interface's sample clock is not ours (measured 2026-09-11 on the X18: 44071 samples per
+    second of wall time, wandering; 150 ms early after six minutes), so each block's arrival
+    time says where its samples belong. The wav is rewritten so that sample j sits at
+    offset + j / sr of take time; the device's own file stays beside it as audio.device.wav.
+    Returns {"offset", "rate", "drift_ms", "blocks"} or None."""
+    import soundfile as sf
+    if len(clock) < 50:
+        return None
+    x, sr = sf.read(path, dtype="float32")
+    if x.ndim == 1:
+        x = x[:, None]
+    n = len(x)
+    pcs = np.array([c[0] for c in clock]) - started_pc - latency      # take time the block's last sample was captured
+    S = np.array([c[1] for c in clock], dtype=np.float64)              # samples written after the block
+    c = pcs - S / sr                                                    # take time of sample 0 as each block sees it
+    # one point per second of samples, the median inside it (callback jitter is a few ms)
+    edges = np.arange(0, S[-1] + sr, sr)
+    which = np.searchsorted(edges, S, side="right") - 1
+    pts_s, pts_c = [], []
+    for b in range(len(edges)):
+        sel = which == b
+        if sel.sum() >= 3:
+            pts_s.append(float(np.median(S[sel]))); pts_c.append(float(np.median(c[sel])))
+    if len(pts_s) < 2:
+        return None
+    pts_s, pts_c = np.array(pts_s), np.array(pts_c)
+    offset = float(pts_c[0])
+    tau = pts_c + pts_s / sr                                            # take time of those samples
+    rate = float((pts_s[-1] - pts_s[0]) / (tau[-1] - tau[0]))
+    drift_ms = float((pts_c[-1] - pts_c[0]) * 1000)
+    if abs(drift_ms) < 1.0 and abs(rate - sr) < 1.0:
+        return {"offset": offset, "rate": round(rate, 2), "drift_ms": round(drift_ms, 1), "blocks": int(len(clock)), "rewritten": False}
+    device = path[:-4] + ".device.wav"
+    shutil.move(path, device)
+    out = np.empty_like(x)
+    step = sr * 60
+    for a in range(0, n, step):
+        b = min(n, a + step)
+        T = offset + np.arange(a, b) / sr                               # take time of output sample j
+        pos = np.clip(np.interp(T, tau, pts_s), 0, n - 1.001)           # source sample at that time
+        i = pos.astype(int); f = (pos - i)[:, None]
+        out[a:b] = x[i] * (1 - f) + x[i + 1] * f
+    sf.write(path, out, sr, subtype="PCM_16")
+    log(f"audio aligned to the take's clock: device ran at {rate:.1f} Hz, {drift_ms:+.0f} ms over the take, rewritten")
+    return {"offset": offset, "rate": round(rate, 2), "drift_ms": round(drift_ms, 1), "blocks": int(len(clock)), "rewritten": True}
+
+
+def _level_clocks(meta):
+    """Per run log: (wall time of chart time 0, chart note times, guide on) from the hits' wall
+    and song_t (the game clock is the wall clock, so one hit pins the level)."""
+    out = []
+    for r in meta.get("run_logs", []):
+        try:
+            with open(r["path"]) as f:
+                head = json.loads(f.readline())
+                hits = [json.loads(l) for l in f if '"hit"' in l]
+        except (OSError, ValueError):
+            continue
+        anchors = [h["wall"] - h["song_t"] for h in hits if h.get("kind") == "hit" and "song_t" in h]
+        if anchors:
+            out.append((float(np.median(anchors)), [n["t"] for n in head["chart"]["notes"]], bool(head.get("guide", True))))
+    return out
+
+
+def measure_audio_curve(take_dir, meta):
+    """How early the drum sounds in the wav, over the take: every stroke in the run logs has a
+    wall time, so in SYNC_WINDOW_S windows the offset that best lines the wav's onsets up with
+    the strokes is found (tracked from one window to the next). The strokes are the anchor
+    because that is what the viewer compares: the hands on the camera against the sound.
+    Without strokes the guide notes (at their chart times) are used instead.
+    Returns [(t, early_s, peak)] on the wav's timeline; empty when nothing lines up."""
+    aud = meta.get("audio")
+    if not aud:
+        return []
+    import soundfile as sf
+    x, sr = sf.read(os.path.join(take_dir, aud["file"]), dtype="float32")
+    env = np.abs(x).mean(axis=1) if x.ndim > 1 else np.abs(x)
+    k = max(1, int(sr * 0.002))
+    env = np.convolve(env, np.ones(k) / k, mode="same")
+    d = np.clip(np.diff(env, prepend=env[0]), 0, None)
+    t0, base = meta["t0"], float(aud.get("offset_estimated", aud["offset"]))
+    events = []
+    for r in meta.get("run_logs", []):
+        try:
+            with open(r["path"]) as f:
+                events += [json.loads(l)["wall"] - t0 - base for l in f if '"kind": "hit"' in l]
+        except (OSError, ValueError, KeyError):
+            continue
+    if len(events) < 15:
+        for w0, notes, guide in _level_clocks(meta):
+            if guide:
+                events += [w0 + t - t0 - base for t in notes]
+    events = np.array(sorted(events))
+    if len(events) < 15:
+        return []
+    taus = np.arange(-SYNC_RANGE_S, SYNC_RANGE_S + 1e-9, 0.001)
+    prev, locked, curve = 0.0, False, []
+    for a in range(0, int(len(env) / sr) - SYNC_WINDOW_S + 1, SYNC_STEP_S):
+        ev = events[(events > a) & (events < a + SYNC_WINDOW_S)]
+        if len(ev) < 15:
+            continue
+        idx = np.clip(((ev[:, None] + taus[None, :]) * sr).astype(int), 0, len(d) - 1)
+        score = d[idx].mean(axis=0)
+        med = np.median(score) + 1e-12
+        near = np.abs(taus - prev) < (SYNC_FOLLOW_S if locked else SYNC_SEARCH_S)
+        if score[near].max() < SYNC_WINDOW_PEAK * med:
+            continue
+        k = int(np.argmax(np.where(near, score, -1)))
+        locked = True
+        prev = float(taus[k])
+        curve.append((a + SYNC_WINDOW_S / 2, round(prev, 4), round(float(score[k] / med), 2)))
+    return curve
+
+
+def warp_audio(src, dst, curve):
+    """Write `dst`: `src` re-timed so that a sound the curve says was early by e at time t lands
+    at t. Piecewise linear between the curve's points, flat beyond them."""
+    import soundfile as sf
+    x, sr = sf.read(src, dtype="float32")
+    if x.ndim == 1:
+        x = x[:, None]
+    ts = np.array([c[0] for c in curve]); es = np.array([c[1] for c in curve])
+    n = len(x)
+    out = np.empty_like(x)
+    step = sr * 60
+    for a in range(0, n, step):
+        b = min(n, a + step)
+        t = np.arange(a, b) / sr
+        pos = (t + np.interp(t, ts, es)) * sr                  # where the sound for instant t sits in the source
+        pos = np.clip(pos, 0, n - 1.001)
+        i = pos.astype(int); f = (pos - i)[:, None]
+        out[a:b] = x[i] * (1 - f) + x[i + 1] * f
+    sf.write(dst, out, sr, subtype="PCM_16")
+
+
 def measure_sync(take_dir, log=print):
     """Measure the audio offset and the camera lag of a take from its raws and write the corrections
     to take.json (audio.offset, camera.delay_ms; the recorder's estimates stay as *_estimated).
@@ -383,24 +529,48 @@ def measure_sync(take_dir, log=print):
     with open(os.path.join(take_dir, "take.json")) as f:
         meta = json.load(f)
     report = meta.get("sync", {})
-    if meta.get("audio"):                                   # measure against the recorder's estimate, not a previous correction
-        meta["audio"]["offset"] = meta["audio"].get("offset_estimated", meta["audio"]["offset"])
+    aud = meta.get("audio")
+    if aud:                                                 # measure against the recorder's estimate, not a previous correction
+        aud["offset"] = aud.get("offset_estimated", aud["offset"])
+        if aud.get("file_device"):
+            aud["file"] = aud["file_device"]
+    curve = []
+    try:
+        curve = measure_audio_curve(take_dir, meta)
+    except Exception as e:                                  # noqa: BLE001
+        report["curve_error"] = str(e)
+    if curve:
+        early = [c[1] for c in curve]
+        report["audio_curve"] = curve
+        span = (max(early) - min(early)) * 1000
+        log(f"sync: game sounds early by {early[0] * 1000:+.0f} ms at the start, {early[-1] * 1000:+.0f} ms at the end ({len(curve)} windows)")
+        if span > SYNC_WARP_MIN_MS:
+            src = os.path.join(take_dir, aud["file"])
+            dst = os.path.join(take_dir, "raw", "audio.synced.wav")
+            warp_audio(src, dst, curve)
+            aud["file_device"] = aud["file"]
+            aud["file"] = "raw/audio.synced.wav"
+            log(f"sync: audio re-timed over the take (moved {span:.0f} ms) -> raw/audio.synced.wav")
+        else:
+            aud["offset"] = round(aud["offset"] + float(np.median(early)), 4)
+            log(f"sync: audio offset moved {np.median(early) * 1000:+.0f} ms from the game sounds")
+    a = None
     try:
         a = measure_audio_offset(take_dir, meta)
     except Exception as e:                                  # noqa: BLE001
-        a, report["audio_error"] = None, str(e)
+        report["audio_error"] = str(e)
     if a is not None:
-        aud = meta["audio"]
-        base = aud.get("offset_estimated", aud["offset"])
-        if abs(a["shift_ms"]) <= SYNC_MAX_AUDIO_SHIFT * 1000:
-            aud["offset_estimated"] = base
-            aud["offset"] = round(base + a["shift_ms"] / 1000, 4)
-            log(f"sync: audio shifted {a['shift_ms']:+.0f} ms from {a['hits']} hits (offset {aud['offset'] * 1000:.0f} ms)")
+        report["audio"] = a
+        if curve:                                           # the game clock is the timeline; the drum's own latency is reported
+            log(f"sync: drum sounds {-a['shift_ms']:+.0f} ms after the MIDI over {a['hits']} hits (kept: that is what the drummer heard)")
+        elif abs(a["shift_ms"]) <= SYNC_MAX_AUDIO_SHIFT * 1000:
+            aud.setdefault("offset_estimated", aud["offset"])
+            aud["offset"] = round(aud["offset"] + a["shift_ms"] / 1000, 4)
+            log(f"sync: audio offset set from {a['hits']} drum hits ({a['shift_ms']:+.0f} ms) -> {aud['offset'] * 1000:.0f} ms")
         else:
             log(f"sync: audio measurement ignored ({a['shift_ms']:+.0f} ms from {a['hits']} hits is too large)")
-        report["audio"] = a
-    else:
-        log("sync: audio not measured (no wav, no run logs or too few isolated hits)")
+    elif not curve:
+        log("sync: audio not measured (no wav, no run logs, guide off and too few isolated hits)")
     try:
         c = measure_camera_lag(take_dir, meta)
     except Exception as e:                                  # noqa: BLE001
@@ -554,6 +724,8 @@ class Recorder:
         self.audio_blocks = 0            # callbacks that delivered samples (0 at the end = a silent wav)
         self.audio_restarts = 0
         self.audio_t0 = None             # wall time of the first sample, set by the first callback
+        self.audio_samples = 0           # samples written so far (gap padding included)
+        self._aclock = []                # (perf_counter at the callback, samples written after it): the device's clock against ours
         self._audio_started = time.time()
         self._audio_last = None          # perf_counter of the last callback
         self._audio_gap_from = None      # perf_counter the stream stalled at: the next block is preceded by that much silence
@@ -578,15 +750,19 @@ class Recorder:
                 gap = int((now - self._audio_gap_from) * sr) - frames
                 if gap > 0:
                     self._aq.put(np.zeros((gap, len(chans)), dtype="float32"))
+                    self.audio_samples += gap
                 self._audio_gap_from = None
             self.audio_blocks += 1
             self._audio_last = now
+            self.audio_samples += frames
+            self._aclock.append((now, self.audio_samples))
             self._aq.put(indata[:, chans].copy())
 
         self._audio = sd.InputStream(device=idx, channels=nin, samplerate=sr, dtype="float32", callback=cb,
                                      **input_stream_kwargs(sr))
         self._audio.start()
         self._audio_started_pc = time.perf_counter()
+        self._audio_latency = float(self._audio.latency or 0)
 
     def _watch_audio(self):
         """Main thread, every frame: an input stream that stops delivering (seen 2026-09-09: the first
@@ -744,9 +920,18 @@ class Recorder:
                       "delay_ms": float(self.settings.get("capture_camera_delay_ms", 0))}
         audio = None
         if self.audio_path and os.path.exists(self.audio_path):
-            shutil.move(self.audio_path, os.path.join(raw_dir, "audio.wav"))
+            wav = os.path.join(raw_dir, "audio.wav")
+            shutil.move(self.audio_path, wav)
             audio = {"file": "raw/audio.wav", "offset": (self.audio_t0 or self._audio_started) - self.t0,
                      "overflows": self.audio_overflows, "blocks": self.audio_blocks, "restarts": self.audio_restarts}
+            try:
+                clock = align_audio_to_clock(wav, self._aclock, self.started_at, getattr(self, "_audio_latency", 0.0), log=self.log)
+            except Exception as e:                          # noqa: BLE001
+                clock = None
+                self.log(f"audio clock alignment failed ({e}); the device's timing stays")
+            if clock is not None:
+                audio["offset"] = clock["offset"]
+                audio["clock"] = clock
         meta = {"take": take_dir, "t0": self.t0, "duration": duration, "fps": FPS, "size": list(self.size),
                 "frames": self.frames, "dropped": self.dropped, "repeated": self.repeated, "raws": raws, "camera": camera, "audio": audio,
                 "settings": {k: self.settings[k] for k in ("capture_pip", "capture_corner", "capture_split")},
