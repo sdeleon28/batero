@@ -320,6 +320,8 @@ class Renderer:
                  f"guide {'on' if g.guide else 'off'}" + ("" if g.sounds is None or g.sounds.drums else "  ·  drums off"),
                  f"backing {'on' if g.track_enabled('backing') else 'off'}" if 'backing' in g.tracks else "no backing",
                  f"metronome {g.metronome_mode}"]
+        if g.night and g.chart.dynamics:
+            right.append("night · softer accents")
         for i, s in enumerate(right):
             ts = f.text(s, f.small, DIM)
             surf.blit(ts, (self.w - ts.get_width() - 12 * S, (10 + i * 20) * S))

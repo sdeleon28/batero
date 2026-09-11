@@ -18,6 +18,11 @@ TAP_MAX = 84             # an unaccented note hit at most this hard counts as a 
 # The hi-hat pad reads much hotter than the snare (2026-09-07, 196 judged hi-hat hits in
 # rudiments: taps 64..96, accents 120..127, median 106), so it gets its own band.
 DYN_THRESHOLDS = {"hihat": (116, 104)}     # instrument -> (accent min, tap max); others use the defaults
+# At night the whole band slides down by NIGHT_DYN_SCALE so accents can be played softer
+# (default 70 / 67, hi-hat 93 / 83); daytime thresholds above stay as they are. Decided when a
+# level starts, from the local clock.
+NIGHT_START, NIGHT_END = 22, 8     # night is from 22:00 to 08:00 local time
+NIGHT_DYN_SCALE = 0.8
 CONTRAST_TARGET = 1.4    # median accent velocity / median tap velocity to aim for
 DYN_BONUS = 30           # score for the right dynamic on a hit note
 ART_BONUS = 30           # score for the right hi-hat articulation on a hit note
@@ -50,10 +55,23 @@ class Flash:
     art: tuple = None    # (required articulation, matched) when the chart judges hi-hat expression
 
 
-def dynamic_for(accent: bool, velocity: int, instrument: str = None):
+def is_night(now: float = None) -> bool:
+    hour = time.localtime(now).tm_hour
+    return hour >= NIGHT_START or hour < NIGHT_END
+
+
+def dyn_band(instrument: str = None, night: bool = False):
+    """(accent min, tap max) for an instrument, scaled down at night."""
+    accent_min, tap_max = DYN_THRESHOLDS.get(instrument, (ACCENT_MIN, TAP_MAX))
+    if night:
+        return round(accent_min * NIGHT_DYN_SCALE), round(tap_max * NIGHT_DYN_SCALE)
+    return accent_min, tap_max
+
+
+def dynamic_for(accent: bool, velocity: int, instrument: str = None, night: bool = False):
     """ACCENT or TAP when the stroke matches the note, SOFT (missed accent) or LOUD
     (tap too hard) when it does not, None in the band between the thresholds."""
-    accent_min, tap_max = DYN_THRESHOLDS.get(instrument, (ACCENT_MIN, TAP_MAX))
+    accent_min, tap_max = dyn_band(instrument, night)
     if accent:
         return "ACCENT" if velocity >= accent_min else "SOFT" if velocity <= tap_max else None
     return "TAP" if velocity <= tap_max else "LOUD" if velocity >= accent_min else None
@@ -66,8 +84,9 @@ def lead_in_for(bpm: float) -> float:
 
 
 class Game:
-    def __init__(self, chart, lanes, by_note, offset_ms=0.0, speed=1.0, sounds=None, guide=True, log=None):
+    def __init__(self, chart, lanes, by_note, offset_ms=0.0, speed=1.0, sounds=None, guide=True, log=None, night=None):
         self.log = log                      # RunLog or None; append-only, never blocks
+        self.night = is_night() if night is None else night     # softer dynamics band after NIGHT_START
         self.tracks = {}                    # name -> (Track, enabled); pre-rendered audio on the chart timeline
         self.chart = chart
         self.notes = chart.notes
@@ -115,7 +134,8 @@ class Game:
         return self.paused_at is not None
 
     def dyn_thresholds(self):
-        return {"default": [ACCENT_MIN, TAP_MAX], **{k: list(v) for k, v in DYN_THRESHOLDS.items()}}
+        return {"default": list(dyn_band(None, self.night)), "night": self.night,
+                **{k: list(dyn_band(k, self.night)) for k in DYN_THRESHOLDS}}
 
     def toggle_pause(self):
         with self.lock:
@@ -198,7 +218,7 @@ class Game:
                 best.state, best.judge, best.error_ms = "hit", judge, err_ms
                 best.hit_velocity = velocity
                 if self.chart.dynamics:
-                    dyn = best.dyn = dynamic_for(best.accent, velocity, best.key)
+                    dyn = best.dyn = dynamic_for(best.accent, velocity, best.key, self.night)
                 if self.chart.expression and best.art:
                     best.played = art
                     best.art_ok = (art == best.art)
