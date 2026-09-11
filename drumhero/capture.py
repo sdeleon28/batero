@@ -86,7 +86,9 @@ CAMERA_SIZE = (1920, 1080)   # what the take records from the camera (the social
 # game runs. The editions are the deliverables: libx264 crf 16, H.264 High, offline in the finish thread.
 RAW_ENCODE = ["-c:v", "hevc_videotoolbox", "-b:v", "40M", "-pix_fmt", "yuv420p", "-tag:v", "hvc1"]
 EDITION_ENCODE = ["-c:v", "libx264", "-preset", "medium", "-crf", "16", "-profile:v", "high", "-pix_fmt", "yuv420p"]
-EDITION_AUDIO = ["-c:a", "aac", "-b:a", "256k"]
+# The interface's USB return is quiet (a take measured 2026-09-11: peaks -18 dBFS, mean -42 dB,
+# inaudible on a phone), so the editions are loudness-normalised to what the platforms expect.
+EDITION_AUDIO = ["-af", "loudnorm=I=-16:TP=-1.5:LRA=11", "-c:a", "aac", "-b:a", "256k"]
 SCALE = "flags=lanczos"
 
 

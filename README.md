@@ -303,7 +303,9 @@ sound and the camera, and none of them runs at the rate it claims.
   measured (`sync.camera`), minus the monitor's display lag (25 ms), and
   becomes `camera.delay_ms`.
 
-Everything measured is in take.json and `render_edition` applies it.
+Everything measured is in take.json and `render_edition` applies it. The
+editions' sound is loudness-normalised (-16 LUFS, true peak -1.5 dB): the
+interface's USB return is quiet (peaks around -18 dBFS), inaudible on a phone.
 `python -m drumhero.capture --sync "<take folder>"` measures again from the
 raws and re-renders; `--retime "<take folder>" 60:7 970:30` inserts frozen
 frames before raw frames 60 and 970 (a take from the old recorder), then
