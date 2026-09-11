@@ -41,6 +41,8 @@ NAV_MIN_VELOCITY = 25     # softer hits never navigate (sticks resting on the sn
 NAV_SOUND_MIN_VELOCITY = 15  # ...but every hit above this is heard, undebounced, so rolls sound whole
 RESULTS_GRACE_S = 1.0     # after a level ends, ignore drum hits this long before they navigate
 VOLUME_STEP = 0.05        # { and } move the game's output level by this much
+DEBUG_HITS = 200          # hits the ` pane remembers
+DEBUG_BARS = 48           # of which it draws as bars
 KEY_LANES = {pygame.K_1: 0, pygame.K_2: 1, pygame.K_3: 2, pygame.K_4: 3, pygame.K_5: 4,
              pygame.K_6: 5, pygame.K_7: 6, pygame.K_8: 7, pygame.K_9: 8, pygame.K_0: 9}
 MODULE_HINTS = ("td-", "td1", "td2", "td5", "alesis", "nitro", "strike", "dtx", "roland", "drum")
@@ -97,6 +99,8 @@ class App:
         if trace:
             self.midi_trace = open(os.path.expanduser(trace), "a")
         self.legend_flash = {}     # instrument -> wall time of its last navigation hit
+        self.debug_on = False      # the ` key: velocity viewer over any screen
+        self.debug_hits = deque(maxlen=DEBUG_HITS)   # (wall t, note, velocity, instrument, outcome, is ghost)
 
         # display and fonts only: pygame.init() would open the mixer here, and opening an audio
         # device can block on macOS's microphone prompt (seen 2026-09-08: the window never came
@@ -397,6 +401,8 @@ class App:
             else:
                 self.runlog.add("note", note=msg.note, velocity=msg.velocity, cc=self.ghosts.pedal_cc)
                 result = scr.on_note(msg.note, msg.velocity)
+            self.debug_hits.append((time.perf_counter(), msg.note, msg.velocity, self.instrument_for(msg.note),
+                                    result if isinstance(result, str) else None, why is not None))
             if self.midi_trace is not None:
                 # wall clock at the callback, note, velocity, outcome, microseconds spent judging
                 self.midi_trace.write(f"{time.time():.6f} {msg.note} {msg.velocity} {result or '-'} "
@@ -587,6 +593,53 @@ class App:
                 self.toasts.add(f"recording could not start: {self.recorder.error}", JUDGE_COLORS["MISS"])
                 print(f"recording could not start: {self.recorder.error}")
 
+    def draw_debug(self):
+        """The ` pane: the last hits' velocities as bars against the accent / tap thresholds
+        in force, the last few as text, the pedal CC. Drawn over any screen."""
+        if not self.debug_on:
+            return
+        S, f = self.scale, self.fonts
+        game = self.screen_obj.game if isinstance(self.screen_obj, PlayScreen) else None
+        night = game.night if game is not None else GM.is_night()
+        scale = game.dyn_scale if game is not None else self.dyn_scale
+        hits = list(self.debug_hits)
+        now = time.perf_counter()
+        w, h = 430 * S, 232 * S
+        x0, y0 = 16 * S, self.size[1] - h - 16 * S
+        pane = pygame.Surface((int(w), int(h)), pygame.SRCALPHA)
+        pane.fill((*LANE_BG, 225))
+        self.surface.blit(pane, (x0, y0))
+        pygame.draw.rect(self.surface, DIM, (x0, y0, w, h), 1)
+        a_min, t_max = GM.dyn_band(None, night, scale)
+        head = f"velocity   pedal cc {self.ghosts.pedal_cc}   thresholds {a_min}/{t_max}" + ("  night" if night else "")
+        self.surface.blit(f.text(head, f.small, DIM), (x0 + 12 * S, y0 + 8 * S))
+        # bars: the last DEBUG_BARS hits, newest at the right, 0..127 tall; ghosts hollow
+        gx, gy, gw, gh = x0 + 12 * S, y0 + 34 * S, w - 130 * S, 96 * S     # room for the big number at the right
+        pygame.draw.rect(self.surface, BG, (gx, gy, gw, gh))
+        for v, col in ((a_min, JUDGE_COLORS["PERFECT"]), (t_max, ACCENT)):
+            yy = gy + gh * (1 - v / 127)
+            pygame.draw.line(self.surface, lerp(col, BG, 0.5), (gx, yy), (gx + gw, yy), 1)
+        bars = hits[-DEBUG_BARS:]
+        bw = gw / DEBUG_BARS
+        for i, (t, note, vel, inst, res, ghost) in enumerate(bars):
+            bh = gh * vel / 127
+            bx = gx + gw - (len(bars) - i) * bw
+            band = GM.dyn_band(inst, night, scale)
+            col = JUDGE_COLORS["MISS"] if ghost else JUDGE_COLORS["PERFECT"] if vel >= band[0] else ACCENT if vel <= band[1] else DIM
+            rect = (bx + 1, gy + gh - bh, max(1, bw - 2), bh)
+            pygame.draw.rect(self.surface, col, rect, 1 if ghost else 0)
+        # the last hit, big, and the last few as text
+        if hits:
+            t, note, vel, inst, res, ghost = hits[-1]
+            ts = f.text(str(vel), f.big, JUDGE_COLORS["MISS"] if ghost else TEXT)
+            self.surface.blit(ts, (x0 + w - 12 * S - ts.get_width(), gy + gh / 2 - ts.get_height() / 2))
+        y = y0 + 138 * S
+        for t, note, vel, inst, res, ghost in reversed(hits[-4:]):
+            age = now - t
+            line = f"{age:5.1f}s  n{note:<3d} {inst or '?':7} {vel:3d}  {'ghost: ' + res if ghost else (res or '')}"
+            self.surface.blit(f.text(line[:50], f.small, DIM if age > 2 else TEXT), (x0 + 12 * S, y))
+            y += 22 * S
+
     def draw_recording_status(self):
         status = self.recorder.status
         rec = self.recorder.active
@@ -631,6 +684,8 @@ class App:
                         self.nudge_volume(-1)              # the plain brackets belong to the screens (tempo, corner)
                     elif ev.unicode == "}" or (ev.key == pygame.K_RIGHTBRACKET and ev.mod & pygame.KMOD_SHIFT):
                         self.nudge_volume(+1)
+                    elif ev.unicode == "`" or ev.key == pygame.K_BACKQUOTE:
+                        self.debug_on = not self.debug_on
                     elif ev.unicode == ";" or ev.key == pygame.K_SEMICOLON:
                         self.nudge_dyn_scale(-1)           # softer accents count
                     elif ev.unicode == "'" or ev.key == pygame.K_QUOTE:
@@ -647,6 +702,7 @@ class App:
             self.recorder.push(self.surface)              # a copy 30 times a second while recording
             self.draw_recording_status()
             self.draw_toasts()
+            self.draw_debug()
             pygame.display.flip()
             clock.tick(TARGET_FPS)
         if self.midi_in:

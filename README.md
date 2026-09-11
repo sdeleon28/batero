@@ -427,6 +427,7 @@ timing errors; the mean is your latency, the deviation is you.
 | V             | start / stop a take (screen + mix + camera, both editions rendered) |
 | { / }         | game volume -/+ 5 % (saved), any screen; the mixer fader stays the overall level |
 | ; / '         | accent sensitivity -/+ 5 % (saved), any screen: scales the accent and tap thresholds, 50..130 % |
+| `             | debug pane on / off, any screen: the last 48 hits' velocities as bars against the accent / tap thresholds in force (green accent, blue tap, grey between, red outline a filtered ghost), the last hit big, the last four as text with note, instrument and outcome, and the pedal CC |
 | S / C (hub)   | progress / coach                   |
 | 1..9, 0       | hit lanes from the keyboard        |
 
