@@ -273,9 +273,30 @@ edition can be rendered again later from the raws: "Takes" in Setup, or
   ffmpeg to its own file and overlaid at stop, aligned by wall clock. The first
   time, macOS asks the app for camera permission; without a camera the take is
   picture and sound only.
-- At stop the raws move into the take's folder and both editions render in
-  the background ("rendering ... edition" bottom right); the raws stay either
-  way.
+- At stop the raws move into the take's folder, the sync is measured (next
+  paragraph) and both editions render in the background ("rendering ...
+  edition" bottom right); the raws stay either way.
+
+**Sync.** Three clocks have to agree: the game's picture, the interface's
+sound and the camera. The picture is sampled by wall clock: frame *n* of the
+raw is the frame on screen at *n*/30 s after the take started, and a slot the
+main loop missed (a level loading, a stall) is filled with the previous frame,
+so the picture can never run ahead of the sound (the recorder before
+2026-09-11 skipped those slots: 1.2 s ahead after a six minute take;
+`--retime` repairs such a take, see below). The sound's start is estimated
+from the input stream and then *measured*: the hits in the run logs say when
+each stroke happened, the wav shows where it sounds (the guide sound of the
+note or the drum, whichever comes first), and the median difference over the
+isolated hits corrects the offset (`sync.audio` in take.json). The camera
+runs behind the picture by its own pipeline latency (Continuity Camera ~100
+ms); since the drummer faces the monitor, the camera sees the game too: the
+camera regions whose brightness follows the screen's are found and the lag
+that lines them up is measured (`sync.camera`), minus the monitor's own
+display lag (25 ms), and becomes `camera.delay_ms`. Both corrections are in
+take.json and `render_edition` applies them. `python -m drumhero.capture
+--sync "<take folder>"` measures again and re-renders; `--retime "<take
+folder>" 60:7 970:30` inserts frozen frames before raw frames 60 and 970 (a
+take from the old recorder), then measures and renders.
 
 Settings: `capture_audio_device`, `capture_audio_channels`, `capture_camera`,
 `capture_pip` (camera height as a fraction of the picture, 0.28) and

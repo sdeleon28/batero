@@ -30,8 +30,12 @@ How it works, and why not a screen recorder:
 - Camera (optional): ffmpeg's avfoundation records the first video device whose name
   matches the camera setting ("iPhone" by default, so Continuity Camera or Camo) to its
   own file, on the same clock as the game's frames.
-- Editions: ffmpeg overlays the camera on the game raw and muxes the audio, aligned by
-  wall clock (render_edition). The raws stay, so both editions can be made from one take.
+- Sync: the picture is sampled by wall clock (frame n = n / FPS s after the start, missed
+  slots repeat the previous frame); when the take ends measure_sync corrects the audio offset
+  from the MIDI hits in the run logs and the camera delay from the camera's view of the
+  monitor, into take.json.
+- Editions: ffmpeg overlays the camera on the game raw and muxes the audio with those
+  corrections (render_edition). The raws stay, so both editions can be made from one take.
 """
 import glob
 import json
@@ -57,6 +61,14 @@ PIPS = [0.2, 0.28, 0.36, 0.45, 0.55]  # computer edition: the camera picture's h
 SOCIAL_SIZE = (1080, 1920)
 PREVIEW_SIZE = (640, 360)
 AUDIO_STALL_S = 1.0          # input stream silent this long: reopen it (Recorder._watch_audio)
+# Sync, measured from the raws when a take ends (measure_sync): the interface's audio against
+# the MIDI hits in the run logs, the camera against the game picture as the camera sees it on the
+# monitor. Both corrections go to take.json and render_edition applies them.
+DISPLAY_LAG_MS = 25          # the monitor shows a frame this long after the game drew it (refresh + panel)
+SYNC_LAG_SPAN = 30           # frames each way searched for the camera lag (1 s)
+SYNC_MIN_HITS = 8            # isolated hits needed to trust the audio measurement
+SYNC_MAX_AUDIO_SHIFT = 0.25  # s; a larger correction means the measurement is wrong, keep the estimate
+SYNC_MIN_CAMERA_PEAK = 1.5   # the camera lag's correlation peak must beat the runner-up by this factor
 CAMERA_FPS = 30              # what cameras accept (Continuity Camera: 30 or 60)
 CAMERA_SIZE = (1920, 1080)   # what the take records from the camera (the social edition shows it 960 px tall)
 # Raws: HEVC by VideoToolbox at a high bitrate. Measured 2026-09-09 on the M1 Max on fresh camera
@@ -258,6 +270,193 @@ def render_edition(take_dir, edition, settings=None, log=print):
     return out
 
 
+def _gray_series(path, w, h):
+    """Every frame of a video as a (frames, h*w) float32 array of gray levels, scaled to w x h."""
+    r = subprocess.run([ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-i", path, "-vf", f"scale={w}:{h}",
+                        "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"], capture_output=True)
+    a = np.frombuffer(r.stdout, dtype=np.uint8)
+    n = len(a) // (w * h)
+    return a[: n * w * h].reshape(n, w * h).astype(np.float32)
+
+
+def _xcorr(a, b, span):
+    """Normalised cross-correlation of two equal series for lags -span..span; positive lag = b later."""
+    a = (a - a.mean()) / (a.std() + 1e-9); b = (b - b.mean()) / (b.std() + 1e-9)
+    out = np.empty(2 * span + 1)
+    for i, L in enumerate(range(-span, span + 1)):
+        out[i] = (a[: len(a) - L] * b[L:]).mean() if L >= 0 else (a[-L:] * b[: len(b) + L]).mean()
+    return out
+
+
+def measure_camera_lag(take_dir, meta):
+    """How many frames the camera runs behind the game picture, from the raws: the monitor is in the
+    camera's view (the drummer faces it), so the camera regions whose brightness changes follow the
+    screen's are found, and the lag that lines them up is measured (frame changes cross-correlated,
+    sub-frame by parabolic fit). Returns {"frames", "ms", "peak", "runner_up", "blocks"} or None."""
+    cam = meta.get("camera")
+    if not cam or not meta.get("raws", {}).get("screen"):
+        return None
+    scr = _gray_series(os.path.join(take_dir, meta["raws"]["screen"]["file"]), 32, 32).mean(axis=1)
+    blocks = _gray_series(os.path.join(take_dir, cam["file"]), 64, 36)
+    n = min(len(scr), len(blocks))
+    if n < 10 * FPS:
+        return None
+    ds = np.diff(scr[:n]); db = np.diff(blocks[:n], axis=0)
+    ds = (ds - ds.mean()) / (ds.std() + 1e-9)
+    db = (db - db.mean(axis=0)) / (db.std(axis=0) + 1e-9)
+    # a block follows the screen if some lag 0..span correlates it well with the screen's changes
+    best = np.full(db.shape[1], -1.0)
+    for L in range(0, SYNC_LAG_SPAN + 1):
+        best = np.maximum(best, (ds[: len(ds) - L, None] * db[L:]).mean(axis=0))
+    thr = max(0.08, np.percentile(best, 98))
+    chosen = np.nonzero(best >= thr)[0]
+    if len(chosen) < 4:
+        return None
+    series = db[:, chosen].mean(axis=1)
+    xc = _xcorr(ds, series, SYNC_LAG_SPAN)
+    k = int(xc.argmax()); runner = float(np.sort(xc)[-2])
+    frac = 0.0
+    if 0 < k < len(xc) - 1 and (xc[k - 1] - 2 * xc[k] + xc[k + 1]) < 0:
+        frac = float(0.5 * (xc[k - 1] - xc[k + 1]) / (xc[k - 1] - 2 * xc[k] + xc[k + 1]))
+    lag = k - SYNC_LAG_SPAN + frac
+    return {"frames": round(lag, 2), "ms": round(lag * 1000 / FPS, 1), "peak": round(float(xc[k]), 4),
+            "runner_up": round(runner, 4), "blocks": int(len(chosen))}
+
+
+def measure_audio_offset(take_dir, meta):
+    """Where the hits sound in the interface's wav against when the MIDI said they happened
+    (the run logs' hit wall times): median onset minus expected position over isolated hits.
+    Returns {"hits", "shift_ms", "p10_ms", "p90_ms"} or None. shift > 0 = the audio sounds
+    earlier than the MIDI, so the wav must be delayed that much more."""
+    aud = meta.get("audio")
+    if not aud or not meta.get("run_logs"):
+        return None
+    import soundfile as sf
+    x, sr = sf.read(os.path.join(take_dir, aud["file"]), dtype="float32")
+    if x.ndim == 1:
+        x = x[:, None]
+    env = np.abs(x).mean(axis=1)
+    k = max(1, int(sr * 0.002))
+    env = np.convolve(env, np.ones(k) / k, mode="same")
+    t0, offset = meta["t0"], float(aud.get("offset", 0))
+    diffs = []
+    for r in meta["run_logs"]:
+        try:
+            with open(r["path"]) as f:
+                head = json.loads(f.readline())
+                hits = [json.loads(l) for l in f if '"hit"' in l]
+        except (OSError, ValueError):
+            continue
+        guide = bool(head.get("guide", True))       # the guide sounds the note at its chart time, the drum at the hit
+        prev = None
+        for h in hits:
+            if h.get("kind") != "hit":
+                continue
+            wall = h["wall"]
+            isolated = prev is None or wall - prev > 0.3
+            prev = wall
+            if not isolated or h.get("judge") == "STRAY" or h.get("velocity", 0) < 40:
+                continue
+            first = wall
+            if guide and h.get("error_ms") is not None:
+                first = min(wall, wall - h["error_ms"] / 1000)   # whichever sounds first: the guide or the drum
+            t = first - t0 - offset
+            i0, i1 = int((t - 0.08) * sr), int((t + 0.12) * sr)
+            if i0 < 0 or i1 >= len(env):
+                continue
+            seg = env[i0:i1]
+            floor = seg[: int(0.04 * sr)].mean()
+            above = np.nonzero(seg > max(4 * floor + 1e-4, 0.3 * seg.max()))[0]
+            if len(above):
+                diffs.append(t - (i0 + above[0]) / sr)
+    if len(diffs) < SYNC_MIN_HITS:
+        return None
+    d = np.array(diffs)
+    return {"hits": int(len(d)), "shift_ms": round(float(np.median(d)) * 1000, 1),
+            "p10_ms": round(float(np.percentile(d, 10)) * 1000, 1), "p90_ms": round(float(np.percentile(d, 90)) * 1000, 1)}
+
+
+def measure_sync(take_dir, log=print):
+    """Measure the audio offset and the camera lag of a take from its raws and write the corrections
+    to take.json (audio.offset, camera.delay_ms; the recorder's estimates stay as *_estimated).
+    Run when a take ends and by `--sync`; render the editions afterwards. Returns the report."""
+    with open(os.path.join(take_dir, "take.json")) as f:
+        meta = json.load(f)
+    report = meta.get("sync", {})
+    if meta.get("audio"):                                   # measure against the recorder's estimate, not a previous correction
+        meta["audio"]["offset"] = meta["audio"].get("offset_estimated", meta["audio"]["offset"])
+    try:
+        a = measure_audio_offset(take_dir, meta)
+    except Exception as e:                                  # noqa: BLE001
+        a, report["audio_error"] = None, str(e)
+    if a is not None:
+        aud = meta["audio"]
+        base = aud.get("offset_estimated", aud["offset"])
+        if abs(a["shift_ms"]) <= SYNC_MAX_AUDIO_SHIFT * 1000:
+            aud["offset_estimated"] = base
+            aud["offset"] = round(base + a["shift_ms"] / 1000, 4)
+            log(f"sync: audio shifted {a['shift_ms']:+.0f} ms from {a['hits']} hits (offset {aud['offset'] * 1000:.0f} ms)")
+        else:
+            log(f"sync: audio measurement ignored ({a['shift_ms']:+.0f} ms from {a['hits']} hits is too large)")
+        report["audio"] = a
+    else:
+        log("sync: audio not measured (no wav, no run logs or too few isolated hits)")
+    try:
+        c = measure_camera_lag(take_dir, meta)
+    except Exception as e:                                  # noqa: BLE001
+        c, report["camera_error"] = None, str(e)
+    if c is not None:
+        cam = meta["camera"]
+        if c["peak"] > 0 and c["peak"] >= SYNC_MIN_CAMERA_PEAK * max(c["runner_up"], 1e-6):
+            cam.setdefault("delay_ms_setting", cam.get("delay_ms", 0))
+            cam["delay_ms"] = round(max(0.0, c["ms"] - DISPLAY_LAG_MS), 1)
+            log(f"sync: camera runs {c['frames']:.2f} frames ({c['ms']:.0f} ms) behind the screen, delay set to {cam['delay_ms']:.0f} ms")
+        else:
+            log(f"sync: camera lag unclear (peak {c['peak']:.3f} vs {c['runner_up']:.3f}), delay kept at {cam.get('delay_ms', 0):.0f} ms")
+        report["camera"] = c
+    elif meta.get("camera"):
+        log("sync: camera lag not measured (the monitor is not in the camera's view?)")
+    meta["sync"] = report
+    with open(os.path.join(take_dir, "take.json"), "w") as f:
+        json.dump(meta, f, indent=1)
+    return report
+
+
+def retime_raws(take_dir, inserts, log=print):
+    """Repair a take whose video raws lost frames (the recorder before 2026-09-11 skipped the
+    slots of a stalled main loop instead of repeating the last frame, so the picture ran ahead of
+    the audio by the stalled time). `inserts` = [(frame_index, frames)]: before each raw frame
+    index that many copies of the previous frame are inserted, in the screen and the camera raws
+    alike (they share one clock). The originals stay beside them as *.unsynced.mp4; take.json
+    records the repair. Then render the editions again."""
+    with open(os.path.join(take_dir, "take.json")) as f:
+        meta = json.load(f)
+    inserts = sorted((int(i), int(n)) for i, n in inserts if int(n) > 0)
+    files = [meta["raws"]["screen"]["file"]] + ([meta["camera"]["file"]] if meta.get("camera") else [])
+    for rel in files:
+        path = os.path.join(take_dir, rel)
+        keep = path[:-4] + ".unsynced.mp4"
+        if not os.path.exists(keep):
+            shutil.move(path, keep)
+        parts, labels, prev = [], [], 0
+        for k, (idx, n) in enumerate(inserts):
+            parts.append(f"[0:v]trim=start_frame={prev}:end_frame={idx},setpts=PTS-STARTPTS,"
+                         f"tpad=stop_mode=clone:stop_duration={n / FPS:.6f}[s{k}]")
+            labels.append(f"[s{k}]"); prev = idx
+        parts.append(f"[0:v]trim=start_frame={prev},setpts=PTS-STARTPTS[s{len(inserts)}]"); labels.append(f"[s{len(inserts)}]")
+        graph = ";".join(parts) + f";{''.join(labels)}concat=n={len(labels)}:v=1:a=0,fps={FPS}[v]"
+        cmd = [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-y", "-i", keep, "-filter_complex", graph, "-map", "[v]",
+               *RAW_ENCODE, path]
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
+            raise RuntimeError(f"ffmpeg: {r.stderr.strip()[-300:]}")
+        log(f"retimed {rel}: {sum(n for _, n in inserts)} frames inserted at {[i for i, _ in inserts]}")
+    meta["retimed"] = inserts
+    meta["frames"] = meta.get("frames", 0) + sum(n for _, n in inserts)
+    with open(os.path.join(take_dir, "take.json"), "w") as f:
+        json.dump(meta, f, indent=1)
+
+
 class Recorder:
     """One take: the screen, the interface's mix and the camera, each to its own file (the raws)
     in a take folder, then both editions rendered from them; an edition can be rendered again
@@ -273,7 +472,7 @@ class Recorder:
         self.started_at = None
         self.feed = None               # the camera while recording
         self.size = None
-        self._next_frame = 0.0
+        self._last_slot = -1
         self._q = None
 
     # --- start ---------------------------------------------------------------------
@@ -288,7 +487,7 @@ class Recorder:
         self.name = "".join(c if c.isalnum() or c in "-_ " else "_" for c in name).strip() or "take"
         self.t0 = time.time()
         self.started_at = time.perf_counter()
-        self._next_frame = 0.0
+        self._last_slot = -1
         # video: raw frames piped to ffmpeg
         w, h = self.size
         self.ff_video = subprocess.Popen(
@@ -299,6 +498,7 @@ class Recorder:
         self._q = queue.Queue(maxsize=8)
         self.frames = 0
         self.dropped = 0
+        self.repeated = 0
         self._writer = threading.Thread(target=self._write_frames, daemon=True)
         self._writer.start()
         # audio: sounddevice input -> wav
@@ -425,45 +625,57 @@ class Recorder:
 
     # --- frames from the main loop ----------------------------------------------------
     def push(self, surface):
-        """Call every frame; takes a copy FPS times a second. Cheap when it is not time yet."""
+        """Call every frame; takes a copy once per 1/FPS slot of the wall clock. The frame's index
+        in the raw is its slot, so a slot the main loop missed (a stall, a full queue) is filled by
+        the writer with the previous frame and the picture never runs ahead of the audio (before
+        2026-09-11 missed slots were skipped: 1.2 s ahead after a 6 minute take)."""
         if not self.active:
             return
         now = time.perf_counter()
-        if now < self._next_frame:
+        slot = int((now - self.started_at) * FPS + 0.5)
+        if slot <= self._last_slot:
             return
         if self._audio is not None:
             self._watch_audio()
-        self._next_frame = max(self._next_frame + 1 / FPS, now - 0.5 / FPS)
+        self._last_slot = slot
         cam = self.feed.frame if self.feed is not None else None
         try:
-            self._q.put_nowait((surface.copy(), cam))
+            self._q.put_nowait((slot, surface.copy(), cam))
         except queue.Full:
             self.dropped += 1
 
     def _write_frames(self):
         import pygame
         black = None
+        last_rgb = last_cam = None
         while True:
             item = self._q.get()
             if item is None:
                 break
-            surf, cam = item
+            slot, surf, cam = item
             if surf.get_size() != self.size:
                 surf = pygame.transform.smoothscale(surf, self.size)
-            try:
-                self.ff_video.stdin.write(pygame.image.tobytes(surf, "RGB"))
-                self.frames += 1
-            except (BrokenPipeError, ValueError, OSError):
-                break
-            if self.ff_cam is not None:
-                if cam is None:                                  # camera not streaming yet: black frame keeps sync
-                    black = black or bytes(CAMERA_SIZE[0] * CAMERA_SIZE[1] * 3)
-                    cam = black
+            rgb = pygame.image.tobytes(surf, "RGB")
+            if self.ff_cam is not None and cam is None:          # camera not streaming yet: black frame keeps sync
+                black = black or bytes(CAMERA_SIZE[0] * CAMERA_SIZE[1] * 3)
+                cam = black
+            repeats = slot - self.frames                         # slots nobody pushed: repeat the previous frame
+            if repeats > 0:
+                self.repeated += repeats
+            frames = [(last_rgb or rgb, last_cam or cam)] * max(0, repeats) + [(rgb, cam)]
+            for r, c in frames:
                 try:
-                    self.ff_cam.stdin.write(cam)
-                    self.cam_frames += 1
+                    self.ff_video.stdin.write(r)
+                    self.frames += 1
                 except (BrokenPipeError, ValueError, OSError):
-                    self.ff_cam = None
+                    return
+                if self.ff_cam is not None:
+                    try:
+                        self.ff_cam.stdin.write(c)
+                        self.cam_frames += 1
+                    except (BrokenPipeError, ValueError, OSError):
+                        self.ff_cam = None
+            last_rgb, last_cam = rgb, cam
 
     def _write_audio(self):
         while True:
@@ -536,16 +748,22 @@ class Recorder:
             audio = {"file": "raw/audio.wav", "offset": (self.audio_t0 or self._audio_started) - self.t0,
                      "overflows": self.audio_overflows, "blocks": self.audio_blocks, "restarts": self.audio_restarts}
         meta = {"take": take_dir, "t0": self.t0, "duration": duration, "fps": FPS, "size": list(self.size),
-                "frames": self.frames, "dropped": self.dropped, "raws": raws, "camera": camera, "audio": audio,
+                "frames": self.frames, "dropped": self.dropped, "repeated": self.repeated, "raws": raws, "camera": camera, "audio": audio,
                 "settings": {k: self.settings[k] for k in ("capture_pip", "capture_corner", "capture_split")},
                 "run_logs": run_logs_between(self.t0, duration), "editions": {}}
         with open(os.path.join(take_dir, "take.json"), "w") as f:
             json.dump(meta, f, indent=1)
         shutil.rmtree(self.tmp, ignore_errors=True)
-        self.log(f"take saved: {take_dir} ({self.frames} frames, {self.dropped} dropped, camera {'yes' if camera else 'no'}, "
+        self.log(f"take saved: {take_dir} ({self.frames} frames, {self.repeated} repeated, {self.dropped} dropped, camera {'yes' if camera else 'no'}, "
                  f"audio {'yes' if audio else 'no'}" + (f": {audio['blocks']} blocks, {audio['overflows']} overflows, "
                                                         f"{audio['restarts']} restarts, offset {audio['offset'] * 1000:.0f} ms" if audio else "") + ")")
         self.result = take_dir
+        if raws:
+            self.composing = (threading.current_thread(), f"sync of {os.path.basename(take_dir)}")
+            try:
+                measure_sync(take_dir, log=self.log)
+            except Exception as e:                              # noqa: BLE001
+                self.log(f"sync measurement failed ({e}); the estimates stay")
         for edition in (("computer", "social") if raws else ()):   # both editions, every time; the user manages the disk
             self.composing = (threading.current_thread(), f"{edition} edition of {os.path.basename(take_dir)}")
             try:
@@ -741,8 +959,19 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="drumhero takes: check the devices, or render an edition of a take")
     ap.add_argument("--check", action="store_true", help="record a moment and report the channel levels and cameras (default)")
     ap.add_argument("--render", nargs=2, metavar=("TAKE_DIR", "EDITION"), help="render computer or social from a take folder's raws")
+    ap.add_argument("--retime", nargs="+", metavar="ARG", help="TAKE_DIR FRAME:COUNT ...: insert COUNT frozen frames before raw frame FRAME (repair a take whose video ran ahead), measure the sync, render both editions")
+    ap.add_argument("--sync", metavar="TAKE_DIR", help="measure the audio offset and camera lag of a take from its raws, then render both editions")
     a = ap.parse_args()
     if a.render:
         print(render_edition(*a.render))
+    elif a.retime or a.sync:
+        if a.retime:
+            take_dir, *specs = a.retime
+            retime_raws(take_dir, [tuple(int(v) for v in spec.split(":")) for spec in specs])
+        else:
+            take_dir = a.sync
+        print(measure_sync(take_dir))
+        for ed in ("computer", "social"):
+            print(render_edition(take_dir, ed))
     else:
         check()
