@@ -495,6 +495,7 @@ RUDIMENTS = [
     _rudiment("Single strokes 8ths", "Alternate hands on the eighths.", 80, 8, "RL", 2),
     _rudiment("Single strokes 16ths", "Alternate hands on the sixteenths, accent on the beat.", 70, 8, "RLRL", 4),
     _rudiment("Paradiddle", "R L R R  L R L L, accent on the first of each group.", 70, 8, "RLRRLRLL", 4, accents=(0, 4)),
+    _rudiment("Paradiddle left lead", "L R L L  R L R R, the same paradiddle starting on the left.", 70, 8, "LRLLRLRR", 4, accents=(0, 4)),
     _rudiment("Paradiddle hat / snare", "Right hand on the hi-hat, left on the snare.", 75, 8, "RLRRLRLL", 4, accents=(0, 4),
               lanes={"R": "hihat", "L": "snare"}),
     _rudiment("Triplets", "Eighth-note triplets, alternating, accent on the beat.", 70, 8, "RLRLRL", 3, accents=(0, 3)),
