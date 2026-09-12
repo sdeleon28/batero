@@ -505,6 +505,8 @@ RUDIMENTS = [
     # six stroke roll: R L L R R L, the two singles accented, the doubles soft
     _rudiment("Six stroke roll in triplets", "R L L R R L over two beats of triplets: accent the singles, keep the doubles soft.",
               70, 8, "RLLRRL", 3, accents=(0, 5)),
+    _rudiment("Six stroke roll left lead", "L R R L L R over two beats of triplets: the same roll starting on the left.",
+              70, 8, "LRRLLR", 3, accents=(0, 5)),
     _rudiment("Six stroke roll", "The same six strokes inside one beat: a sextuplet, accents on the first and the last.",
               60, 8, "RLLRRL", 6, accents=(0, 5)),
     _rudiment("Six stroke roll R L R R L L", "Singles first: the two accents land together, then the two doubles.",
