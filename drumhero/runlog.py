@@ -30,7 +30,7 @@ class RunLog:
             "kind": "run",
             "started": time.time(),
             "chart": {
-                "name": chart.name, "bpm": chart.bpm, "rate": chart.rate, "desc": chart.desc,
+                "name": chart.key, "lead": chart.lead, "bpm": chart.bpm, "rate": chart.rate, "desc": chart.desc,
                 "dynamics": chart.dynamics, "sticking": chart.sticking,
                 "accents": sorted(chart.accents) if chart.accents else None,
                 "audio": chart.audio, "audio_offset": chart.audio_offset,

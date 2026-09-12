@@ -1,6 +1,7 @@
 """Charts: the notes to play, built-in levels, MIDI file loading, and lane layout."""
 import json
 import os
+import re
 import statistics
 import sys
 import dataclasses
@@ -171,6 +172,28 @@ class Chart:
     dynamics: bool = False      # judge accents vs taps by velocity
     expression: bool = False    # judge hi-hat articulations (openness, zone, chick)
     rate: float = 1.0           # tempo multiplier this chart was scaled by (see at_rate)
+    lead: str = None            # "R" / "L": which hand leads; None when the level has no hand lead
+                                # (one instrument per hand, feet, hi-hat lessons). Set by the builders.
+
+    @property
+    def key(self):
+        """The progress / run-log name: the level name, plus " (L)" for the left-hand-lead version."""
+        return self.name + (" (L)" if self.lead == "L" else "")
+
+    @property
+    def title(self):
+        return self.name + ("  ·  left hand lead" if self.lead == "L" else "")
+
+    def mirrored(self):
+        """The same level led by the other hand: every R becomes L and vice versa, in the
+        notes, the sticking strip and the description's R / L tokens. Same name, other key."""
+        if not self.lead:
+            return self
+        swap = {"R": "L", "L": "R"}
+        notes = [dataclasses.replace(n, hand=swap.get(n.hand, n.hand)) for n in self.notes]
+        desc = re.sub(r"\b[RL]\b", lambda m: swap[m.group(0)], self.desc)
+        return dataclasses.replace(self, notes=notes, desc=desc, lead=swap[self.lead],
+                                   sticking=[swap.get(h, h) for h in self.sticking] if self.sticking else None)
 
     def at_rate(self, rate: float):
         """A copy of this chart played at `rate` times the tempo: note times, beat grid and
@@ -436,7 +459,14 @@ def _rudiment(name, desc, bpm, bars, sticking, sub, accents=(0,), lanes=None):
     ch.sticking = list(sticking)
     ch.accents = set(accents)
     ch.dynamics = bool(accents)
+    ch.lead = _lead_of(sticking, lanes)
     return ch
+
+
+def _lead_of(sticking, lanes):
+    """"R" when the level can be played led by either hand: both hands appear and land on the
+    same instrument. A hands-on-different-drums level has one version only."""
+    return "R" if {"R", "L"} <= set(sticking) and len(set(lanes.values())) == 1 else None
 
 
 def _swap(sticking):
@@ -475,6 +505,7 @@ def _rudiment_mix(name, desc, bpm, bars, phrase, lanes=None):
     ch = Chart(name, notes, bpm, desc, segments)
     ch.sticking, ch.accents, ch.dynamics = sticking, accents, True
     ch.sticking_groups = groups[1:]
+    ch.lead = _lead_of(sticking, lanes)
     return ch
 
 
@@ -495,7 +526,6 @@ RUDIMENTS = [
     _rudiment("Single strokes 8ths", "Alternate hands on the eighths.", 80, 8, "RL", 2),
     _rudiment("Single strokes 16ths", "Alternate hands on the sixteenths, accent on the beat.", 70, 8, "RLRL", 4),
     _rudiment("Paradiddle", "R L R R  L R L L, accent on the first of each group.", 70, 8, "RLRRLRLL", 4, accents=(0, 4)),
-    _rudiment("Paradiddle left lead", "L R L L  R L R R, the same paradiddle starting on the left.", 70, 8, "LRLLRLRR", 4, accents=(0, 4)),
     _rudiment("Paradiddle hat / snare", "Right hand on the hi-hat, left on the snare.", 75, 8, "RLRRLRLL", 4, accents=(0, 4),
               lanes={"R": "hihat", "L": "snare"}),
     _rudiment("Triplets", "Eighth-note triplets, alternating, accent on the beat.", 70, 8, "RLRLRL", 3, accents=(0, 3)),
@@ -505,8 +535,6 @@ RUDIMENTS = [
     # six stroke roll: R L L R R L, the two singles accented, the doubles soft
     _rudiment("Six stroke roll in triplets", "R L L R R L over two beats of triplets: accent the singles, keep the doubles soft.",
               70, 8, "RLLRRL", 3, accents=(0, 5)),
-    _rudiment("Six stroke roll left lead", "L R R L L R over two beats of triplets: the same roll starting on the left.",
-              70, 8, "LRRLLR", 3, accents=(0, 5)),
     _rudiment("Six stroke roll", "The same six strokes inside one beat: a sextuplet, accents on the first and the last.",
               60, 8, "RLLRRL", 6, accents=(0, 5)),
     _rudiment("Six stroke roll R L R R L L", "Singles first: the two accents land together, then the two doubles.",

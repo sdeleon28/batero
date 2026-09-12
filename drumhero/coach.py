@@ -34,7 +34,7 @@ Write coach.json here, valid JSON and nothing else in the file, with exactly the
   "diet": "a weekly plan in 4 to 6 lines: what to play, how often, at what tempo, when to move on",
   "playlists": [
     {{"name": "short name", "goal": "one line", "minutes": 15,
-      "items": [{{"level": "exact level name from levels_catalogue", "rate": 0.9, "reps": 2, "why": "short"}}]}}
+      "items": [{{"level": "exact level name from levels_catalogue (or its left_hand_lead name)", "rate": 0.9, "reps": 2, "why": "short"}}]}}
   ]
 }}
 Make 3 playlists of 4 to 8 items each: a warm-up and fundamentals session, a session that attacks

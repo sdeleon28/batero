@@ -53,8 +53,8 @@ STAR_OFF = (60, 60, 72)
 def draw_stars(surf, fonts, stars, right_x, y, S, size="small", pop=None):
     """Five stars ending at right_x, `stars` of them lit. pop: seconds since the stars
     appeared (the lit ones scale in one after another). Returns the width drawn."""
-    r = (7 if size == "small" else 16) * S
-    gap = (6 if size == "small" else 14) * S
+    r = {"tiny": 5, "small": 7}.get(size, 16) * S
+    gap = {"tiny": 3, "small": 6}.get(size, 14) * S
     w = 5 * (2 * r) + 4 * gap
     x0 = right_x - w
     for i in range(5):
@@ -117,6 +117,7 @@ class Fonts:
         name = pygame.font.match_font("menlo,monaco,dejavusansmono,consolas,couriernew") or None
         self.scale = scale
         px = lambda n: max(8, round(n * scale))
+        self.tiny = pygame.font.Font(name, px(12))
         self.small = pygame.font.Font(name, px(16))
         self.mid = pygame.font.Font(name, px(24))
         self.large = pygame.font.Font(name, px(36))
@@ -308,7 +309,7 @@ class Renderer:
             surf.blit(f.text(f"hat articulations {a['ok']}/{a['ok'] + a['wrong']}",
                              f.small, TEXT if a["wrong"] == 0 else JUDGE_COLORS["OK"]), (12 * S, 96 * S))
             surf.blit(f.text("+ tight   / mid   o open   > edge   ^ foot", f.small, DIM), (12 * S, 116 * S))
-        surf.blit(f.text(g.chart.name, f.mid, ACCENT), (12 * S, 8 * S))
+        surf.blit(f.text(g.chart.title, f.mid, ACCENT), (12 * S, 8 * S))
         surf.blit(f.text(f"score {score}   combo {combo}", f.mid, TEXT), (12 * S, 38 * S))
         line = f"P {counts['PERFECT']}  G {counts['GOOD']}  O {counts['OK']}  M {counts['MISS']}  S {counts['STRAY']}"
         if self.ghosts is not None and self.ghosts.filtered:

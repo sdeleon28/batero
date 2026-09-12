@@ -54,7 +54,9 @@ KEY_LANES = {pygame.K_1: 0, pygame.K_2: 1, pygame.K_3: 2, pygame.K_4: 3, pygame.
 MODULE_HINTS = ("td-", "td1", "td2", "td5", "alesis", "nitro", "strike", "dtx", "roland", "drum")
 
 # What each drum does inside a list. The hub uses the drums as section buttons instead.
-NAV = {"snare": "accept", "kick": "back", "hihat": "next", "crash": "prev", "crash2": "prev"}
+NAV = {"snare": "accept", "kick": "back", "hihat": "next", "crash": "prev", "crash2": "prev",
+       "tom1": "lead", "floor": "lead"}      # lead: swap the leading hand (lists of exercises)
+HAND_COLORS = {"R": (245, 90, 90), "L": (80, 200, 230)}     # as on the sticking strip
 CATEGORIES = [
     ("kick", "Exercises", "one drum at a time, slow"),
     ("snare", "Beats", "full grooves"),
@@ -95,7 +97,8 @@ class App:
         self.editor = E.Editor(self.settings.get("claude_bin"))   # Edit with Claude
         self.coach = Coach(self.settings.get("claude_bin"), self.settings.get("coach_language", "es"),
                            self.settings.get("coach_model"))
-        self.session = None          # {"name", "items": [(cat, index, rate, reps, why)], "pos", "rep"} while a playlist runs
+        self.session = None          # {"name", "items": [(cat, index, rate, reps, why, lead)], "pos", "rep"} while a playlist runs
+        self.lead = "R"              # the hand leading the exercises that have a lead (Chart.lead); toms swap it
         self.toasts = Toasts()
         self.camera_name = None
         self.watcher = DeviceWatcher(args.port, self.settings.get("audio_device"), self.settings.get("capture_camera", "iPhone"),
@@ -527,11 +530,19 @@ class App:
         return midi, audio, cam
 
     def level_by_name(self, name):
+        """(category, index, lead) for a level name or a left-hand-lead key ("Paradiddle (L)")."""
         for cat in ("kick", "snare", "hihat"):
             for i, ch in enumerate(self.items_for(cat)):
                 if ch.name == name:
-                    return cat, i
+                    return cat, i, "R"
+                if ch.lead and ch.mirrored().key == name:
+                    return cat, i, "L"
         return None
+
+    def chart_for(self, cat, index):
+        """The level to play: the left-hand-lead mirror when that is the chosen lead."""
+        ch = self.items_for(cat)[index]
+        return ch.mirrored() if ch.lead and self.lead == "L" else ch
 
     def level_names(self):
         return {ch.name for cat in ("kick", "snare", "hihat") for ch in self.items_for(cat)}
@@ -552,7 +563,7 @@ class App:
         for it in playlist.get("items", []):
             found = self.level_by_name(it.get("level"))
             if found:
-                items.append((found[0], found[1], float(it.get("rate", 1.0)), max(1, int(it.get("reps", 1))), it.get("why", "")))
+                items.append((found[0], found[1], float(it.get("rate", 1.0)), max(1, int(it.get("reps", 1))), it.get("why", ""), found[2]))
         if not items:
             return False
         self.session = {"name": playlist.get("name", "session"), "items": items, "pos": 0, "rep": 1}
@@ -560,8 +571,8 @@ class App:
         return True
 
     def session_go(self):
-        cat, index, rate, reps, why = self.session["items"][self.session["pos"]]
-        self.rate = rate
+        cat, index, rate, reps, why, lead = self.session["items"][self.session["pos"]]
+        self.rate, self.lead = rate, lead
         self.go(PlayScreen(self, cat, index))
 
     def session_advance(self):
@@ -569,7 +580,7 @@ class App:
         ss = self.session
         if ss is None:
             return False
-        cat, index, rate, reps, why = ss["items"][ss["pos"]]
+        cat, index, rate, reps, why, lead = ss["items"][ss["pos"]]
         if ss["rep"] < reps:
             ss["rep"] += 1
         elif ss["pos"] + 1 < len(ss["items"]):
@@ -589,7 +600,7 @@ class App:
             self.toasts.add(f"take stopped: {os.path.basename(path)}, rendering both editions", DIM)
             print(f"recording stopped, finishing {path}")
         else:
-            name = self.screen_obj.chart.name if isinstance(self.screen_obj, PlayScreen) else "take"
+            name = self.screen_obj.chart.key if isinstance(self.screen_obj, PlayScreen) else "take"
             self.watcher.paused = True                     # the camera is ffmpeg's now
             if self.recorder.start(self.size, name):
                 self.toasts.add("recording" + (f" with camera {self.camera_name}" if self.camera_name else ", no camera"), (235, 70, 70))
@@ -868,8 +879,9 @@ class HubScreen(Screen):
             self.f.center(surf, sub, self.f.small, DIM, y + ph / 2 + 36 * S, x + pw / 2)
             if cat in ("kick", "snare"):
                 items = self.app.items_for(cat)
-                got = sum(self.app.results.get(ch.name, {}).get("stars", 0) for ch in items)
-                self.f.center(surf, f"{len(items)} levels  ·  ★ {got} / {5 * len(items)}", self.f.small, color, y + ph - 26 * S, x + pw / 2)
+                keys = [ch.key for ch in items] + [ch.mirrored().key for ch in items if ch.lead]   # both leads count
+                got = sum(self.app.results.get(k, {}).get("stars", 0) for k in keys)
+                self.f.center(surf, f"{len(items)} levels  ·  ★ {got} / {5 * len(keys)}", self.f.small, color, y + ph - 26 * S, x + pw / 2)
             elif cat == "hihat":
                 n = len(self.app.songs) if self.app.songs is not None else None
                 self.f.center(surf, f"{n} songs" if n is not None else "songs/ folder", self.f.small, color, y + ph - 26 * S, x + pw / 2)
@@ -997,7 +1009,16 @@ class ListScreen(Screen):
             return self.accept()
         elif action == "back":
             self.back()
+        elif action == "lead":
+            self.swap_lead()
         return True
+
+    def has_leads(self):
+        return self.cat == "kick"
+
+    def swap_lead(self):
+        if self.has_leads():
+            self.app.lead = "L" if self.app.lead == "R" else "R"
 
     def on_key(self, key):
         if key in (pygame.K_DOWN, pygame.K_j):
@@ -1008,7 +1029,31 @@ class ListScreen(Screen):
             return self.accept()
         elif key in (pygame.K_ESCAPE, pygame.K_h):
             self.back()
+        elif key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_TAB):
+            self.swap_lead()
         return True
+
+    def draw_lead_rows(self, surf, ch, right, y, selected):
+        """A two-lead level's best results, one line per hand: R on top, L below, the chosen
+        lead lit on the selected row. Returns the x where the sub text must stop."""
+        S, f = self.s, self.f
+        stop = right
+        for k, (lead, key) in enumerate((("R", ch.key), ("L", ch.mirrored().key))):
+            best = self.app.results.get(key)
+            yy = y - 3 * S + k * 16 * S
+            x = right
+            hot = selected and lead == self.app.lead
+            if best:                                             # a fixed column: the stars stay aligned
+                ts = f.text(f"{best['accuracy'] * 100:.0f}%", f.tiny, TEXT if hot else DIM)
+                surf.blit(ts, (x - ts.get_width(), yy + 1 * S))
+            x -= f.text("100%", f.tiny, DIM).get_width() + 8 * S
+            x -= draw_stars(surf, f, best.get("stars", 0) if best else 0, x, yy + 2 * S, S, size="tiny") + 8 * S
+            hs = f.text(lead, f.tiny, HAND_COLORS[lead] if hot or best else DIM)
+            surf.blit(hs, (x - hs.get_width(), yy + 1 * S)); x -= hs.get_width()
+            if hot:
+                pygame.draw.rect(surf, HAND_COLORS[lead], (x - 6 * S, yy + 2 * S, 2 * S, 11 * S))
+            stop = min(stop, x - 10 * S)
+        return stop
 
     def draw(self, surf, fps):
         surf.fill(BG)
@@ -1038,7 +1083,10 @@ class ListScreen(Screen):
             surf.blit(self.f.text(shown, self.f.mid, self.color if selected else TEXT), (x, y))
             best = self.app.results.get(name)
             right = self.w * 0.88
-            if best:
+            ch = self.app.items_for(self.cat)[i] if self.cat != "crash" else None
+            if ch is not None and ch.lead:
+                right = self.draw_lead_rows(surf, ch, right, y, selected)
+            elif best:
                 ts = self.f.text(f"{best['accuracy'] * 100:.0f}%", self.f.small, DIM)
                 surf.blit(ts, (right - ts.get_width(), y + 4 * S))
                 right -= ts.get_width() + 12 * S
@@ -1047,8 +1095,15 @@ class ListScreen(Screen):
             y += row_h
         if items:
             self.f.center(surf, items[self.sel][1], self.f.small, TEXT, self.h - 84 * S)   # the selected one in full
-        self.legend(surf, [("hihat", "down"), ("crash", "up"), ("snare", "select"), ("kick", "back")],
-                    keys="arrows or j k · Enter or l · Esc or h")
+        if self.has_leads():
+            lead = self.app.lead
+            ls = self.f.text(f"lead hand  {'right' if lead == 'R' else 'left'}", self.f.small, HAND_COLORS[lead])
+            surf.blit(ls, (self.w * 0.88 - ls.get_width(), 28 * S))
+            self.legend(surf, [("hihat", "down"), ("crash", "up"), ("snare", "select"), ("tom1", "lead R/L"), ("kick", "back")],
+                        keys="arrows or j k · Enter or l · ← → lead · Esc or h")
+        else:
+            self.legend(surf, [("hihat", "down"), ("crash", "up"), ("snare", "select"), ("kick", "back")],
+                        keys="arrows or j k · Enter or l · Esc or h")
 
 
 def wrap(fonts, text, font, max_w):
@@ -1868,7 +1923,7 @@ class PlayScreen(Screen):
     def __init__(self, app, cat, index):
         super().__init__(app)
         self.cat, self.index = cat, index
-        self.chart = app.items_for(cat)[index].at_rate(app.rate)
+        self.chart = app.chart_for(cat, index).at_rate(app.rate)
         self.lanes, self.by_note = build_lanes(self.chart, app.kit)
         # scroll speed follows the tempo so a beat is always the same distance on screen
         self.game = Game(self.chart, self.lanes, self.by_note, offset_ms=app.offset_ms, speed=app.rate,
@@ -2000,11 +2055,11 @@ class PlayScreen(Screen):
         if self.recorded or not self.game.hits:
             return
         st = self.game.stats()
-        best = self.app.results.get(self.chart.name)
+        best = self.app.results.get(self.chart.key)
         if best is None or st["grade"] > best.get("grade", -1):
             keep = {k: st[k] for k in ("stars", "grade", "accuracy", "mean_ms", "std_ms", "hit", "notes")}
             keep["when"] = time.time()
-            self.app.results[self.chart.name] = keep
+            self.app.results[self.chart.key] = keep
             save_progress(self.app.results)
         self.recorded = True
 

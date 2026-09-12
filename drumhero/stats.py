@@ -137,7 +137,8 @@ def report(levels, runs=None, now=None):
         for i, ch in enumerate(charts):
             catalogue.append({"category": cat, "index": i + 1, "name": ch.name, "bpm": ch.bpm, "bars": ch.bars,
                               "desc": ch.desc, "instruments": sorted({n.key for n in ch.notes}),
-                              "dynamics": ch.dynamics, "sticking": "".join(ch.sticking) if ch.sticking else None})
+                              "dynamics": ch.dynamics, "sticking": "".join(ch.sticking) if ch.sticking else None,
+                              "left_hand_lead": ch.mirrored().key if ch.lead else None})
     lv = per_level(runs)
     played = []
     for name, e in lv.items():

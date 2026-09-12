@@ -24,6 +24,18 @@ so the relaunch is what matters.
 notes, XR18 USB sends for take audio, XR18 network). Read it before touching the ghost
 filter or `capture.py`; update it when an item is closed.
 
+## Hand lead in Exercises
+
+A rudiment whose sticking uses both hands on one instrument (`Chart.lead == "R"`, set by
+`_rudiment` / `_rudiment_mix` when `lanes` is None) exists in two versions: right and left
+hand lead. There is one level, `Chart.mirrored()` swaps every R and L (notes, strip, the R / L
+tokens of the description); never add a "left lead" level by hand. `App.lead` ("R" / "L",
+toms or the arrow keys in the list swap it) picks the version played. Progress is keyed by
+`Chart.key`: the name, plus `" (L)"` for the left lead; the list shows one star row per hand,
+the hub counts both. Old level names map to current keys in `kit.PROGRESS_MIGRATIONS`,
+applied when progress loads. Levels with hands on different drums, feet patterns and hi-hat
+lessons have no lead (one version).
+
 ## Testing
 
 Headless tests use `SDL_VIDEODRIVER=dummy` and `SDL_AUDIODRIVER=dummy`; screens can be

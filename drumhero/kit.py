@@ -30,13 +30,31 @@ def save_settings(settings, path=SETTINGS_PATH):
 PROGRESS_PATH = os.path.expanduser("~/.config/drumhero/progress.json")
 
 
+# Levels that were renamed or folded into another one: old key -> current key. Applied on load.
+PROGRESS_MIGRATIONS = {
+    "Paradiddle left lead": "Paradiddle (L)",                          # now the paradiddle's left-hand lead
+    "Six stroke roll left lead": "Six stroke roll in triplets (L)",
+}
+
+
 def load_progress(path=PROGRESS_PATH):
-    """chart name -> best stats so far (stars, grade, accuracy, mean_ms, ...)."""
+    """chart key -> best stats so far (stars, grade, accuracy, mean_ms, ...). The key is the
+    level name, plus " (L)" for the left-hand-lead version of a level (Chart.key)."""
     try:
         with open(path) as f:
-            return json.load(f)
+            progress = json.load(f)
     except (OSError, ValueError):
         return {}
+    moved = False
+    for old, new in PROGRESS_MIGRATIONS.items():
+        if old in progress:
+            entry = progress.pop(old)
+            if new not in progress or entry.get("grade", -1) > progress[new].get("grade", -1):
+                progress[new] = entry
+            moved = True
+    if moved:
+        save_progress(progress, path)
+    return progress
 
 
 def save_progress(progress, path=PROGRESS_PATH):
