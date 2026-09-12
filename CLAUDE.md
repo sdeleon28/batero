@@ -1,7 +1,13 @@
 # drumhero
 
 Guitar Hero style drum trainer (pygame + mido). Run with `.venv/bin/python -m drumhero`.
-Sibling of `../hhmapper`; same conventions: own `.venv`, commits allowed, reply ends with the user's next action.
+Sibling of `../hhmapper`; same conventions: own `.venv`, reply ends with the user's next action.
+
+## Git: commit and push when a task is done (required)
+
+Commits are allowed without asking. When a task is finished and verified (and deployed, see
+below), commit it and `git push origin master` without being asked. `origin` is github
+`sdeleon28/batero`; the branch is `master`.
 
 ## Deploy after every change (required)
 
