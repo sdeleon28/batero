@@ -1987,6 +1987,7 @@ class PlayScreen(Screen):
 
     def leave(self):
         self.game.stop_tracks()
+        self.app.sounds.stop_jingle()                     # the jingle must not bleed into the next screen
         self.record()
         if self.app.args.log:
             self.game.write_csv(self.app.args.log)

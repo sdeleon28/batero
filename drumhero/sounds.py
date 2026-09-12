@@ -278,9 +278,18 @@ class SoundBank:
         key = f"jingle{stars}"
         if key not in self.sounds:
             self.sounds[key] = _to_sound(jingle(stars))
+        self.stop_jingle()
         ch = self.sounds[key].play()
         if ch is not None:
             ch.set_volume(0.9 * _master)
+            self._jingle = self.sounds[key]
+
+    def stop_jingle(self):
+        """Cut the end-of-level jingle at once (retry / next / back must not carry it over)."""
+        j = getattr(self, "_jingle", None)
+        if j is not None:
+            j.stop()
+            self._jingle = None
 
     def _get(self, key):
         s = self.sounds.get(key)
