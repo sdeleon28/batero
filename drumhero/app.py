@@ -109,6 +109,9 @@ class App:
             self.midi_trace = open(os.path.expanduser(trace), "a")
         self.legend_flash = {}     # instrument -> wall time of its last navigation hit
         self.debug_on = False      # the ` key: velocity viewer over any screen
+        self.cam_on = False        # the ! key: a small live picture of the camera over any screen
+        self.cam_preview = None    # our own CameraPreview while the recorder does not hold the camera
+        self._cam_cache = (None, None)   # (source frame counter, scaled surface)
         self.debug_hits = deque(maxlen=DEBUG_HITS)   # (wall t, note, velocity, instrument, outcome, is ghost)
 
         # display and fonts only: pygame.init() would open the mixer here, and opening an audio
@@ -600,6 +603,7 @@ class App:
             self.toasts.add(f"take stopped: {os.path.basename(path)}, rendering both editions", DIM)
             print(f"recording stopped, finishing {path}")
         else:
+            self.close_cam_monitor()                      # the camera goes to the recorder; ! reopens it after
             name = self.screen_obj.chart.key if isinstance(self.screen_obj, PlayScreen) else "take"
             self.watcher.paused = True                     # the camera is ffmpeg's now
             if self.recorder.start(self.size, name):
@@ -659,6 +663,49 @@ class App:
             self.surface.blit(f.text(line[:56], f.small, DIM if age > 2 else TEXT), (x0 + 12 * S, y))
             y += 22 * S
 
+    def close_cam_monitor(self):
+        """Release our camera preview (the recorder or the camera check screen takes the camera)."""
+        if self.cam_preview is not None:
+            self.cam_preview.stop()
+            self.cam_preview = None
+
+    def draw_cam_monitor(self):
+        """The ! pane: what the camera sees, small, bottom right, over any screen. While a take
+        runs it shows the recorder's own frames (the ones going into the take); otherwise it
+        opens a preview of its own. The camera check screen has its own picture."""
+        if not self.cam_on or isinstance(self.screen_obj, CameraCheckScreen):
+            self.close_cam_monitor()
+            return
+        S, f = self.scale, self.fonts
+        pw, ph = 320 * S, 180 * S
+        x0, y0 = self.size[0] - pw - 16 * S, self.size[1] - ph - 40 * S
+        if self.recorder.active and self.recorder.feed is not None:
+            self.close_cam_monitor()
+            src, frame, size, count = self.recorder.feed, self.recorder.feed.frame, CP.CAMERA_SIZE, self.recorder.feed.frames
+            label, error = "camera · recording", self.recorder.feed.error
+        else:
+            if self.cam_preview is None and not self.recorder.active:
+                cam = CP.find_camera(self.recorder.settings["capture_camera"])
+                self.cam_preview = CP.CameraPreview(cam) if cam and CP.ffmpeg_path() else None
+                if self.cam_preview is None:
+                    self._cam_cache = (None, None)
+            p = self.cam_preview
+            src, frame, size, count = p, (p.frame if p else None), CP.PREVIEW_SIZE, (p.frames if p else 0)
+            label = "camera"
+            error = (p.error if p else f"no camera '{self.recorder.settings['capture_camera']}'")
+        key = (id(src), count)
+        if frame is not None and self._cam_cache[0] != key:
+            pic = pygame.image.frombuffer(frame, size, "RGB")
+            self._cam_cache = (key, pygame.transform.scale(pic, (int(pw), int(ph))))
+        pic = self._cam_cache[1] if self._cam_cache[0] == key else None
+        if pic is not None:
+            self.surface.blit(pic, (x0, y0))
+        else:
+            pygame.draw.rect(self.surface, LANE_BG, (x0, y0, pw, ph))
+            self.fonts.center(self.surface, error or "waiting for frames...", f.small, DIM, y0 + ph / 2 - 8 * S, x0 + pw / 2)
+        pygame.draw.rect(self.surface, (235, 70, 70) if self.recorder.active else DIM, (x0, y0, pw, ph), 1)
+        self.surface.blit(f.text(label, f.small, TEXT), (x0 + 8 * S, y0 + 6 * S))
+
     def draw_recording_status(self):
         status = self.recorder.status
         rec = self.recorder.active
@@ -705,6 +752,8 @@ class App:
                         self.nudge_volume(+1)
                     elif ev.unicode == "`" or ev.key == pygame.K_BACKQUOTE:
                         self.debug_on = not self.debug_on
+                    elif ev.unicode == "!" or (ev.key == pygame.K_1 and ev.mod & pygame.KMOD_SHIFT):
+                        self.cam_on = not self.cam_on
                     elif ev.unicode == ";" or ev.key == pygame.K_SEMICOLON:
                         self.nudge_dyn_scale(-1)           # softer accents count
                     elif ev.unicode == "'" or ev.key == pygame.K_QUOTE:
@@ -722,11 +771,13 @@ class App:
             self.draw_recording_status()
             self.draw_toasts()
             self.draw_debug()
+            self.draw_cam_monitor()                       # after push: never in the take
             pygame.display.flip()
             clock.tick(TARGET_FPS)
         if self.midi_in:
             self.midi_in.close()
         self.watcher.stop()
+        self.close_cam_monitor()
         if self.recorder.active:
             self.recorder.stop()
         if self.recorder.composing is not None:
@@ -1338,6 +1389,7 @@ class CameraCheckScreen(Screen):
         super().__init__(app)
         self.sample = sample.copy() if sample is not None else None   # what the take captures
         self.settings = {**CP.DEFAULTS, **{k: v for k, v in app.settings.items() if k in CP.DEFAULTS}}
+        app.close_cam_monitor()                                  # one ffmpeg on the camera at a time
         self.camera = CP.find_camera(self.settings["capture_camera"])
         self.preview = CP.CameraPreview(self.camera) if self.camera and CP.ffmpeg_path() else None
         try:
