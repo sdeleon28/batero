@@ -43,6 +43,12 @@ RESULTS_GRACE_S = 1.0     # after a level ends, ignore drum hits this long befor
 VOLUME_STEP = 0.05        # { and } move the game's output level by this much
 DEBUG_HITS = 200          # hits the ` pane remembers
 DEBUG_BARS = 48           # of which it draws as bars
+NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+
+
+def note_name(note):
+    """MIDI note -> name in the Bitwig / Kontakt convention (60 = C3): 42 -> C#1."""
+    return f"{NOTE_NAMES[note % 12]}{note // 12 - 2}"
 KEY_LANES = {pygame.K_1: 0, pygame.K_2: 1, pygame.K_3: 2, pygame.K_4: 3, pygame.K_5: 4,
              pygame.K_6: 5, pygame.K_7: 6, pygame.K_8: 7, pygame.K_9: 8, pygame.K_0: 9}
 MODULE_HINTS = ("td-", "td1", "td2", "td5", "alesis", "nitro", "strike", "dtx", "roland", "drum")
@@ -604,7 +610,7 @@ class App:
         scale = game.dyn_scale if game is not None else self.dyn_scale
         hits = list(self.debug_hits)
         now = time.perf_counter()
-        w, h = 430 * S, 232 * S
+        w, h = 470 * S, 232 * S
         x0, y0 = 16 * S, self.size[1] - h - 16 * S
         pane = pygame.Surface((int(w), int(h)), pygame.SRCALPHA)
         pane.fill((*LANE_BG, 225))
@@ -632,12 +638,14 @@ class App:
         if hits:
             t, note, vel, inst, res, ghost = hits[-1]
             ts = f.text(str(vel), f.big, JUDGE_COLORS["MISS"] if ghost else TEXT)
-            self.surface.blit(ts, (x0 + w - 12 * S - ts.get_width(), gy + gh / 2 - ts.get_height() / 2))
+            self.surface.blit(ts, (x0 + w - 12 * S - ts.get_width(), gy + gh / 2 - ts.get_height() / 2 - 10 * S))
+            ns = f.text(f"{note} {note_name(note)}", f.small, DIM)   # the note: number and name
+            self.surface.blit(ns, (x0 + w - 12 * S - ns.get_width(), gy + gh - ns.get_height() - 2 * S))
         y = y0 + 138 * S
         for t, note, vel, inst, res, ghost in reversed(hits[-4:]):
             age = now - t
-            line = f"{age:5.1f}s  n{note:<3d} {inst or '?':7} {vel:3d}  {'ghost: ' + res if ghost else (res or '')}"
-            self.surface.blit(f.text(line[:50], f.small, DIM if age > 2 else TEXT), (x0 + 12 * S, y))
+            line = f"{age:5.1f}s  {note:3d} {note_name(note):<4} {inst or '?':7} {vel:3d}  {'ghost: ' + res if ghost else (res or '')}"
+            self.surface.blit(f.text(line[:56], f.small, DIM if age > 2 else TEXT), (x0 + 12 * S, y))
             y += 22 * S
 
     def draw_recording_status(self):
