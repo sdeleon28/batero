@@ -676,21 +676,13 @@ class App:
     def draw_cam_monitor(self):
         """The ! pane: what the camera sees, small, bottom right, over any screen. While a take
         runs it shows the recorder's own frames (the ones going into the take); otherwise it
-        opens a preview of its own. The camera check screen has its own picture.
-        While the stream is live the camera is always on, as the picture-in-picture of the
-        computer edition (capture_pip of the height in capture_corner, 30 fps): the stream is
-        the window, so this is how the camera gets into it."""
-        live = self.streamer.active
-        if (not self.cam_on and not live) or isinstance(self.screen_obj, CameraCheckScreen):
+        opens a preview of its own. The camera check screen has its own picture."""
+        if not self.cam_on or isinstance(self.screen_obj, CameraCheckScreen):
             self.close_cam_monitor()
             return
         S, f = self.scale, self.fonts
-        if live:
-            x0, y0, pw, ph = CP.pip_rect(self.size, self.recorder.settings["capture_pip"], self.recorder.settings["capture_corner"],
-                                         margin=int(16 * S))
-        else:
-            pw, ph = 320 * S, 180 * S
-            x0, y0 = self.size[0] - pw - 16 * S, self.size[1] - ph - 40 * S
+        pw, ph = 320 * S, 180 * S
+        x0, y0 = self.size[0] - pw - 16 * S, self.size[1] - ph - 40 * S
         if self.recorder.active and self.recorder.feed is not None:
             self.close_cam_monitor()
             src, frame, size, count = self.recorder.feed, self.recorder.feed.frame, CP.CAMERA_SIZE, self.recorder.feed.frames
@@ -698,12 +690,12 @@ class App:
         else:
             if self.cam_preview is None and not self.recorder.active:
                 cam = CP.find_camera(self.recorder.settings["capture_camera"])
-                self.cam_preview = CP.CameraPreview(cam, fps=CP.CAMERA_FPS if live else 15) if cam and CP.ffmpeg_path() else None
+                self.cam_preview = CP.CameraPreview(cam) if cam and CP.ffmpeg_path() else None
                 if self.cam_preview is None:
                     self._cam_cache = (None, None)
             p = self.cam_preview
             src, frame, size, count = p, (p.frame if p else None), CP.PREVIEW_SIZE, (p.frames if p else 0)
-            label = "camera · live" if live else "camera"
+            label = "camera"
             error = (p.error if p else f"no camera '{self.recorder.settings['capture_camera']}'")
         key = (id(src), count)
         if frame is not None and self._cam_cache[0] != key:
@@ -715,9 +707,8 @@ class App:
         else:
             pygame.draw.rect(self.surface, LANE_BG, (x0, y0, pw, ph))
             self.fonts.center(self.surface, error or "waiting for frames...", f.small, DIM, y0 + ph / 2 - 8 * S, x0 + pw / 2)
-        pygame.draw.rect(self.surface, (235, 70, 70) if self.recorder.active else (145, 70, 255) if live else DIM, (x0, y0, pw, ph), 1)
-        if not live:
-            self.surface.blit(f.text(label, f.small, TEXT), (x0 + 8 * S, y0 + 6 * S))
+        pygame.draw.rect(self.surface, (235, 70, 70) if self.recorder.active else DIM, (x0, y0, pw, ph), 1)
+        self.surface.blit(f.text(label, f.small, TEXT), (x0 + 8 * S, y0 + 6 * S))
 
     def toggle_stream(self):
         """T: the stream starts and stops here and nowhere else (never on its own)."""
@@ -735,7 +726,6 @@ class App:
 
     def stop_stream(self):
         self.streamer.stop()
-        self.close_cam_monitor()                      # the 30 fps preview of the PiP; ! opens the small one again
         if self.chat is not None:
             self.chat.stop()
             self.chat = None

@@ -32,9 +32,6 @@ presses T, and Claude does not press it for them.** For pipeline checks use
 `python -m drumhero.twitch --selftest` (a local rtmp listener, no Twitch) and
 `python -m drumhero.twitch --chat xantwav` (reads the chat, no account needed).
 
-- While live the camera is drawn in the window as the computer edition's PiP (`capture_pip` of
-  the height in `capture_corner`, 30 fps preview, purple border), whatever the `!` key says: that
-  is how the iPhone gets into the stream (added 2026-09-12 after the first live test).
 - What goes out is the window as the user sees it, every overlay included (`Streamer.push`
   runs last in the main loop, after the toasts, the velocity viewer, the chat pane and the
   camera monitor): not an edition, no PiP, no social layout.
