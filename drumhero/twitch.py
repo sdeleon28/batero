@@ -93,12 +93,29 @@ DEFAULTS = {"twitch_channel": "xantwav", "stream_height": 1080, "stream_kbps": 6
 STREAMS_DIR = os.path.expanduser("~/Movies/drumhero/streams")   # the AAC copy of every stream's audio
 STATE_PATH = os.environ.get("DRUMHERO_STREAM_STATE") or os.path.expanduser("~/.config/drumhero/stream.json")   # the daemon's state, read by the game (tests: their own file)
 DAEMON_LOG = os.path.expanduser("~/Library/Logs/drumhero/stream.log")   # the daemon's output
+GAIN_PATH = os.path.expanduser("~/.config/drumhero/stream_gain")         # the stream's audio gain in dB, one number, kept between streams
+GAIN_RANGE = (-12.0, 30.0)   # the badge's fader; the first streams measured -42 LUFS with the interface's mix as it came (2026-09-13)
 AUDIO_STALL_S = 1.0          # no audio callback this long: the input is reopened (at most 3 times)
 AUDIO_LAG_PAD_S = 0.25       # the audio timeline fell this far behind the wall clock: pad it with silence
 START_TIMEOUT_S = 15         # ffmpeg reported no progress this long after the start: the stream is declared dead
 CHAT_HOST, CHAT_PORT = "irc.chat.twitch.tv", 6697
 CHAT_KEEP = 60               # messages kept for the pane
 CHAT_RECONNECT_S = (2, 5, 10, 20, 30)
+
+
+def read_gain(path=GAIN_PATH):
+    """The stream's audio gain in dB (0 when unset)."""
+    try:
+        with open(path) as f:
+            return min(GAIN_RANGE[1], max(GAIN_RANGE[0], float(f.read().strip() or 0)))
+    except (OSError, ValueError):
+        return 0.0
+
+
+def write_gain(db, path=GAIN_PATH):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write(f"{db:.1f}\n")
 
 
 def read_key(path=TWITCH_KEY_PATH):
@@ -259,7 +276,9 @@ class Streamer:
         venv_py = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".venv", "bin", "python")
         self.feeder = subprocess.Popen([venv_py if os.path.exists(venv_py) else sys.executable, "-m", "drumhero.twitch", "--audio-feed", self.fifo, "--device", dev,
                                         "--channels", ",".join(str(c) for c in chans), "--rate", str(sr)],
-                                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.audio_level = (-99.0, -99.0)            # (peak dB, rms dB) of what the feeder sent lately, after the gain
+        threading.Thread(target=self._read_level, daemon=True).start()
         t0 = time.time()
         cmd = [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
                "-f", "avfoundation", "-framerate", str(self.fps), "-capture_cursor", "1", "-use_wallclock_as_timestamps", "1",
@@ -268,7 +287,7 @@ class Streamer:
                "-thread_queue_size", "1024", "-i", self.fifo,
                "-copyts", "-map", "0:v", "-map", "1:a",
                "-vf", f"setpts=PTS-{t0:.3f}/TB,scale=-2:'min({th},ih)':flags=bilinear", "-fps_mode", "cfr",
-               "-af", f"asetpts=PTS-{t0:.3f}/TB,aresample=async=1",
+               "-af", f"asetpts=PTS-{t0:.3f}/TB,aresample=async=1,alimiter=limit=0.97:level=0",
                *encode_args((0, th), self.fps, int(self.settings["stream_kbps"]), container=False),
                "-progress", "pipe:1", *tee_output(url, self.audio_copy)]
         self.ff = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -295,6 +314,7 @@ class Streamer:
         if len(chans) == 1:
             chans = chans * 2
         self._audio_spec = (idx, nin, sr, chans[:2])
+        self._gain = 10 ** (read_gain() / 20)
         self.audio_samples = 0           # samples sent so far, on the stream's clock (pads included)
         self._audio_last = None
         self._audio_restarting = False
@@ -319,7 +339,7 @@ class Streamer:
             self.audio_blocks += 1
             self._audio_last = now
             self.audio_samples += frames
-            self._aq.put(np.ascontiguousarray(indata[:, chans], dtype="float32"))
+            self._aq.put(np.ascontiguousarray(indata[:, chans], dtype="float32") * self._gain)
 
         self._audio = sd.InputStream(device=idx, channels=nin, samplerate=sr, dtype="float32", callback=cb,
                                      **input_stream_kwargs(sr))
@@ -435,6 +455,16 @@ class Streamer:
                 except (BrokenPipeError, ValueError, OSError):
                     return
             last_rgb = rgb
+
+    def _read_level(self):
+        """The feeder prints "level <peak dB> <rms dB>" four times a second on stdout."""
+        for line in iter(self.feeder.stdout.readline, b""):
+            parts = line.decode(errors="replace").split()
+            if len(parts) == 3 and parts[0] == "level":
+                try:
+                    self.audio_level = (float(parts[1]), float(parts[2]))
+                except ValueError:
+                    pass
 
     def _read_progress(self):
         block = {}
@@ -646,6 +676,10 @@ def daemon(settings):
             warn += f"  dropped {p['drop_frames']}"
         return "live", f"LIVE {clock}", warn.strip()
 
+    def on_gain(db):
+        write_gain(db)
+        _stamped_print(f"stream: gain {db:+.1f} dB")
+
     try:
         from .badge import Badge, TICK_S
     except ImportError as e:                          # no PyObjC: the stream still runs, without the badge
@@ -653,7 +687,7 @@ def daemon(settings):
         while tick() is not None:
             stop.wait(0.5)
     else:
-        Badge(tick, on_close=stop.set).run()
+        Badge(tick, on_close=stop.set, gain=(read_gain(), GAIN_RANGE, on_gain), level=lambda: st.audio_level).run()
     _stamped_print("stream: daemon exit")
 
 
@@ -859,19 +893,23 @@ def audio_feed(fifo, device, channels, rate):
     if len(chans) == 1:
         chans = chans * 2
     q = queue.Queue()
-    stats = {"blocks": 0, "overflows": 0, "frames": 0}
+    stats = {"blocks": 0, "overflows": 0, "frames": 0, "gain": 10 ** (read_gain() / 20), "peak": 0.0, "sq": 0.0, "n": 0}
 
     def cb(indata, frames, t, status):
         if status.input_overflow:
             stats["overflows"] += 1
         stats["blocks"] += 1
         stats["frames"] += frames
-        q.put(np.ascontiguousarray(indata[:, chans], dtype="float32").tobytes())
+        block = np.ascontiguousarray(indata[:, chans], dtype="float32") * stats["gain"]
+        stats["peak"] = max(stats["peak"], float(np.abs(block).max()) if frames else 0.0)
+        stats["sq"] += float((block * block).sum()); stats["n"] += block.size
+        q.put(block.tobytes())
 
     out = open(fifo, "wb", buffering=0)                  # blocks until ffmpeg opens its end
     stream = sd.InputStream(device=idx, channels=nin, samplerate=rate, dtype="float32", callback=cb, **input_stream_kwargs(rate))
     stream.start()
     t0 = time.perf_counter()
+    gain_db, checked, reported = read_gain(), t0, t0
     try:
         while True:
             block = q.get()
@@ -879,11 +917,24 @@ def audio_feed(fifo, device, channels, rate):
                 out.write(block)
             except (BrokenPipeError, OSError):
                 break
+            now = time.perf_counter()
+            if now - checked > 0.5:                      # the badge's fader writes GAIN_PATH
+                checked = now
+                g = read_gain()
+                if g != gain_db:
+                    gain_db = g
+                    stats["gain"] = 10 ** (g / 20)
+            if now - reported > 0.25:
+                reported = now
+                peak, sq, n = stats["peak"], stats["sq"], stats["n"]
+                stats["peak"], stats["sq"], stats["n"] = 0.0, 0.0, 0
+                rms = (sq / n) ** 0.5 if n else 0.0
+                print(f"level {20 * np.log10(max(peak, 1e-5)):.1f} {20 * np.log10(max(rms, 1e-5)):.1f}", flush=True)
     finally:
         elapsed = time.perf_counter() - t0
         stream.stop(); stream.close()
         lost = max(0.0, elapsed - stats["frames"] / rate) * 1000
-        print(f"audio feed: {stats['blocks']} blocks, {stats['overflows']} overflows, {elapsed:.1f} s, lost {lost:.0f} ms", file=sys.stderr)
+        print(f"audio feed: {stats['blocks']} blocks, {stats['overflows']} overflows, {elapsed:.1f} s, lost {lost:.0f} ms, gain {gain_db:+.1f} dB", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------

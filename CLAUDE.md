@@ -54,7 +54,7 @@ prints the received audio's level, so silence is caught) and
   fullscreen Space hides it; re-placed every half second), no Dock icon, never takes the focus. A
   red pill "LIVE mm:ss" with a blinking dot; amber STARTING until ffmpeg reports, dim STOPPING;
   after an unrequested end "STREAM ENDED · reason" stays until its x is clicked or another stream
-  goes live. Speed under 0.95x and dropped frames appear in amber inside the pill. The x next to it
+  goes live. Under the pill, the audio row (meter, gain fader, dB), see below. Speed under 0.95x and dropped frames appear in amber inside the pill. The x next to it
   stops the stream like T (the daemon's SIGTERM path). The game draws no badge of its own; the
   play HUD's right column starts under the corner while the stream lives (`Renderer.top_inset`
   from `App.badge_height`). Viewers see the badge too (the stream is the display).
@@ -87,6 +87,14 @@ prints the received audio's level, so silence is caught) and
   input inside the game process for the stream: the callback waits for the GIL and the
   window source logged 0.25 s stalls; the headphone return also chopped that night.
   "window" stays as the fallback (`stream_source: "window"`).
+- **Gain and level** (2026-09-13: the first streams went out at -42 LUFS, peaks -20 dB, the
+  interface's mix as it came): the badge's audio row has a peak meter of what goes out, a gain
+  fader (-12..+30 dB, whole dB) and its value. The fader writes `~/.config/drumhero/stream_gain`
+  (one number, kept between streams, `twitch.read_gain`); the feeder re-reads it twice a second
+  and multiplies its blocks (the window source's in-process input too), and prints
+  "level <peak dB> <rms dB>" on stdout four times a second, which the Streamer keeps as
+  `audio_level`. ffmpeg's audio chain ends in `alimiter=limit=0.97`, so a hot fader clips softly.
+  The gain applies from the next stream a running daemon does not have the fader.
 - What goes out is the display as the user sees it, every overlay included (the layer, the
   toasts, the velocity viewer, the badge): not an edition, no social layout.
 - Video: 30 fps, H.264 on VideoToolbox, `stream_height` (1080) and `stream_kbps` (6000) from
