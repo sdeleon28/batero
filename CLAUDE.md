@@ -100,6 +100,21 @@ h, f. `--title`, `--note`, `--scene`, `--seconds`, `--fps`, `--no-card`.
   `font.render(..., True, ...)` puts the shape in the ALPHA channel, so it is
   `surfarray.array_alpha`, not `array3d`. Set PYGAME_HIDE_SUPPORT_PROMPT before
   importing pygame or the banner lands on the alt screen.
+- The music is `drumhero/keygen.py`, its own renderer (not `make_arrangement`,
+  which has no drums because it plays under a drummer): four minor chords,
+  sixteenth arps with a 3/16 ping-pong delay, pulse lead, square bass and a drum
+  machine, eight sections of eight bars, ~100 s, looped, all from one seed, using
+  the oscillators and the drum hits of `sounds`. `python -m drumhero.keygen
+  [--wav f] [--seed N]` renders or plays one on its own. Rendering is 0.3 s
+  because every distinct note is cached: four chords is a handful of waveforms.
+  Balance measured by band energy after the mix (2026-09-13); the first version
+  buried the melody (3 % between 400 and 4000 Hz) because the bass doubled itself
+  an octave below its root at 27 Hz.
+- `render()` also returns `low` and `high` envelopes, one value per 60th of a
+  second, so the animation follows the music by indexing (position = wall clock
+  since play started, a Sound on a channel has no cursor). `Scene.low` / `.high`
+  are set every frame: the card breathes with the kick, Gray-Scott drops a cell on
+  it, the forward pass rides it, the arcs and the particles brighten with the hats.
 - `--snap DIR` renders a frame of every scene to PNG (plus the character layer
   as .txt) with SDL_VIDEODRIVER=dummy: that is how the look was checked without
   a terminal, and how to check it after touching a scene.

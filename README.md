@@ -542,6 +542,16 @@ loss curve and its emergent capabilities, and a thought being generated token by
 token. Since the stream captures the whole display, put the terminal full screen
 on display 0 and the viewers see this instead of an empty chair.
 
+It comes with its own music: a keygen tune, the busy chiptune of a 2000s cracktro
+(`drumhero/keygen.py`), built out of the same oscillators as the game's sounds -
+four chords in a minor key, sixteenth arpeggios with a ping-pong delay, a pulse
+lead, a square bass and a drum machine, in eight sections that add and drop layers
+over about a hundred seconds, and then it loops. A different tune every run, drawn
+from a seed; `--music-seed N` plays one you liked again, `--bpm` sets the tempo.
+The animation follows the music: the card breathes with the kick, cells divide on
+it, the arpeggio lights the arcs and the particles. `python -m drumhero.keygen
+--wav tune.wav` renders one to a file without the screen.
+
 It is not ASCII art: every cell is the half block `U+2580` with a different
 colour above and below, so the picture is `cols x 2*rows` pixels in 24-bit
 colour, and a second layer puts real characters where text has to stay crisp.
@@ -556,6 +566,8 @@ core.
 | `p` | pause |
 | `b` | the be-right-back card on/off (animation only) |
 | `h` | HUD on/off |
+| `m` | music on/off |
+| `-` `+` | volume |
 | `f` | fps |
 
 ```
@@ -564,6 +576,8 @@ core.
 ./agi --scene emergence            # one scene, no rotation
 ./agi --seconds 40 --fps 24        # slower rotation, cheaper frames
 ./agi --no-card                    # just the animation
+./agi --no-music --volume 0.4      # quiet, or silent
+./agi --music-seed 1312 --bpm 155  # that tune again, at that tempo
 ```
 
 ## Install as a Mac app

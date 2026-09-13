@@ -34,6 +34,11 @@ import tty
 
 import numpy as np
 
+# Before anything can import pygame (the title font, the music): its banner
+# would land on the alt screen and stay there.
+os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+
 # ---------------------------------------------------------------- palette
 # Linear-light colours: everything is composited additively and tone-mapped at
 # the end, so these are intensities, not sRGB values. Small numbers are normal.
@@ -385,6 +390,8 @@ class Scene:
     name = "scene"
     title = ""
     sub = ""
+    low = 0.0          # kick and bass, 0..1.4, set by App from the music every frame
+    high = 0.0         # hats and arpeggio
 
     def enter(self, w, h, cols, rows):
         self.w, self.h, self.cols, self.rows = w, h, cols, rows
@@ -461,7 +468,7 @@ class Latent(Scene):
 
     def draw(self, cv):
         self.trail *= 0.935
-        splat(self.trail, self.pos[:, 0], self.pos[:, 1], self.col, 0.040)
+        splat(self.trail, self.pos[:, 0], self.pos[:, 1], self.col, 0.040 * (1 + 0.9 * self.high))
         cv.px += self.trail
         ax, ay = getattr(self, "anchors", (np.zeros(1), np.zeros(1)))
         for i in range(len(ACCENTS)):
@@ -535,7 +542,7 @@ class Attention(Scene):
             bx = mt * mt * xj + 2 * mt * t * ((xq + xj) / 2) + t * t * xq
             by = mt * mt * self.base + 2 * mt * t * apex + t * t * self.base
             col = mix(VIOLET, CYAN, min(1.0, a * 3.2))
-            splat(cv.px, bx, by, col, 0.9 * (0.25 + a * 2.4))
+            splat(cv.px, bx, by, col, 0.9 * (0.25 + a * 2.4) * (1 + 0.5 * self.high))
             splat(cv.px, [xj], [self.base], mix(col, WHITE, 0.4), 2.5 * (0.3 + a))
         # the query head, sliding between tokens
         xq = float(np.interp(self.q, np.arange(n), xs))
@@ -601,8 +608,8 @@ class Diffusion(Scene):
             V += 0.08 * lv + uvv - (self.F + self.k) * V
         np.clip(U, 0, 1, out=U)
         np.clip(V, 0, 1, out=V)
-        if np.random.random() < dt * 0.25:
-            self.drop()
+        if np.random.random() < dt * 0.25 or self.low > 1.0:
+            self.drop(3 if self.low > 1.0 else None)      # a new cell on every kick
 
     def draw(self, cv):
         v = np.clip(self.V * 2.15, 0, 1)
@@ -663,7 +670,7 @@ class Network(Scene):
 
     def update(self, t, dt):
         L = len(self.SIZES)
-        self.p += dt * 1.9 * (-1 if self.back else 1)
+        self.p += dt * 1.9 * (1 + 0.7 * self.low) * (-1 if self.back else 1)
         if not self.back and self.p > L - 0.2:
             self.back = True
             self.loss = max(0.32, self.loss * np.random.uniform(0.90, 0.995))
@@ -748,7 +755,7 @@ class Telemetry(Scene):
         self.hist[-1] = self.loss
         self.step += int(dt * 620)
         self.acc = min(0.999, self.acc + dt * 0.004)
-        self.heat += (np.random.random(self.heat.shape).astype(np.float32) - 0.5) * dt * 2.2
+        self.heat += (np.random.random(self.heat.shape).astype(np.float32) - 0.5) * dt * (2.2 + 9 * self.high)
         np.clip(self.heat, 0, 1, out=self.heat)
         if t > self.next_unlock:
             self.next_unlock = t + np.random.uniform(3.5, 7.0)
@@ -864,8 +871,9 @@ class TokenStream(Scene):
             row += 1
         s = " ".join(self.cur)
         cv.text(row, left, s[:width], WHITE)
-        if int(self.phase * 2.4) % 2 == 0:
-            cv.text(row, left + min(len(s), width) + 1, "█", AMBER)
+        if self.low > 0.35 or int(self.phase * 2.4) % 2 == 0:
+            cv.text(row, left + min(len(s), width) + 1, "█",
+                    mix(AMBER, WHITE, min(1.0, self.low)))
         cv.text(3, self.cols - 24, "logits", scale(SLATE, 1.4))
         for i, (tok, p) in enumerate(self.cands):
             bar = "█" * int(p * 14 + 0.5)
@@ -925,7 +933,7 @@ class Card:
         c = np.array(CYAN, np.float32)[None, None, :] * (1 - gx) + np.array(VIOLET, np.float32)[None, None, :] * gx
         self.tint = (self.mask[:, :, None] * (c * 0.55 + np.array(WHITE, np.float32) * 0.55)).astype(np.float32)
 
-    def draw(self, cv, t, elapsed):
+    def draw(self, cv, t, elapsed, low=0.0, high=0.0):
         px = cv.px
         y0, y1, x0, x1 = self.y0, self.y1, self.x0, self.x1
         px *= self.panel                  # the panel: everything behind it, quieter
@@ -942,13 +950,13 @@ class Card:
         for ya, yb in ((y0, y0 + b // 2 + 1), (y1 - b // 2 - 1, y1)):
             px[ya:yb, x0] += acc
             px[ya:yb, x1 - 1] += acc
-        pulse = 0.75 + 0.25 * math.sin(t * 2.2)
+        pulse = (0.70 + 0.30 * math.sin(t * 2.2)) + 0.85 * low
         px += self.glow[:, :, None] * np.array(scale(MAGENTA, 0.30), np.float32) * pulse
         px += self.tint
 
         r0 = y0 // 2
         r1 = (y1 - 1) // 2
-        lit = 0.45 + 0.55 * (0.5 + 0.5 * math.sin(t * 3.0))
+        lit = 0.45 + 0.55 * (0.5 + 0.5 * math.sin(t * 3.0)) + 0.5 * low
         cv.text(r0 + 2, x0 // 1 + 3, "●", scale(RED, lit + 0.4))
         cv.text(r0 + 2, x0 + 5, "EN VIVO", mix(WHITE, RED, 0.25))
         cv.text(r0 + 2, x0 + 14, "·  " + self.channel, scale(SLATE, 1.6))
@@ -974,7 +982,7 @@ class Card:
         cv.text(r1 - 1, (self.cols - wide) // 2, s, scale(SLATE, 1.1))
 
 
-def hud(cv, scene, t, total, fps, show_fps):
+def hud(cv, scene, t, total, fps, show_fps, music=None, lvl=(0.0, 0.0)):
     cols, rows = cv.cols, cv.rows
     cv.px[1, 2 : cols - 2] += np.array(scale(SLATE, 0.22), np.float32)
     cv.px[cv.h - 3, 2 : cols - 2] += np.array(scale(SLATE, 0.22), np.float32)
@@ -986,7 +994,16 @@ def hud(cv, scene, t, total, fps, show_fps):
         cv.text(0, (cols + len(scene.title)) // 2 + 3, s, scale(SLATE, 1.3))
     clock = time.strftime("%H:%M:%S")
     cv.text(0, cols - 2 - len(clock), clock, scale(SLATE, 1.6))
-    keys = "q salir   espacio escena   p pausa   b tarjeta   h hud"
+    if music is not None:
+        s = "♪ " + music.label()
+        cv.text(0, cols - 5 - len(clock) - len(s), s,
+                mix(SLATE, CYAN, 0.35) if music.track else scale(SLATE, 1.2))
+        lo, hi = lvl
+        k, j, nn = int(lo * 14), int(hi * 14), 14
+        bar = "".join("█" if i < k else ("▄" if i < j else "·") for i in range(nn))
+        cv.text(rows - 1, cols - 2 - nn - (10 if show_fps else 0), bar,
+                mix(CYAN, MAGENTA, min(1.0, hi)))
+    keys = "q salir   espacio escena   p pausa   m musica   -/+ volumen   b tarjeta   h hud"
     cv.text(rows - 1, 2, keys, scale(SLATE, 1.0))
     if show_fps:
         s = "%4.1f fps" % fps
@@ -1019,6 +1036,80 @@ def wipe(new, old, u, rng):
     new.chars = chars
 
 
+# ---------------------------------------------------------------- music
+class Music:
+    """The keygen loop, and where the animation is inside it.
+
+    `low` (kick and bass) and `high` (hats and arpeggio) come pre-computed with
+    the track, one value per 60th of a second, so following the music at playback
+    time is an index, not an analysis. The position is the wall clock since the
+    loop started: a Sound on a channel has no cursor to ask.
+    """
+
+    def __init__(self, enabled=True, volume=0.55, seed=None, bpm=None):
+        self.enabled = enabled
+        self.volume = volume
+        self.seed = seed
+        self.bpm = bpm
+        self.track = None
+        self.snd = None
+        self.t0 = None
+        self.error = None
+
+    def start(self):
+        if not self.enabled:
+            return
+        try:
+            import pygame
+            from . import keygen
+            pygame.mixer.init(frequency=44100, size=-16, channels=2, buffer=1024)
+            self.track = keygen.render(bpm=self.bpm, seed=self.seed)
+            self.snd = pygame.sndarray.make_sound(self.track["pcm"])
+            self.snd.set_volume(self.volume)
+            self.snd.play(loops=-1, fade_ms=1800)
+            self.t0 = time.time()
+        except Exception as e:                     # no audio device, no music, no drama
+            self.error = str(e).split("\n")[0][:40]
+            self.track = None
+
+    def level(self):
+        if self.track is None or self.t0 is None:
+            return 0.0, 0.0
+        tr = self.track
+        i = int(((time.time() - self.t0) % tr["length"]) * tr["fps"])
+        i = min(i, len(tr["low"]) - 1)
+        return float(tr["low"][i]), float(tr["high"][i])
+
+    def toggle(self):
+        if self.snd is None:
+            self.enabled = not self.enabled
+            if self.enabled:
+                self.start()
+            return
+        if self.t0 is None:
+            self.snd.play(loops=-1, fade_ms=600)
+            self.t0 = time.time()
+        else:
+            self.snd.fadeout(400)
+            self.t0 = None
+
+    def nudge(self, d):
+        self.volume = max(0.0, min(1.0, self.volume + d))
+        if self.snd is not None:
+            self.snd.set_volume(self.volume)
+
+    def label(self):
+        if self.error:
+            return "sin audio"
+        if self.track is None:
+            return "sin musica"
+        return "%s %.0f" % (self.track["key"], self.track["bpm"])
+
+    def stop(self):
+        if self.snd is not None:
+            self.snd.stop()
+
+
 # ---------------------------------------------------------------- the loop
 SCENES = [Latent, Attention, Diffusion, Network, Telemetry, TokenStream]
 TRANSITION = 0.9
@@ -1044,6 +1135,8 @@ class App:
         self.paused = False
         self.fps = float(args.fps)
         self.card = Card(args.title, args.note, args.channel)
+        self.music = Music(not args.no_music, args.volume, args.music_seed, args.bpm)
+        self.lvl = (0.0, 0.0)
         self.cols = self.rows = 0
         self.resized = True
 
@@ -1085,6 +1178,12 @@ class App:
                 self.show_card = not self.show_card
             elif ch in ("f", "F"):
                 self.show_fps = not self.show_fps
+            elif ch in ("m", "M"):
+                self.music.toggle()
+            elif ch in ("-", "_"):
+                self.music.nudge(-0.05)
+            elif ch in ("+", "="):
+                self.music.nudge(0.05)
             elif ch.isdigit() and ch != "0":
                 i = int(ch) - 1
                 if i < len(self.order) and i != self.idx:
@@ -1100,10 +1199,13 @@ class App:
             self.old_t += dt
         cv = self.cv
         cv.clear()
+        self.lvl = low, high = self.music.level()
+        self.cur.low, self.cur.high = low, high
         self.cur.update(self.scene_t, dt if not self.paused else 0.0)
         self.cur.draw(cv)
         if self.trans > 0 and self.old is not None:
             self.cv2.clear()
+            self.old.low, self.old.high = low, high
             self.old.update(self.old_t, dt if not self.paused else 0.0)
             self.old.draw(self.cv2)
             u = 1.0 - self.trans / TRANSITION
@@ -1112,13 +1214,15 @@ class App:
             if self.trans <= 0:
                 self.old = None
         if self.show_hud:
-            hud(cv, self.cur, self.scene_t, self.args.seconds, self.fps, self.show_fps)
+            hud(cv, self.cur, self.scene_t, self.args.seconds, self.fps, self.show_fps,
+                self.music, self.lvl)
         if self.show_card:
-            self.card.draw(cv, self.t, time.time() - self.started)
+            self.card.draw(cv, self.t, time.time() - self.started, *self.lvl)
         return self.screen.frame(cv)
 
     def run(self):
         target = 1.0 / max(5.0, float(self.args.fps))
+        self.music.start()
         with Term() as term:
             def on_resize(*_):
                 self.resized = True
@@ -1146,6 +1250,7 @@ class App:
                 rest = target - (time.time() - now)
                 if rest > 0:
                     time.sleep(rest)
+        self.music.stop()
 
 
 def snapshot(args):
@@ -1196,6 +1301,10 @@ def main(argv=None):
     ap.add_argument("--fps", type=float, default=30.0)
     ap.add_argument("--no-card", action="store_true", help="animation only, no be-right-back card")
     ap.add_argument("--no-hud", action="store_true")
+    ap.add_argument("--no-music", action="store_true", help="no keygen music")
+    ap.add_argument("--volume", type=float, default=0.55)
+    ap.add_argument("--music-seed", type=int, default=None, help="play a tune you liked again")
+    ap.add_argument("--bpm", type=float, default=None)
     ap.add_argument("--snap", default=None, help="render every scene to PNGs in this directory and exit")
     ap.add_argument("--snap-seconds", type=float, default=6.0)
     ap.add_argument("--snap-size", default="212x58")
