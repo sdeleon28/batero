@@ -833,6 +833,29 @@ BEATS = [
         {"ft": "x.......x.......", "t1": "..x...x...x...xx", "sn": _S24},
         {"ft": "x.......x.....x.", "t1": "..x...x...x....x", "sn": "....X.......X..."},
     ], bars=16),
+    # Reggae one drop with the classic fills (asked 2026-09-13): kick and cross-stick together on
+    # the 3, hats on the eighths; every fourth bar a fill, the crash on the 1 after it.
+    # Fills: the four sixteenths on beat 4 into the drop; the walk down snare, rack, floor over
+    # beats 3 and 4 with the kick pickup on the "a" of 4; snare doubles then rack and floor on
+    # beat 4; the sixteenth roll over beats 3 and 4 accented on every third stroke.
+    _groove("32 · Reggae: one drop, fills", "One drop (kick and cross-stick on the 3, hats on the eighths); every fourth bar a classic fill: the four on beat 4, the walk down the toms, snare doubles to the floor, the roll over 3 and 4.", 76, [
+        {"hh": _H8, "kk": "........x.......", "sn": "........x......."},
+        {"hh": _H8, "kk": "........x.......", "sn": "........x......."},
+        {"hh": _H8, "kk": "........x.......", "sn": "........x......."},
+        {"hh": "x.x.x.x.x.x.....", "kk": "........x.......", "sn": "........x...xxxX"},
+        {"cl": "x...............", "hh": "..x.x.x.x.x.x.x.", "kk": "........x.......", "sn": "........x......."},
+        {"hh": _H8, "kk": "........x.......", "sn": "........x......."},
+        {"hh": _H8, "kk": "........x.......", "sn": "........x......."},
+        {"hh": "x.x.x.x.x.......", "kk": "........x......x", "sn": "........xx......", "t1": "..........xx....", "ft": "............xx.."},
+        {"cl": "x...............", "hh": "..x.x.x.x.x.x.x.", "kk": "........x.......", "sn": "........x......."},
+        {"hh": _H8, "kk": "........x.......", "sn": "........x......."},
+        {"hh": _H8, "kk": "........x.......", "sn": "........x......."},
+        {"hh": "x.x.x.x.x.x.....", "kk": "........x.......", "sn": "........x...xx..", "t1": "..............x.", "ft": "...............x"},
+        {"cl": "x...............", "hh": "..x.x.x.x.x.x.x.", "kk": "........x.......", "sn": "........x......."},
+        {"hh": _H8, "kk": "........x.......", "sn": "........x......."},
+        {"hh": _H8, "kk": "........x.......", "sn": "........x......."},
+        {"hh": "x.x.x.x.x.......", "kk": "........x.......", "sn": "........XxxXxxXx"},
+    ], bars=16),
 ]
 # --- hi-hat control: what the pedal, the zone and the foot can say ----------------------
 # Notation: t/T tight bow/edge, m/M mid, a/A open, pd x = chick. The names of the articulations
