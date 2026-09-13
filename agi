@@ -1,0 +1,4 @@
+#!/bin/bash
+# Waiting screen for the stream. See drumhero/agi.py.
+cd "$(dirname "$0")"
+exec .venv/bin/python -m drumhero.agi "$@"

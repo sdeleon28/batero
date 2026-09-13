@@ -449,6 +449,11 @@ SHUFFLE_STYLE = dict(
         ("shuffle", None, None, False, True), ("shuffle", "arp", "triplets", False, True),
         ("shuffle_fifth", "stab", None, False, True), ("shuffle", "arp", "triplets", True, True),
         ("quarters", "stab", None, True, True), ("shuffle_fifth", "arp", "triplets", True, True)])
+# Sextuplet levels (subdivision 6, "sextuplet" feel): the shuffle's third triplet lands on the
+# fifth stroke of the sextuplet, a soft double, and its arpeggio and stabs fight the hands
+# (2026-09-13: "Six stroke roll" was confusing). So only the beat: bass on the quarters, a pad,
+# no chords, no lead.
+SEXTUPLET_STYLE = dict(SHUFFLE_STYLE, plan=[("quarters", None, None, False, True)] * 6)
 STYLE_ORDER = ["synth", "metal", "chiptune", "punk", "organ", "strings", "funk"]
 STAB_RHYTHMS = [[0, 6, 8, 14], [2, 6, 10, 14], [0, 3, 6, 10, 12], [4, 12], [0, 7, 10]]   # sixteenth indices
 STAB_RHYTHMS_TRIPLET = [[3, 9], [0, 2, 6, 8], [3, 5, 9, 11], [2, 5, 8, 11]]              # twelfth indices
@@ -459,7 +464,7 @@ SCALES = {"natural": {"M": [0, 2, 4, 5, 7, 9, 11], "m": [0, 2, 3, 5, 7, 8, 10]},
 
 
 def style_for(prog_index, feel="straight"):
-    return "shuffle" if feel == "triplet" else STYLE_ORDER[prog_index % len(STYLE_ORDER)]
+    return "shuffle" if feel in ("triplet", "sextuplet") else STYLE_ORDER[prog_index % len(STYLE_ORDER)]
 
 
 def _midi_hz(n):
@@ -510,9 +515,9 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, 
     feel: "straight" (sixteenth grid, style by prog_index) or "triplet" (twelfth grid,
     the shuffle style) for levels whose subdivision is 3."""
     rng = np.random.default_rng(prog_index if seed is None else seed)
-    triplet = feel == "triplet"
+    triplet = feel in ("triplet", "sextuplet")
     style_name = style_for(prog_index, feel)
-    st = SHUFFLE_STYLE if triplet else STYLES[style_name]
+    st = SEXTUPLET_STYLE if feel == "sextuplet" else SHUFFLE_STYLE if triplet else STYLES[style_name]
     bass_patterns = BASS_PATTERNS_TRIPLET if triplet else BASS_PATTERNS
     stab_rhythms = STAB_RHYTHMS_TRIPLET if triplet else STAB_RHYTHMS
     family = st["progressions"][int(rng.integers(0, len(st["progressions"])))]
