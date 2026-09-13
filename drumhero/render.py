@@ -342,8 +342,11 @@ class Renderer:
         """Accent and tap tallies plus a contrast bar (median accent / median tap velocity
         over the last strokes) with the target marked."""
         f, S = self.f, self.s
-        dc = self.game.dyn_counts
-        line = f"accents {dc['ACCENT']}/{dc['ACCENT'] + dc['SOFT']}  taps {dc['TAP']}/{dc['TAP'] + dc['LOUD']}"
+        # x/y: notes played as the right dynamic / chart notes resolved so far (hit or missed), so the
+        # totals end at the chart's own and match the results (2026-09-12: the HUD said 65/75, the
+        # results 65/80; strokes between the two thresholds and missed notes counted nowhere)
+        dc, seen = self.game.dyn_counts, self.game.dyn_seen
+        line = f"accents {dc['ACCENT']}/{seen['accent']}  taps {dc['TAP']}/{seen['tap']}"
         surf.blit(f.text(line, f.small, TEXT), (x, y))
         c = dyn.get("contrast")
         bw, bh = 200 * S, 10 * S

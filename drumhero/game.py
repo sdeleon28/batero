@@ -124,6 +124,7 @@ class Game:
             self.combo = self.max_combo = self.score = 0
             self.counts = {k: 0 for k in ("PERFECT", "GOOD", "OK", "MISS", "STRAY")}
             self.dyn_counts = {k: 0 for k in ("ACCENT", "TAP", "SOFT", "LOUD")}
+            self.dyn_seen = {"accent": 0, "tap": 0}   # chart notes resolved so far (hit or missed): the HUD's denominators
             self.art_counts = {"ok": 0, "wrong": 0}
             self.cursor = 0                     # first note that may still be pending
             self.guide_cursor = 0
@@ -250,6 +251,8 @@ class Game:
             self.score += SCORE[judge] * (1 + self.combo // 10)
         else:
             self.combo = 0
+        if note is not None and self.chart.dynamics:
+            self.dyn_seen["accent" if note.accent else "tap"] += 1
         if dyn:
             self.dyn_counts[dyn] += 1
             if dyn in ("ACCENT", "TAP"):
