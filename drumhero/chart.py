@@ -823,6 +823,14 @@ BEATS = [
         {"cl": "x.x.x.x.x.x.x.x.", "kk": "x.xx......x.xx..", "sn": _S24},
         {"cl": "x...............", "hh": "..x.x.x.x.x.x.x.", "kk": "x.xx......x.x...", "sn": _S24},
         {"kk": "x...x...x...x.x.", "sn": "xxxx........xx..", "t1": "....xxxx........", "ft": "........xxxx....", "cl": "..............x.", "cr": "..............x."},
+    # Plena uruguaya on the three drum bodies (asked 2026-09-12): the cumbia sway, floor tom low
+    # on 1 and 3, rack tom on every &, snare on 2 and 4 (the redoblante), then the plena pickups:
+    # the tom's double into the beat, the floor's "4 a" into the 1. Hands free: no kick, no hats.
+    _groove("31 · Plena", "Plena uruguaya on the drum bodies: floor on 1 and 3, rack tom on every &, snare on 2 and 4; pickups on the tom and the floor.", 96, [
+        {"ft": "x.......x.......", "t1": "..x...x...x...x.", "sn": _S24},
+        {"ft": "x.......x.......", "t1": "..x...x...x...x.", "sn": _S24},
+        {"ft": "x.......x.......", "t1": "..x...x...x...xx", "sn": _S24},
+        {"ft": "x.......x.....x.", "t1": "..x...x...x....x", "sn": "....X.......X..."},
     ], bars=16),
 ]
 # --- hi-hat control: what the pedal, the zone and the foot can say ----------------------
