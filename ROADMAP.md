@@ -105,9 +105,16 @@ the account xantwav and generated the profile picture and banner from the 2026-0
   input): selftest 0..2 ms lost in 15 s, 0 overflows, 30 fps, 0 dropped frames, real signal
   through (webcam mic test, -19 dB mean). To confirm on Twitch with the AAC copy in
   `~/Movies/drumhero/streams/` (a dropped buffer would show as a click there).
+- 2026-09-13: the stream became its own process (`twitch.daemon`, state in
+  `~/.config/drumhero/stream.json`, log in `~/Library/Logs/drumhero/stream.log`) because every
+  deploy.sh relaunch killed the live stream; the game attaches to a live one at start, T and the
+  x next to the LIVE badge stop it. Camera PiP and chat became the `!` layer, independent of the
+  stream. Tested against a local rtmp listener (12 s, attach from a second link, clean stop in
+  0.8 s, no leftovers); the first real relaunch under a live stream is the user's.
 - Open questions: a take (V) and the stream together open two PortAudio inputs on the XR18;
-  not tried. Auto-reconnect when Twitch drops the connection (today: stop + toast).
-  Writing to the chat from the game (needs an OAuth token).
+  not tried. Auto-reconnect when Twitch drops the connection (today: the daemon exits, the game
+  toasts the reason and the badge says STREAM ENDED). Writing to the chat from the game (needs
+  an OAuth token).
 
 ## A. Hi-hat detection drops notes (resolved 2026-09-09)
 

@@ -23,7 +23,7 @@ from .kit import (default_kit, describe, describe_pads, load_kit, load_progress,
                   save_progress, save_settings)
 from .runlog import RunLog
 from .capture import Recorder
-from .twitch import Chat, Streamer
+from .twitch import Chat, StreamLink
 from . import twitch as TW
 from . import capture as CP
 from . import edit as E
@@ -46,7 +46,7 @@ RESULTS_GRACE_S = 1.0     # after a level ends, ignore drum hits this long befor
 VOLUME_STEP = 0.05        # { and } move the game's output level by this much
 DEBUG_HITS = 200          # hits the ` pane remembers
 STALL_S = 2.0             # a frame this long is logged with the main thread's stack (App._watchdog)
-CAM_RETRY_S = 5.0         # the camera monitor looks for a missing camera this often
+CAM_RETRY_S = 5.0         # the ! layer looks for a missing camera this often
 DEBUG_BARS = 48           # of which it draws as bars
 NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
@@ -99,8 +99,10 @@ class App:
         self.ghosts = GhostFilter()  # drops the hi-hat notes the pedal produces on its own
         self.runlog = RunLog()       # every level is written to ~/Library/Logs/drumhero/runs when it ends
         self.recorder = Recorder(self.settings)   # V: take of the game, the interface's mix and the camera
-        self.streamer = Streamer(self.settings)   # T: the window and the interface's mix live to Twitch
-        self.chat = None                          # the channel's chat while the stream is live
+        self.streamer = StreamLink(self.settings, log=print)   # T: the stream, its own process (attaches to a live one)
+        self.stream_phase = "off"                 # what the badge showed last frame; transitions become toasts
+        self.chat = None                          # the channel's chat while the ! layer is on
+        self.badge_x = None                       # the badge's x button (a rect) while the badge is drawn
         self.editor = E.Editor(self.settings.get("claude_bin"))   # Edit with Claude
         self.coach = Coach(self.settings.get("claude_bin"), self.settings.get("coach_language", "es"),
                            self.settings.get("coach_model"))
@@ -116,7 +118,7 @@ class App:
             self.midi_trace = open(os.path.expanduser(trace), "a")
         self.legend_flash = {}     # instrument -> wall time of its last navigation hit
         self.debug_on = False      # the ` key: velocity viewer over any screen
-        self.cam_on = False        # the ! key: a small live picture of the camera over any screen
+        self.layer_on = False      # the ! key: the streamer's layer over any screen (the camera as the PiP, the chat)
         self.cam_preview = None    # our own CameraPreview while the recorder does not hold the camera
         self._cam_opening = None   # the thread opening it (open_cam_preview)
         self._cam_tried = -1e9     # perf_counter of the last attempt
@@ -496,6 +498,8 @@ class App:
                     self.reopen_sounds(None)
         elif kind == "camera":
             self.camera_name = name if connected else None
+            if connected and self.layer_on and self.cam_preview is None:
+                self._cam_tried = -1e9                     # the layer was waiting for it: look now, not in CAM_RETRY_S
             self.toasts.add(f"camera {name} {'available for takes' if connected else 'gone'}", ok if connected else DIM)
 
     def reopen_sounds(self, device):
@@ -674,6 +678,25 @@ class App:
             self.surface.blit(f.text(line[:56], f.small, DIM if age > 2 else TEXT), (x0 + 12 * S, y))
             y += 22 * S
 
+    # --- the ! layer: the camera as the picture-in-picture, the chat ---------------------
+    def set_layer(self, on):
+        """! : the streamer's layer over any screen: the camera where the computer edition puts
+        it (capture_pip of the height in capture_corner, 30 fps) and the channel's chat pane.
+        Independent of the stream (it is how the picture is checked before going live), but
+        going live turns it on: that is how the iPhone gets into the stream, which is the display."""
+        if on == self.layer_on:
+            return
+        self.layer_on = on
+        if on:
+            if self.chat is None:
+                self.chat = Chat(self.streamer.settings["twitch_channel"], log=print)
+        else:
+            self.close_cam_monitor()
+            if self.chat is not None:
+                self.chat.stop()
+                self.chat = None
+        print(f"layer {'on' if on else 'off'}")
+
     def close_cam_monitor(self):
         """Release our camera preview (the recorder or the camera check screen takes the camera)."""
         if self.cam_preview is not None:
@@ -700,7 +723,7 @@ class App:
                     preview = CP.CameraPreview(cam, fps=fps)
             finally:
                 if preview is not None and (not self._cam_wanted or self.recorder.active or self.cam_preview is not None):
-                    preview.stop()                # nobody wants it any more (monitor closed, a take took the camera)
+                    preview.stop()                # nobody wants it any more (layer closed, a take took the camera)
                 elif preview is not None:
                     self.cam_preview = preview
                     self._cam_cache = (None, None)
@@ -709,34 +732,31 @@ class App:
         self._cam_opening = threading.Thread(target=work, daemon=True)
         self._cam_opening.start()
 
+    def pip_rect(self):
+        """Where the layer draws the camera: the computer edition's picture-in-picture."""
+        return CP.pip_rect(self.size, self.recorder.settings["capture_pip"], self.recorder.settings["capture_corner"],
+                           margin=int(16 * self.scale))
+
     def draw_cam_monitor(self):
-        """The ! pane: what the camera sees, small, bottom right, over any screen. While a take
-        runs it shows the recorder's own frames (the ones going into the take); otherwise it
-        opens a preview of its own. The camera check screen has its own picture.
-        While the stream is live the camera is always on, as the picture-in-picture of the
-        computer edition (capture_pip of the height in capture_corner, 30 fps): the stream is
-        the window, so this is how the camera gets into it."""
-        live = self.streamer.active
-        if (not self.cam_on and not live) or isinstance(self.screen_obj, CameraCheckScreen):
+        """The layer's camera: what the camera sees, as the computer edition's picture-in-picture,
+        over any screen. While a take runs it shows the recorder's own frames (the ones going
+        into the take); otherwise it opens a preview of its own. The camera check screen has its
+        own picture."""
+        if not self.layer_on or isinstance(self.screen_obj, CameraCheckScreen):
             self.close_cam_monitor()
             return
         S, f = self.scale, self.fonts
-        if live:
-            x0, y0, pw, ph = CP.pip_rect(self.size, self.recorder.settings["capture_pip"], self.recorder.settings["capture_corner"],
-                                         margin=int(16 * S))
-        else:
-            pw, ph = 320 * S, 180 * S
-            x0, y0 = self.size[0] - pw - 16 * S, self.size[1] - ph - 40 * S
+        x0, y0, pw, ph = self.pip_rect()
+        live = self.streamer.active
         if self.recorder.active and self.recorder.feed is not None:
             self.close_cam_monitor()
             src, frame, size, count = self.recorder.feed, self.recorder.feed.frame, CP.CAMERA_SIZE, self.recorder.feed.frames
-            label, error = "camera · recording", self.recorder.feed.error
+            error = self.recorder.feed.error
         else:
             if self.cam_preview is None and not self.recorder.active:
-                self.open_cam_preview(CP.CAMERA_FPS if live else 15)
+                self.open_cam_preview(CP.CAMERA_FPS)
             p = self.cam_preview
             src, frame, size, count = p, (p.frame if p else None), CP.PREVIEW_SIZE, (p.frames if p else 0)
-            label = "camera · live" if live else "camera"
             error = (p.error if p else f"no camera '{self.recorder.settings['capture_camera']}'")
         key = (id(src), count)
         if frame is not None and self._cam_cache[0] != key:
@@ -749,62 +769,18 @@ class App:
             pygame.draw.rect(self.surface, LANE_BG, (x0, y0, pw, ph))
             self.fonts.center(self.surface, error or "waiting for frames...", f.small, DIM, y0 + ph / 2 - 8 * S, x0 + pw / 2)
         pygame.draw.rect(self.surface, (235, 70, 70) if self.recorder.active else (145, 70, 255) if live else DIM, (x0, y0, pw, ph), 1)
-        if not live:
-            self.surface.blit(f.text(label, f.small, TEXT), (x0 + 8 * S, y0 + 6 * S))
-
-    def toggle_stream(self):
-        """T: the stream starts and stops here and nowhere else (never on its own)."""
-        if self.streamer.active:
-            self.stop_stream()
-            self.toasts.add("stream stopped", DIM)
-        elif self.streamer.start(self.size):
-            self.chat = Chat(self.streamer.settings["twitch_channel"], log=print)
-            what = (f"screen {self.streamer.settings['stream_display']}" if self.streamer.source == "screen"
-                    else "%dx%d window" % self.streamer.out_size)
-            self.toasts.add(f"live on twitch.tv/{self.streamer.settings['twitch_channel']}: {what}, {self.streamer.settings['stream_kbps']} kbps"
-                            + (" (bandwidth test, not public)" if self.streamer.settings.get("stream_bandwidth_test") else ""), (145, 70, 255))
-        else:
-            self.toasts.add(f"stream could not start: {self.streamer.error}", JUDGE_COLORS["MISS"])
-            print(f"stream could not start: {self.streamer.error}")
-
-    def stop_stream(self):
-        self.streamer.stop()
-        self.close_cam_monitor()                      # the 30 fps preview of the PiP; ! opens the small one again
-        if self.chat is not None:
-            self.chat.stop()
-            self.chat = None
-
-    def watch_stream(self):
-        """Every frame: the stream ended on its own (Twitch closed it, the network) -> the chat goes too and the HUD says why."""
-        if self.chat is not None and not self.streamer.active:
-            self.stop_stream()
-            self.toasts.add(f"stream ended: {self.streamer.error}", JUDGE_COLORS["MISS"])
-
-    def draw_stream_status(self, y_bottom):
-        """LIVE mm:ss with the bitrate and speed above the recording line; the last error when it ended. Returns the top y."""
-        status = self.streamer.status
-        if not status:
-            return y_bottom
-        S, f = self.scale, self.fonts
-        live = self.streamer.active
-        ts = f.text(status, f.small, (145, 70, 255) if live else JUDGE_COLORS["MISS"])
-        x = self.size[0] - ts.get_width() - 16 * S
-        y = y_bottom - ts.get_height()
-        if live and int(time.perf_counter() * 2) % 2 == 0:
-            pygame.draw.circle(self.surface, (145, 70, 255), (int(x - 12 * S), int(y + ts.get_height() / 2)), int(5 * S))
-        self.surface.blit(ts, (x, y))
-        return y - 4 * S
 
     def draw_chat(self):
-        """The channel's chat while the stream is live: bottom left, the velocity viewer's place (above
-        it when both are on), the last messages that fit, name in the user's Twitch colour."""
+        """The layer's chat pane: the last messages of the channel that fit, name in the user's
+        Twitch colour. Bottom left, the velocity viewer's place (above it when both are on);
+        bottom right when the camera has the bottom left corner."""
         chat = self.chat
-        if chat is None:
+        if chat is None or not self.layer_on or isinstance(self.screen_obj, CameraCheckScreen):
             return
         S, f = self.scale, self.fonts
         w, h = 470 * S, 232 * S
-        x0 = 16 * S
-        y0 = self.size[1] - h - 16 * S - ((232 + 12) * S if self.debug_on else 0)
+        x0 = 16 * S if self.recorder.settings["capture_corner"] != "bl" else self.size[0] - w - 16 * S
+        y0 = self.size[1] - h - 16 * S - ((232 + 12) * S if self.debug_on and x0 < self.size[0] / 2 else 0)
         pane = pygame.Surface((int(w), int(h)), pygame.SRCALPHA)
         pane.fill((*LANE_BG, 225))
         self.surface.blit(pane, (x0, y0))
@@ -843,6 +819,122 @@ class App:
             self.surface.blit(f.text(row, f.small, TEXT), (x, y))
             y -= lh
 
+    # --- the stream: T, the badge, the daemon ---------------------------------------------
+    def toggle_stream(self):
+        """T (and the badge's x): the stream starts and stops here and nowhere else (never on its own).
+        Starting spawns the stream process; the badge says STARTING until ffmpeg reports, then LIVE."""
+        st = self.streamer
+        if st.phase == "stopping":
+            return
+        if st.active:
+            self.stop_stream()
+        elif st.start(self.size):
+            self.set_layer(True)                       # the camera into the stream; ! hides it again
+            what = (f"display {st.settings['stream_display']}" if st.source == "screen" else "%dx%d window" % st.out_size)
+            self.toasts.add(f"starting the stream to twitch.tv/{st.settings['twitch_channel']}: {what}, {st.settings['stream_kbps']} kbps"
+                            + (" (bandwidth test, not public)" if st.settings.get("stream_bandwidth_test") else ""), (145, 70, 255))
+        else:
+            self.toasts.add(f"stream could not start: {st.error}", JUDGE_COLORS["MISS"])
+            print(f"stream could not start: {st.error}")
+
+    def stop_stream(self):
+        self.streamer.stop()
+        if self.streamer.phase == "stopping":
+            self.toasts.add("stopping the stream", DIM)
+
+    def watch_stream(self):
+        """Every frame: the stream process's state, and its transitions as toasts (live at last,
+        stopped, ended on its own with the reason, found live when the game started)."""
+        st = self.streamer
+        st.refresh()
+        phase = st.phase
+        if phase == self.stream_phase:
+            return
+        was, self.stream_phase = self.stream_phase, phase
+        if phase == "live":
+            if was == "off" and st.attached:
+                st.attached = False
+                since = time.strftime("%H:%M", time.localtime(st.started_wall or time.time()))
+                self.toasts.add(f"stream live since {since} on twitch.tv/{st.settings['twitch_channel']} (the stream runs on its own; T or the x stop it)", (145, 70, 255))
+                self.set_layer(True)
+            elif was == "starting":
+                self.toasts.add(f"live on twitch.tv/{st.settings['twitch_channel']}", (235, 70, 70))
+        elif phase == "off":
+            if st.ended_reason:
+                self.toasts.add(f"stream ended: {st.ended_reason}", JUDGE_COLORS["MISS"])
+                st.ended_reason = None
+            else:
+                self.toasts.add("stream stopped", DIM)
+
+    def badge_height(self):
+        """The badge's height in pixels when it is on screen (the play HUD makes room), else 0."""
+        return int(26 * self.scale) if (self.streamer.phase != "off" or self.streamer.error) else 0
+
+    def draw_stream_badge(self):
+        """Top right, over everything: a red pill "LIVE mm:ss" while the stream is live (amber
+        STARTING, dim STOPPING, the reason in red after it ended on its own) and an x next to it
+        that stops the stream (or dismisses the reason). Bitrate, speed and dropped frames only
+        show when they are bad: speed under 0.95x or dropped frames, in amber."""
+        st = self.streamer
+        phase = st.phase
+        self.badge_x = None
+        if phase == "off" and not st.error:
+            return
+        S, f = self.scale, self.fonts
+        p = st.progress
+        warn = ""
+        if phase == "live":
+            speed = p.get("speed", "")
+            try:
+                if speed.endswith("x") and float(speed[:-1]) < 0.95:
+                    warn += f"  {speed}"
+            except ValueError:
+                pass
+            if p.get("drop_frames", "0") not in ("0", ""):
+                warn += f"  dropped {p['drop_frames']}"
+            if st.silent_s:
+                warn += f"  no news {st.silent_s:.0f} s"
+        if phase == "off":
+            why = st.error if len(st.error) <= 32 else st.error[:31] + "…"     # the whole reason is in the toast and the log
+            label, color, fill = f"STREAM ENDED · {why}", JUDGE_COLORS["MISS"], LANE_BG
+        else:
+            s = int(time.time() - float(st.started_wall or time.time()))
+            label = f"{phase.upper()} {s // 60:02d}:{s % 60:02d}"
+            color, fill = {"live": ((255, 255, 255), (200, 30, 40)), "starting": ((20, 20, 24), (235, 170, 40)),
+                           "stopping": ((220, 220, 220), (70, 70, 80))}[phase]
+        ts = f.text(label, f.small, color)
+        ws = f.text(warn, f.small, (255, 225, 120)) if warn else None
+        h = 26 * S
+        w = ts.get_width() + 30 * S + (ws.get_width() + 6 * S if ws else 0)
+        xh = h                                            # the x button: a square of the pill's height
+        x1 = self.size[0] - 12 * S - xh
+        x0 = x1 - 6 * S - w
+        y0 = 8 * S
+        pill = pygame.Rect(int(x0), int(y0), int(w), int(h))
+        pygame.draw.rect(self.surface, fill, pill, border_radius=int(h / 2))
+        if phase == "off":
+            pygame.draw.rect(self.surface, color, pill, 1, border_radius=int(h / 2))
+        dot = color if phase != "live" or int(time.perf_counter() * 2) % 2 == 0 else fill
+        pygame.draw.circle(self.surface, dot, (int(x0 + 13 * S), int(y0 + h / 2)), int(5 * S))
+        self.surface.blit(ts, (x0 + 24 * S, y0 + h / 2 - ts.get_height() / 2))
+        if ws:
+            self.surface.blit(ws, (x0 + 24 * S + ts.get_width() + 6 * S, y0 + h / 2 - ws.get_height() / 2))
+        box = pygame.Rect(int(x1), int(y0), int(xh), int(xh))
+        hot = box.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.rect(self.surface, (200, 30, 40) if hot else LANE_BG, box, border_radius=int(6 * S))
+        pygame.draw.rect(self.surface, (255, 255, 255) if hot else DIM, box, 1, border_radius=int(6 * S))
+        xs = f.text("×", f.mid, (255, 255, 255) if hot else TEXT)
+        self.surface.blit(xs, (box.centerx - xs.get_width() / 2, box.centery - xs.get_height() / 2))
+        self.badge_x = box
+
+    def click(self, pos):
+        """A mouse click: the badge's x stops the stream (or dismisses the reason it ended)."""
+        if self.badge_x is not None and self.badge_x.collidepoint(pos):
+            if self.streamer.phase == "off":
+                self.streamer.error = None
+            else:
+                self.toggle_stream()
+
     def draw_recording_status(self):
         status = self.recorder.status
         rec = self.recorder.active
@@ -853,7 +945,6 @@ class App:
         if not status and self.coach.busy:
             status = self.coach.status + " ." * (int(time.perf_counter()) % 4)
         if not status:
-            self.draw_stream_status(self.size[1] - 8 * self.scale)
             return
         S = self.scale
         f = self.fonts
@@ -864,7 +955,6 @@ class App:
         if rec and int(time.perf_counter() * 2) % 2 == 0:
             pygame.draw.circle(self.surface, color, (int(x - 12 * S), int(y + ts.get_height() / 2)), int(5 * S))
         self.surface.blit(ts, (x, y))
-        self.draw_stream_status(y - 4 * S)
 
     def _watchdog(self):
         """A frame that takes longer than STALL_S: the main thread's stack goes to the log, once per
@@ -914,13 +1004,15 @@ class App:
                     elif ev.unicode == "`" or ev.key == pygame.K_BACKQUOTE:
                         self.debug_on = not self.debug_on
                     elif ev.unicode == "!" or (ev.key == pygame.K_1 and ev.mod & pygame.KMOD_SHIFT):
-                        self.cam_on = not self.cam_on
+                        self.set_layer(not self.layer_on)
                     elif ev.unicode == ";" or ev.key == pygame.K_SEMICOLON:
                         self.nudge_dyn_scale(-1)           # softer accents count
                     elif ev.unicode == "'" or ev.key == pygame.K_QUOTE:
                         self.nudge_dyn_scale(+1)
                     elif self.screen_obj.on_key(ev.key) is False:
                         running = False
+                elif ev.type == pygame.MOUSEBUTTONDOWN and ev.button == 1:
+                    self.click(ev.pos)
             while self.drum_queue:
                 if self.screen_obj.on_drum(self.drum_queue.popleft()) is False:
                     running = False
@@ -932,20 +1024,20 @@ class App:
             self.draw_recording_status()
             self.draw_toasts()
             self.draw_debug()
-            self.draw_chat()
-            self.draw_cam_monitor()                       # after push: never in the take
-            self.streamer.push(self.surface)              # the stream is the window, every overlay included
+            self.draw_chat()                              # the ! layer, after the recorder's push: never in the take
+            self.draw_cam_monitor()
+            self.draw_stream_badge()                      # over everything, so it is always seen
+            self.streamer.push(self.surface)              # window source only: the stream is the window, every overlay included
             self.watch_stream()
             pygame.display.flip()
             clock.tick(TARGET_FPS)
         if self.midi_in:
             self.midi_in.close()
         self.watcher.stop()
-        self.close_cam_monitor()
+        self.set_layer(False)
         if self.recorder.active:
             self.recorder.stop()
-        if self.streamer.active:
-            self.stop_stream()
+        self.streamer.close()                             # the stream process stays live; T in the next game stops it
         if self.recorder.composing is not None:
             print("finishing the take...")
             self.recorder.composing[0].join(timeout=300)
@@ -1149,7 +1241,7 @@ class ListScreen(Screen):
                                    f"{self.app.streamer.settings['stream_kbps']} kbps · "
                                    + (f"display {self.app.streamer.settings['stream_display']} and the interface, both by ffmpeg"
                                       if self.app.streamer.settings.get('stream_source', 'screen') != 'window' else "the window as you see it, audio as the takes")
-                                   + " · key in ~/.config/drumhero/twitch_key"),
+                                   + " · its own process, survives the game · ! camera and chat layer · key in ~/.config/drumhero/twitch_key"),
                     ("Camera & take check", "the iPhone next to the game picture, both editions' layout, the take's audio meter, a test take"),
                     ("Takes: editions, Claude edits", "every take renders a computer (16:9) and a social (9:16) edition; render one again, or have Claude cut it"),
                     ("Progress (S)", "streak, minutes, trends, records"),
@@ -2299,6 +2391,7 @@ class PlayScreen(Screen):
                 self.app.sounds.play_jingle(self.game.stats()["stars"])
 
     def draw(self, surf, fps):
+        self.renderer.top_inset = self.app.badge_height()
         self.renderer.draw(surf, fps)
         ss = self.app.session
         if ss is not None:

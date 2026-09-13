@@ -1,10 +1,16 @@
-"""Twitch: the stream and the chat, from inside the game, no OBS.
+"""Twitch: the stream and the chat, from the game, no OBS.
 
-    T in the game starts and stops the stream. Nothing else in the window changes: the stream
-    is the window itself (every overlay included: toasts, the velocity viewer, the chat, the
-    camera monitor), not an edition. It never starts on its own.
+    T in the game starts and stops the stream (so does the x next to the LIVE badge, and
+    `python -m drumhero.twitch --stop`). It never starts on its own.
 
-The stream (Streamer). Two sources, `stream_source` in settings:
+The stream is its own process (`daemon()`, `python -m drumhero.twitch --daemon`, launched
+by the game in a new session): the game can quit, crash or be relaunched by deploy.sh and
+the stream goes on; a game started under a live stream attaches to it (StreamLink reads
+STATE_PATH, the daemon's state file, written twice a second) and shows the badge. What goes
+out is the display, so the game's window, its overlays (the ! layer: the camera as the
+computer edition's picture-in-picture, the chat), the terminal, everything.
+
+The stream itself (Streamer). Two sources, `stream_source` in settings:
 
 "screen" (the default since 2026-09-12): ffmpeg captures display `stream_display` through
 avfoundation, and the interface's mix comes from a separate process, `python -m drumhero.twitch
@@ -54,13 +60,15 @@ check the audio afterwards.
 
 The chat (Chat): Twitch chat is IRC over TLS; reading it needs no account or token
 (nick justinfan + digits). The pane in the game shows the last messages of the channel,
-name in the user's Twitch colour, wrapped, and reconnects by itself. Connected while
-the stream is live (or `python -m drumhero.twitch --chat` to watch it in the terminal).
+name in the user's Twitch colour, wrapped, and reconnects by itself. Connected while the
+game's ! layer is on, live or not (or `python -m drumhero.twitch --chat` for the terminal).
 """
+import json
 import os
 import queue
 import random
 import re
+import signal
 import socket
 import ssl
 import subprocess
@@ -81,6 +89,8 @@ DEFAULTS = {"twitch_channel": "xantwav", "stream_height": 1080, "stream_kbps": 6
             "stream_bandwidth_test": False, "stream_source": "screen", "stream_display": 0, "stream_video_device": None,
             "capture_audio_device": "X18/XR18", "capture_audio_channels": [17, 18]}
 STREAMS_DIR = os.path.expanduser("~/Movies/drumhero/streams")   # the AAC copy of every stream's audio
+STATE_PATH = os.path.expanduser("~/.config/drumhero/stream.json")       # the daemon's state, read by the game
+DAEMON_LOG = os.path.expanduser("~/Library/Logs/drumhero/stream.log")   # the daemon's output
 AUDIO_STALL_S = 1.0          # no audio callback this long: the input is reopened (at most 3 times)
 AUDIO_LAG_PAD_S = 0.25       # the audio timeline fell this far behind the wall clock: pad it with silence
 START_TIMEOUT_S = 15         # ffmpeg reported no progress this long after the start: the stream is declared dead
@@ -365,20 +375,26 @@ class Streamer:
                 except (BrokenPipeError, ValueError, OSError):
                     break
 
-    # --- frames from the main loop ----------------------------------------------------
-    def push(self, surface):
-        """Call every frame after everything is drawn; takes a copy once per 1/fps slot."""
+    # --- health -------------------------------------------------------------------------
+    def poll(self):
+        """ffmpeg gone (Twitch closed the connection, an error) or silent since the start: the
+        stream ends and `error` says why. Returns `active`."""
         if not self.active:
-            return
-        if self.ff.poll() is not None:                       # ffmpeg is gone: Twitch closed the connection, or an error
+            return False
+        if self.ff.poll() is not None:
             self._ended()
-            return
+            return False
         if not self.progress and time.perf_counter() - self.started_at > START_TIMEOUT_S:
             self.log(f"stream: no progress from ffmpeg in {START_TIMEOUT_S} s, giving up")
             self.stop()
             self.error = f"ffmpeg produced nothing in {START_TIMEOUT_S} s (screen capture stuck? permission?)"
-            return
-        if self.source == "screen":
+            return False
+        return True
+
+    # --- frames from the main loop ----------------------------------------------------
+    def push(self, surface):
+        """Call every frame after everything is drawn; takes a copy once per 1/fps slot."""
+        if not self.poll() or self.source == "screen":
             return
         now = time.perf_counter()
         slot = int((now - self.started_at) * self.fps + 0.5)
@@ -418,7 +434,7 @@ class Streamer:
         block = {}
         for line in iter(self.ff.stdout.readline, b""):
             k, _, v = line.decode(errors="replace").strip().partition("=")
-            block[k] = v
+            block[k] = v.strip()
             if k == "progress":
                 self.progress = block
                 block = {}
@@ -517,6 +533,263 @@ class Streamer:
                 extra += f" · dropped {p['drop_frames']}"
             return f"LIVE {s // 60:02d}:{s % 60:02d}{extra}"
         return self.error or ""
+
+
+# ---------------------------------------------------------------------------
+def _stamped_print(text):
+    print(time.strftime("%H:%M:%S ") + text, flush=True)
+
+
+def read_state(path=STATE_PATH):
+    """The daemon's state file, or {}."""
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def write_state(state, path=STATE_PATH):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(state, f)
+    os.replace(tmp, path)
+
+
+def pid_alive(pid):
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def venv_python():
+    """The repo's venv python: not sys.executable, which inside the app bundle is a Python whose
+    startup .pth launches the game itself."""
+    py = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".venv", "bin", "python")
+    return py if os.path.exists(py) else sys.executable
+
+
+def daemon(settings):
+    """The stream process: a Streamer on the screen source, on its own so the game can quit and
+    relaunch under it. Writes STATE_PATH twice a second (pid, when it started, ffmpeg's progress);
+    SIGTERM (the game's T, the badge's x, `--stop`) stops the stream cleanly and exits."""
+    import signal
+    state = read_state()
+    if state.get("active") and pid_alive(state.get("pid")) and state["pid"] != os.getpid():
+        sys.exit(f"stream: already live (pid {state['pid']})")
+    stop = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
+    st = Streamer({**settings, "stream_source": "screen"}, log=_stamped_print)
+    base = {"pid": os.getpid(), "started": time.time(), "channel": st.settings["twitch_channel"],
+            "display": st.settings["stream_display"], "height": st.settings["stream_height"], "kbps": st.settings["stream_kbps"],
+            "bandwidth_test": bool(st.settings.get("stream_bandwidth_test")), "log": DAEMON_LOG}
+    if not st.start((0, 0)):
+        write_state({**base, "active": False, "ended": time.time(), "error": st.error})
+        _stamped_print(f"stream: could not start: {st.error}")
+        sys.exit(1)
+    write_state({**base, "active": True, "updated": time.time(), "progress": {}})
+    while not stop.is_set() and st.poll():
+        write_state({**base, "active": True, "updated": time.time(), "progress": st.progress})
+        stop.wait(0.5)
+    requested = stop.is_set()
+    if st.active:
+        st.stop()
+    write_state({**base, "active": False, "ended": time.time(), "progress": st.progress,
+                 "error": None if requested else (st.error or "stream process ended")})
+    _stamped_print("stream: daemon exit" + ("" if requested else f" ({st.error})"))
+
+
+class StreamLink:
+    """The game's handle on the stream: `start(size)`, `stop()`, `refresh()` (every frame,
+    cheap), `push(surface)`; `phase` is "off", "starting", "live" or "stopping", `status` the
+    text for the badge. On the screen source the stream is the daemon (`daemon()` above) and
+    outlives the game: a link created while it runs attaches to it. On the window source the
+    stream is an in-process Streamer, and dies with the game (it is the game's frames)."""
+
+    POLL_S = 0.5           # the state file is read this often
+    STALE_S = 10.0         # a daemon that has not written this long is reported as silent
+    KILL_S = 10.0          # a daemon that ignores SIGTERM this long gets SIGKILL
+
+    def __init__(self, settings, log=print):
+        self.settings = {**DEFAULTS, **{k: v for k, v in settings.items() if k in DEFAULTS}}
+        self.log = log
+        self.local = None              # the in-process Streamer (window source)
+        self.state = {}
+        self.error = None              # why the last stream ended on its own, or could not start
+        self.ended_reason = None       # set once when the stream ends without stop(); the app clears it
+        self.attached = False          # the stream was live before this link existed
+        self._stop_sent = None
+        self._read_at = -1e9
+        self._proc = None
+        self.refresh(force=True)
+        if self.phase in ("live", "starting"):
+            self.attached = True
+            self.log(f"stream: attached to the live stream (pid {self.state.get('pid')}, since {time.strftime('%H:%M:%S', time.localtime(self.state.get('started', 0)))})")
+
+    @property
+    def source(self):
+        return "screen" if self.settings.get("stream_source", "screen") != "window" else "window"
+
+    @property
+    def out_size(self):
+        return self.local.out_size if self.local is not None else (0, int(self.settings["stream_height"]))
+
+    @property
+    def active(self):
+        return self.phase in ("live", "starting")
+
+    @property
+    def phase(self):
+        if self.local is not None:
+            return "live" if self.local.active else "off"
+        st = self.state
+        if not (st.get("active") and pid_alive(st.get("pid"))):
+            return "off"
+        if self._stop_sent is not None:
+            return "stopping"
+        return "live" if st.get("progress") else "starting"
+
+    @property
+    def started_wall(self):
+        return self.state.get("started")
+
+    @property
+    def progress(self):
+        return self.local.progress if self.local is not None else (self.state.get("progress") or {})
+
+    def start(self, size):
+        if self.active:
+            return False
+        self.error = self.ended_reason = None
+        if self.source == "window":
+            self.local = Streamer(self.settings, log=self.log)
+            if self.local.start(size):
+                return True
+            self.error = self.local.error
+            self.local = None
+            return False
+        self.refresh(force=True)
+        if self.active:                          # started elsewhere in the meantime: that one is ours now
+            return True
+        if not ffmpeg_path():
+            self.error = "ffmpeg not found"
+            return False
+        if not read_key() and not self.settings.get("stream_url"):
+            self.error = f"no stream key in {TWITCH_KEY_PATH}"
+            return False
+        os.makedirs(os.path.dirname(DAEMON_LOG), exist_ok=True)
+        log = open(DAEMON_LOG, "ab")
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self._proc = subprocess.Popen([venv_python(), "-m", "drumhero.twitch", "--daemon", "--settings", json.dumps(self.settings)],
+                                      cwd=repo, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        log.close()
+        self.state = {"pid": self._proc.pid, "active": True, "started": time.time(), "progress": {}, "channel": self.settings["twitch_channel"]}
+        self._launched_at = time.perf_counter()
+        self._stop_sent = None
+        self._read_at = time.perf_counter()      # the daemon's first write comes after its imports; ours stands until then
+        self.log(f"stream: daemon pid {self._proc.pid}, log {DAEMON_LOG}")
+        return True
+
+    def stop(self):
+        """Asks the stream to stop; `phase` says "stopping" until the daemon is gone (a few seconds:
+        ffmpeg flushes and closes the rtmp session). Never blocks the caller."""
+        if self.local is not None:
+            self.local.stop()
+            self.local = None
+            return
+        pid = self.state.get("pid")
+        if self.phase in ("live", "starting") and pid:
+            try:
+                os.kill(int(pid), signal.SIGTERM)
+            except OSError:
+                pass
+            self._stop_sent = time.perf_counter()
+            self.log(f"stream: stop sent to pid {pid}")
+
+    def refresh(self, force=False):
+        """Reads the state file (throttled). Notices the daemon dying on its own."""
+        if self.local is not None:
+            return
+        now = time.perf_counter()
+        if not force and now - self._read_at < self.POLL_S:
+            return
+        self._read_at = now
+        was = self.phase
+        st = read_state()
+        if self._proc is not None and self._proc.poll() is None and st.get("pid") != self._proc.pid:
+            st = self.state                      # our daemon has not written yet (still importing): keep the provisional state
+        if self._proc is not None and self._proc.poll() is not None:
+            self._proc = None
+        self.state = st
+        phase = self.phase
+        if was in ("live", "starting") and phase == "off":
+            if self._stop_sent is None and not (st.get("ended") and not st.get("error")):   # not a stop asked elsewhere (another game, --stop)
+                self.ended_reason = self.error = st.get("error") or "stream process died (see the stream log)"
+                self.log(f"stream: ended on its own: {self.error}")
+                if not st.get("ended"):              # killed: its capture and feeder may still hold the display
+                    subprocess.run(["pkill", "-9", "-f", "drumhero-stream-"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            else:
+                self.log("stream: stopped")
+            self._stop_sent = None
+        elif was == "stopping" and phase == "off":
+            self._stop_sent = None
+            self.log("stream: stopped")
+        elif phase == "stopping" and now - self._stop_sent > self.KILL_S:
+            self.log("stream: daemon ignored SIGTERM, killing it and its capture")
+            try:
+                os.kill(int(st["pid"]), signal.SIGKILL)
+            except OSError:
+                pass
+            subprocess.run(["pkill", "-9", "-f", "drumhero-stream-"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def push(self, surface):
+        if self.local is not None:
+            self.local.push(surface)
+        else:
+            self.refresh()
+
+    def close(self):
+        """The game is quitting: the window stream goes with it; the daemon stays live."""
+        if self.local is not None:
+            self.local.stop()
+            self.local = None
+
+    @property
+    def silent_s(self):
+        """Seconds since the daemon last wrote its state, when that is worrying, else 0."""
+        if self.local is not None or self.phase != "live":
+            return 0
+        age = time.time() - float(self.state.get("updated") or time.time())
+        return age if age > self.STALE_S else 0
+
+    @property
+    def status(self):
+        """Short text for the badge: LIVE mm:ss with the bitrate and speed, or the last error."""
+        if self.local is not None:
+            return self.local.status
+        phase = self.phase
+        if phase == "off":
+            return self.error or ""
+        s = int(time.time() - float(self.state.get("started") or time.time()))
+        p = self.progress
+        extra = ""
+        if p.get("bitrate", "N/A") not in ("N/A", ""):
+            extra += f" · {p['bitrate'].replace('kbits/s', 'kbps')}"
+        if p.get("speed", "N/A") not in ("N/A", ""):
+            extra += f" · {p['speed']}"
+        if p.get("drop_frames", "0") not in ("0", ""):
+            extra += f" · dropped {p['drop_frames']}"
+        if self.silent_s:
+            extra += f" · no news for {self.silent_s:.0f} s"
+        return f"{phase.upper()} {s // 60:02d}:{s % 60:02d}{extra}"
 
 
 # ---------------------------------------------------------------------------
@@ -740,9 +1013,39 @@ def main(argv=None):
     ap.add_argument("--device", default="X18/XR18")
     ap.add_argument("--channels", default="17,18")
     ap.add_argument("--rate", type=int, default=AUDIO_SR)
+    ap.add_argument("--daemon", action="store_true", help="(internal, the game's T) the stream process: runs until SIGTERM")
+    ap.add_argument("--settings", metavar="JSON", help="--daemon: the stream settings as JSON (the game's settings.json otherwise)")
+    ap.add_argument("--status", action="store_true", help="print the stream daemon's state")
+    ap.add_argument("--stop", action="store_true", help="stop a live stream daemon (what the game's T does)")
     args = ap.parse_args(argv)
     if args.audio_feed:
         audio_feed(args.audio_feed, args.device, [int(c) for c in args.channels.split(",")], args.rate)
+    elif args.daemon:
+        if args.settings:
+            settings = json.loads(args.settings)
+        else:
+            from .kit import load_settings
+            settings = load_settings()
+        daemon(settings)
+    elif args.status:
+        st = read_state()
+        alive = st.get("active") and pid_alive(st.get("pid"))
+        if not st:
+            print("no stream yet")
+        elif alive:
+            p = st.get("progress") or {}
+            print(f"live: pid {st['pid']}, since {time.strftime('%H:%M:%S', time.localtime(st['started']))}, twitch.tv/{st.get('channel')}, "
+                  f"frame {p.get('frame', '?')}, {p.get('bitrate', '?')}, speed {p.get('speed', '?')}, dropped {p.get('drop_frames', '?')}")
+        else:
+            print(f"off (last one ended {time.strftime('%H:%M:%S', time.localtime(st.get('ended') or st.get('started') or 0))}"
+                  + (f", {st['error']}" if st.get("error") else "") + ")")
+    elif args.stop:
+        st = read_state()
+        if st.get("active") and pid_alive(st.get("pid")):
+            os.kill(int(st["pid"]), signal.SIGTERM)
+            print(f"stop sent to pid {st['pid']}")
+        else:
+            print("no live stream")
     elif args.chat:
         c = Chat(args.chat, on_message=lambda name, text: print(f"{name}: {text}"))
         try:

@@ -24,15 +24,45 @@ relaunches it. Do this before reporting the change as done. The bundle does not 
 the code (it points at this repo), but a running instance keeps the old code loaded,
 so the relaunch is what matters.
 
-## Twitch stream (T) and chat
+## Twitch stream (T), the badge, and the ! layer (camera + chat)
 
-`drumhero/twitch.py`. `T` starts and stops the stream (also the Setup row "Stream (T)").
-**The stream never starts on its own, never in a test, never from a script: only the user
-presses T, and Claude does not press it for them.** For pipeline checks use
+`drumhero/twitch.py`. `T` starts and stops the stream (also the Setup row "Stream (T)" and the
+x next to the LIVE badge). **The stream never starts on its own, never in a test, never from a
+script: only the user presses T, and Claude does not press it for them.** For pipeline checks use
 `python -m drumhero.twitch --selftest [--source screen]` (a local rtmp listener, no Twitch;
 prints the received audio's level, so silence is caught) and
 `python -m drumhero.twitch --chat xantwav` (reads the chat, no account needed).
 
+- **The stream is its own process** (since 2026-09-13, so deploy.sh relaunching the game does not
+  kill a live stream): T spawns `.venv/bin/python -m drumhero.twitch --daemon --settings JSON` in
+  a new session (`twitch.daemon`), which runs the `Streamer` on the screen source and writes
+  `~/.config/drumhero/stream.json` twice a second (pid, when it started, ffmpeg's progress); its
+  output goes to `~/Library/Logs/drumhero/stream.log`. The game holds a `StreamLink` (`app.streamer`):
+  `phase` is off / starting / live / stopping from the state file and the pid; a game started under a
+  live stream attaches to it (toast "stream live since hh:mm", the layer comes on); quitting the game
+  leaves the daemon alone; `stop()` sends SIGTERM and never blocks (the daemon stops ffmpeg cleanly,
+  a few seconds; SIGKILL plus a `pkill -f drumhero-stream-` after 10 s if it ignores it). A daemon
+  that dies on its own (or is killed) is reported "stream ended: ..." from the state file's error,
+  and its leftover capture is killed. `python -m drumhero.twitch --status` / `--stop` from a
+  terminal. The "window" source is still the in-process Streamer and dies with the game (it is the
+  game's frames); a daemon refuses to start while another is live.
+- **The badge** (`App.draw_stream_badge`, drawn last, over everything, top right at y = 8): a red
+  pill "LIVE mm:ss" with a blinking dot; amber STARTING until ffmpeg reports, dim STOPPING, and
+  "STREAM ENDED · reason" in the miss colour after an unrequested end (the x dismisses it). Bitrate
+  and speed are not shown unless bad: speed under 0.95x, dropped frames or a daemon silent for 10 s
+  appear in amber inside the pill. The x button next to it (`App.badge_x`, a mouse click,
+  `App.click`) stops the stream like T. The play HUD's right column starts under it
+  (`Renderer.top_inset`); no other screen draws in that corner (toasts start at y = 108).
+- **The ! layer** (`App.set_layer`, `layer_on`): the streamer's overlay over any screen, independent
+  of the stream: the camera as the computer edition's picture-in-picture (`capture_pip` of the
+  height in `capture_corner`, 30 fps preview, border purple while live, red while a take records
+  and it shows the recorder's own frames) and the chat pane (bottom left, the velocity viewer's
+  place, above it when both are on; bottom right when the camera has the bottom-left corner). The
+  chat connects when the layer turns on and closes when it turns off. Going live (or attaching to a
+  live stream) turns the layer on, because the stream is the display and this is how the iPhone
+  gets into it; ! hides it again during the stream if wanted. The camera check screen hides the
+  layer (it has its own picture). This replaced the old camera monitor (a small 15 fps picture)
+  and the chat-tied-to-the-stream of 2026-09-12.
 - Source (`stream_source`, default "screen", since the first live tests 2026-09-12): ffmpeg
   captures display `stream_display` (0) through avfoundation, so the terminal or anything else
   on that display goes out too; the interface's mix comes from a separate feeder process
@@ -48,28 +78,18 @@ prints the received audio's level, so silence is caught) and
   input inside the game process for the stream: the callback waits for the GIL and the
   window source logged 0.25 s stalls; the headphone return also chopped that night.
   "window" stays as the fallback (`stream_source: "window"`).
-- While live the camera is drawn in the window as the computer edition's PiP (`capture_pip` of
-  the height in `capture_corner`, 30 fps preview, purple border), whatever the `!` key says: that
-  is how the iPhone gets into the stream (added 2026-09-12 after the first live test).
-- What goes out is the window as the user sees it, every overlay included (`Streamer.push`
-  runs last in the main loop, after the toasts, the velocity viewer, the chat pane and the
-  camera monitor): not an edition, no PiP, no social layout.
-- Video: frames per wall-clock slot like the take (30 fps, missed slots repeat), H.264 on
-  VideoToolbox, `stream_height` (1080) and `stream_kbps` (6000) from settings, keyframe every
-  2 s, FLV over RTMPS to Twitch's ingest. Audio: the same interface channels as the take
-  (X18/XR18, USB 17/18 = Main L/R) through a sounddevice input with the mixer-sized buffer,
-  float32 stereo to ffmpeg through a named pipe, padded with silence onto the stream's clock.
+- What goes out is the display as the user sees it, every overlay included (the layer, the
+  toasts, the velocity viewer, the badge): not an edition, no social layout.
+- Video: 30 fps, H.264 on VideoToolbox, `stream_height` (1080) and `stream_kbps` (6000) from
+  settings, keyframe every 2 s, FLV over RTMPS to Twitch's ingest. Audio: the same interface
+  channels as the take (X18/XR18, USB 17/18 = Main L/R) through the feeder, float32 stereo,
+  padded with silence onto the stream's clock.
 - The key lives in `~/.config/drumhero/twitch_key` (one line). Never log it, never copy it
   into settings.json or the repo; `twitch.redact` strips it from ffmpeg's messages.
   `stream_url` in settings replaces the whole URL (tests); `stream_bandwidth_test` appends
   `?bandwidthtest=true` (Twitch takes the stream without going live, inspector.twitch.tv).
-- The chat pane (bottom left, the velocity viewer's place, above it when both are on) shows
-  the last messages of `twitch_channel` (xantwav) while the stream is live; anonymous IRC
-  over TLS, `justinfan` nick, reconnects by itself. Writing to the chat would need a token;
-  not built.
-- HUD: "LIVE mm:ss · bitrate · speed" in purple above the REC line, from ffmpeg's `-progress`;
-  speed under 1.0x means the encoder or the network is behind. When ffmpeg exits the stream
-  stops, the chat closes and the toast shows ffmpeg's last stderr line.
+- Chat: anonymous IRC over TLS, `justinfan` nick, reconnects by itself. Writing to the chat would
+  need a token; not built.
 - Network measured 2026-09-12 on Wi-Fi (en1): uplink 14..24 Mbps, responsiveness low
   (2.6..3.7 s under load). The user has two USB Ethernet adapters; a wired link is the fix
   if the stream drops frames. Ingest TCP round trip 47..51 ms.

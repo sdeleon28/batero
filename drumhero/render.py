@@ -156,6 +156,7 @@ class Renderer:
         self.s = self.h / 720                            # pixel scale relative to the 720p design
         n = len(game.lanes)
         margin = 40 * self.s
+        self.top_inset = 0           # the app's stream badge sits top right: the HUD's right column starts under it
         self.lane_w = min((self.w - 2 * margin) / n, MAX_LANE_W * self.s)
         left = (self.w - self.lane_w * n) / 2
         self.lane_x = [left + i * self.lane_w for i in range(n)]
@@ -326,7 +327,7 @@ class Renderer:
             right.append(f"accent >= {a}  tap <= {tp}  ({g.dyn_scale:.0%}{', night' if g.night else ''})")
         for i, s in enumerate(right):
             ts = f.text(s, f.small, DIM)
-            surf.blit(ts, (self.w - ts.get_width() - 12 * S, (10 + i * 20) * S))
+            surf.blit(ts, (self.w - ts.get_width() - 12 * S, (10 + i * 20) * S + self.top_inset))
 
         if paused:
             f.center(surf, "PAUSED", f.huge, TEXT, self.h * 0.45)
