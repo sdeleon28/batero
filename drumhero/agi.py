@@ -1,6 +1,7 @@
 """AGI: a waiting screen for the stream, drawn in the terminal.
 
-`.venv/bin/python -m drumhero.agi` (or `./agi`) takes over the terminal with a
+`cortina` (the repo's `./cortina`, symlinked into ~/bin, or
+`.venv/bin/python -m drumhero.agi`) takes over the terminal with a
 full-screen animation for the moments the user walks away from the camera: the
 Twitch-style "be right back" card (LIVE badge, away timer, rotating excuse) over
 a rotation of scenes that look like a machine thinking - latent space, attention,
@@ -1291,7 +1292,7 @@ def snapshot(args):
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        prog="drumhero.agi", description=__doc__.split("\n")[0],
+        prog="cortina", description=__doc__.split("\n")[0],
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--title", default="YA VUELVO", help="big text on the card")
     ap.add_argument("--note", default=None, help="fixed line under the title (default: it rotates)")

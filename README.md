@@ -526,13 +526,13 @@ intro. Songs from MIDI files get no backing, since a made-up progression would
 clash with the tune. Toggle it with B during play or from Setup, or start with
 `--no-backing`.
 
-## Waiting screen for the stream (`./agi`)
+## Waiting screen for the stream (`cortina`)
 
 ```
-./agi                  # or .venv/bin/python -m drumhero.agi
+cortina
 ```
 
-takes over the terminal with a full-screen "be right back" card for the moments
+from any terminal takes over it with a full-screen "be right back" card for the moments
 you walk away from the camera: a pulsing EN VIVO badge, the channel, an AFK
 timer, the big title and a line that rotates through the reasons you are not in
 the chair, over an animation that cycles six scenes - a latent space of drifting
@@ -551,6 +551,10 @@ from a seed; `--music-seed N` plays one you liked again, `--bpm` sets the tempo.
 The animation follows the music: the card breathes with the kick, cells divide on
 it, the arpeggio lights the arcs and the particles. `python -m drumhero.keygen
 --wav tune.wav` renders one to a file without the screen.
+
+`~/bin/cortina` is a symlink to `./cortina` in this repo, which finds the repo
+through the link and runs `.venv/bin/python -m drumhero.agi`; if the repo moves,
+`ln -sfn <repo>/cortina ~/bin/cortina` again.
 
 It is not ASCII art: every cell is the half block `U+2580` with a different
 colour above and below, so the picture is `cols x 2*rows` pixels in 24-bit
@@ -571,13 +575,13 @@ core.
 | `f` | fps |
 
 ```
-./agi --title "VUELVO EN 5"        # the big text
-./agi --note "fui a buscar hielo"  # a fixed line instead of the rotating one
-./agi --scene emergence            # one scene, no rotation
-./agi --seconds 40 --fps 24        # slower rotation, cheaper frames
-./agi --no-card                    # just the animation
-./agi --no-music --volume 0.4      # quiet, or silent
-./agi --music-seed 1312 --bpm 155  # that tune again, at that tempo
+cortina --title "VUELVO EN 5"        # the big text
+cortina --note "fui a buscar hielo"  # a fixed line instead of the rotating one
+cortina --scene emergence            # one scene, no rotation
+cortina --seconds 40 --fps 24        # slower rotation, cheaper frames
+cortina --no-card                    # just the animation
+cortina --no-music --volume 0.4      # quiet, or silent
+cortina --music-seed 1312 --bpm 155  # that tune again, at that tempo
 ```
 
 ## Install as a Mac app

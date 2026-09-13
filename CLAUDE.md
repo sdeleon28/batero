@@ -74,10 +74,13 @@ prints the received audio's level, so silence is caught) and
   (2.6..3.7 s under load). The user has two USB Ethernet adapters; a wired link is the fix
   if the stream drops frames. Ingest TCP round trip 47..51 ms.
 
-## Waiting screen (`./agi`)
+## Waiting screen (`cortina`)
 
-`drumhero/agi.py`, a separate terminal program (`./agi`, or
-`.venv/bin/python -m drumhero.agi`), for the moments the user leaves the camera:
+`drumhero/agi.py`, a separate terminal program, for the moments the user leaves
+the camera. It runs as `cortina` from any terminal: `~/bin/cortina` is a symlink
+to `./cortina` in this repo, which resolves the symlink before cd-ing here (so
+`$0` is not `~/bin`) and execs `.venv/bin/python -m drumhero.agi`. The user named
+it, and that is the name to use for it:
 a Twitch-style be-right-back card (EN VIVO badge, channel, AFK timer, big title,
 a rotating line of excuses) over six scenes that cycle every 26 s. The stream
 captures the display, so a full-screen terminal on display 0 is what goes out;

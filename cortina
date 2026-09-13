@@ -1,0 +1,11 @@
+#!/bin/bash
+# The waiting screen for the stream (drumhero/agi.py). Installed globally as
+# ~/bin/cortina -> this file, so resolve the symlink before cd-ing to the repo.
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+    dir="$(cd -P "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    [[ $src != /* ]] && src="$dir/$src"
+done
+cd "$(cd -P "$(dirname "$src")" && pwd)"
+exec .venv/bin/python -m drumhero.agi "$@"
