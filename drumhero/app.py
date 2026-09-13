@@ -118,6 +118,7 @@ class App:
         self.legend_flash = {}     # instrument -> wall time of its last navigation hit
         self.debug_on = False      # the ` key: velocity viewer over any screen
         self.layer_on = False      # the ! key: the streamer's layer over any screen (the camera as the PiP, the chat)
+        self.layer_auto = False    # the stream turned it on (so its end turns it off and frees the camera); ! makes it the user's
         self.cam_preview = None    # our own CameraPreview while the recorder does not hold the camera
         self._cam_opening = None   # the thread opening it (open_cam_preview)
         self._cam_tried = -1e9     # perf_counter of the last attempt
@@ -678,14 +679,20 @@ class App:
             y += 22 * S
 
     # --- the ! layer: the camera as the picture-in-picture, the chat ---------------------
-    def set_layer(self, on):
+    def set_layer(self, on, auto=False):
         """! : the streamer's layer over any screen: the camera where the computer edition puts
         it (capture_pip of the height in capture_corner, 30 fps) and the channel's chat pane.
         Independent of the stream (it is how the picture is checked before going live), but
-        going live turns it on: that is how the iPhone gets into the stream, which is the display."""
+        going live turns it on (auto=True): that is how the iPhone gets into the stream, which
+        is the display; and the stream's end turns an auto layer off again, so the camera is
+        released (Continuity Camera stayed "connected" after a stream, 2026-09-13). A layer the
+        user switched with ! is theirs: the stream leaves it alone."""
         if on == self.layer_on:
+            if not auto:
+                self.layer_auto = False
             return
         self.layer_on = on
+        self.layer_auto = auto and on
         if on:
             if self.chat is None:
                 self.chat = Chat(self.streamer.settings["twitch_channel"], log=print)
@@ -828,7 +835,7 @@ class App:
         if st.active:
             self.stop_stream()
         elif st.start(self.size):
-            self.set_layer(True)                       # the camera into the stream; ! hides it again
+            self.set_layer(True, auto=True)            # the camera into the stream; ! hides it again
             what = (f"display {st.settings['stream_display']}" if st.source == "screen" else "%dx%d window" % st.out_size)
             self.toasts.add(f"starting the stream to twitch.tv/{st.settings['twitch_channel']}: {what}, {st.settings['stream_kbps']} kbps"
                             + (" (bandwidth test, not public)" if st.settings.get("stream_bandwidth_test") else ""), (145, 70, 255))
@@ -855,7 +862,7 @@ class App:
                 st.attached = False
                 since = time.strftime("%H:%M", time.localtime(st.started_wall or time.time()))
                 self.toasts.add(f"stream live since {since} on twitch.tv/{st.settings['twitch_channel']} (the stream runs on its own; T or the x stop it)", (145, 70, 255))
-                self.set_layer(True)
+                self.set_layer(True, auto=True)
             elif was == "starting":
                 self.toasts.add(f"live on twitch.tv/{st.settings['twitch_channel']}", (235, 70, 70))
         elif phase == "off":
@@ -864,6 +871,8 @@ class App:
                 st.ended_reason = None
             else:
                 self.toasts.add("stream stopped", DIM)
+            if self.layer_auto:
+                self.set_layer(False)                  # the camera and the chat came with the stream: they go with it
 
     def badge_height(self):
         """The room the play HUD leaves top right for the stream's LIVE badge (the daemon's own

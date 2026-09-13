@@ -67,7 +67,9 @@ prints the received audio's level, so silence is caught) and
   place, above it when both are on; bottom right when the camera has the bottom-left corner). The
   chat connects when the layer turns on and closes when it turns off. Going live (or attaching to a
   live stream) turns the layer on, because the stream is the display and this is how the iPhone
-  gets into it; ! hides it again during the stream if wanted. The camera check screen hides the
+  gets into it; ! hides it again during the stream if wanted. A layer the stream turned on goes
+  off when the stream ends (`layer_auto`), so the camera preview's ffmpeg is released and
+  Continuity Camera disconnects; a layer the user switched with ! stays. The camera check screen hides the
   layer (it has its own picture). This replaced the old camera monitor (a small 15 fps picture)
   and the chat-tied-to-the-stream of 2026-09-12.
 - Source (`stream_source`, default "screen", since the first live tests 2026-09-12): ffmpeg
