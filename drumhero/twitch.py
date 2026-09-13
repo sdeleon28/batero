@@ -6,9 +6,11 @@
 The stream is its own process (`daemon()`, `python -m drumhero.twitch --daemon`, launched
 by the game in a new session): the game can quit, crash or be relaunched by deploy.sh and
 the stream goes on; a game started under a live stream attaches to it (StreamLink reads
-STATE_PATH, the daemon's state file, written twice a second) and shows the badge. What goes
-out is the display, so the game's window, its overlays (the ! layer: the camera as the
-computer edition's picture-in-picture, the chat), the terminal, everything.
+STATE_PATH, the daemon's state file, written twice a second). The LIVE badge is the daemon's
+own floating window (badge.py), top right of every screen and Space, over everything, so it
+is seen with the game closed too; its x stops the stream. What goes out is the display, so
+the game's window, its overlays (the ! layer: the camera as the computer edition's
+picture-in-picture, the chat), the badge, the terminal, everything.
 
 The stream itself (Streamer). Two sources, `stream_source` in settings:
 
@@ -89,7 +91,7 @@ DEFAULTS = {"twitch_channel": "xantwav", "stream_height": 1080, "stream_kbps": 6
             "stream_bandwidth_test": False, "stream_source": "screen", "stream_display": 0, "stream_video_device": None,
             "capture_audio_device": "X18/XR18", "capture_audio_channels": [17, 18]}
 STREAMS_DIR = os.path.expanduser("~/Movies/drumhero/streams")   # the AAC copy of every stream's audio
-STATE_PATH = os.path.expanduser("~/.config/drumhero/stream.json")       # the daemon's state, read by the game
+STATE_PATH = os.environ.get("DRUMHERO_STREAM_STATE") or os.path.expanduser("~/.config/drumhero/stream.json")   # the daemon's state, read by the game (tests: their own file)
 DAEMON_LOG = os.path.expanduser("~/Library/Logs/drumhero/stream.log")   # the daemon's output
 AUDIO_STALL_S = 1.0          # no audio callback this long: the input is reopened (at most 3 times)
 AUDIO_LAG_PAD_S = 0.25       # the audio timeline fell this far behind the wall clock: pad it with silence
@@ -233,9 +235,10 @@ class Streamer:
         # Leftovers of an earlier stream (the game killed under them, 2026-09-12) keep the display
         # captured, and a second screen capture then waits for ever inside avformat_open_input;
         # such an ffmpeg ignores SIGTERM, so SIGKILL. Ours carry the pipe's prefix on their command line.
-        # Never while a stream daemon is live: a selftest run during a stream killed it (2026-09-13).
+        # Never while a stream daemon is live, and never from a test (stream_url set): a selftest run
+        # during a stream killed it (2026-09-13).
         st = read_state()
-        if not (st.get("active") and pid_alive(st.get("pid")) and st["pid"] != os.getpid()):
+        if not self.settings.get("stream_url") and not (st.get("active") and pid_alive(st.get("pid")) and st["pid"] != os.getpid()):
             subprocess.run(["pkill", "-9", "-f", "drumhero-stream-"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         display = int(self.settings.get("stream_display", 0))
         video_dev = self.settings.get("stream_video_device") or f"Capture screen {display}"
@@ -581,8 +584,11 @@ def venv_python():
 
 def daemon(settings):
     """The stream process: a Streamer on the screen source, on its own so the game can quit and
-    relaunch under it. Writes STATE_PATH twice a second (pid, when it started, ffmpeg's progress);
-    SIGTERM (the game's T, the badge's x, `--stop`) stops the stream cleanly and exits."""
+    relaunch under it, and the LIVE badge (badge.py: a floating window top right of every screen,
+    over everything, on every Space) that exists exactly as long as this process. Writes
+    STATE_PATH twice a second (pid, when it started, ffmpeg's progress); SIGTERM (the game's T,
+    `--stop`) or the badge's x stops the stream cleanly and exits. After an unrequested end the
+    badge stays, saying why, until its x is clicked or another stream goes live."""
     import signal
     state = read_state()
     if state.get("active") and pid_alive(state.get("pid")) and state["pid"] != os.getpid():
@@ -599,15 +605,56 @@ def daemon(settings):
         _stamped_print(f"stream: could not start: {st.error}")
         sys.exit(1)
     write_state({**base, "active": True, "updated": time.time(), "progress": {}})
-    while not stop.is_set() and st.poll():
-        write_state({**base, "active": True, "updated": time.time(), "progress": st.progress})
-        stop.wait(0.5)
-    requested = stop.is_set()
-    if st.active:
-        st.stop()
-    write_state({**base, "active": False, "ended": time.time(), "progress": st.progress,
-                 "error": None if requested else (st.error or "stream process ended")})
-    _stamped_print("stream: daemon exit" + ("" if requested else f" ({st.error})"))
+    done = {"at": None, "requested": False}          # set once the stream is over
+
+    def tick():
+        """Every half second, from whichever loop runs: the health check, the state file, and
+        what the badge shows. Returns None when the process should exit."""
+        if done["at"] is None:
+            if stop.is_set() or not st.poll():
+                done["requested"] = stop.is_set()
+                if st.active:
+                    st.stop()
+                done["at"] = time.time()
+                write_state({**base, "active": False, "ended": done["at"], "progress": st.progress,
+                             "error": None if done["requested"] else (st.error or "stream process ended")})
+                _stamped_print("stream: daemon " + ("stopped" if done["requested"] else f"ended on its own ({st.error})"))
+            else:
+                write_state({**base, "active": True, "updated": time.time(), "progress": st.progress})
+        if done["at"] is not None:
+            if done["requested"] or stop.is_set():
+                return None
+            other = read_state()                      # another stream went live: this badge is stale
+            if other.get("pid") != os.getpid() and other.get("active") and pid_alive(other.get("pid")):
+                return None
+            why = st.error or "ended"
+            return "ended", "STREAM ENDED · " + (why if len(why) <= 40 else why[:39] + "…"), ""
+        s = int(time.time() - base["started"])
+        clock = f"{s // 60:02d}:{s % 60:02d}"
+        if stop.is_set():
+            return "stopping", f"STOPPING {clock}", ""
+        p = st.progress
+        if not p:
+            return "starting", f"STARTING {clock}", ""
+        warn = ""
+        try:
+            if p.get("speed", "").endswith("x") and float(p["speed"][:-1]) < 0.95:
+                warn += f"  {p['speed']}"
+        except ValueError:
+            pass
+        if p.get("drop_frames", "0") not in ("0", ""):
+            warn += f"  dropped {p['drop_frames']}"
+        return "live", f"LIVE {clock}", warn.strip()
+
+    try:
+        from .badge import Badge, TICK_S
+    except ImportError as e:                          # no PyObjC: the stream still runs, without the badge
+        _stamped_print(f"stream: no badge ({e})")
+        while tick() is not None:
+            stop.wait(0.5)
+    else:
+        Badge(tick, on_close=stop.set).run()
+    _stamped_print("stream: daemon exit")
 
 
 class StreamLink:

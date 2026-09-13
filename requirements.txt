@@ -4,3 +4,4 @@ python-rtmidi
 numpy
 librosa
 soundfile
+pyobjc-framework-Cocoa

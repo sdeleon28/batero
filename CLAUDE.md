@@ -46,13 +46,20 @@ prints the received audio's level, so silence is caught) and
   and its leftover capture is killed. `python -m drumhero.twitch --status` / `--stop` from a
   terminal. The "window" source is still the in-process Streamer and dies with the game (it is the
   game's frames); a daemon refuses to start while another is live.
-- **The badge** (`App.draw_stream_badge`, drawn last, over everything, top right at y = 8): a red
-  pill "LIVE mm:ss" with a blinking dot; amber STARTING until ffmpeg reports, dim STOPPING, and
-  "STREAM ENDED · reason" in the miss colour after an unrequested end (the x dismisses it). Bitrate
-  and speed are not shown unless bad: speed under 0.95x, dropped frames or a daemon silent for 10 s
-  appear in amber inside the pill. The x button next to it (`App.badge_x`, a mouse click,
-  `App.click`) stops the stream like T. The play HUD's right column starts under it
-  (`Renderer.top_inset`); no other screen draws in that corner (toasts start at y = 108).
+- **The badge** (`drumhero/badge.py`) is the daemon's own window, so it is on screen exactly while
+  the stream process lives, game or no game: Cocoa through PyObjC (`pyobjc-framework-Cocoa` in the
+  venv), a borderless transparent window at the maximum window level, on every Space
+  (CanJoinAllSpaces, FullScreenAuxiliary: it shows over the game's fullscreen Space and follows a
+  Mission Control switch), one per display, top right under the menu bar (at the very top when a
+  fullscreen Space hides it; re-placed every half second), no Dock icon, never takes the focus. A
+  red pill "LIVE mm:ss" with a blinking dot; amber STARTING until ffmpeg reports, dim STOPPING;
+  after an unrequested end "STREAM ENDED · reason" stays until its x is clicked or another stream
+  goes live. Speed under 0.95x and dropped frames appear in amber inside the pill. The x next to it
+  stops the stream like T (the daemon's SIGTERM path). The game draws no badge of its own; the
+  play HUD's right column starts under the corner while the stream lives (`Renderer.top_inset`
+  from `App.badge_height`). Viewers see the badge too (the stream is the display).
+  `python -m drumhero.badge --demo` shows one for 10 s. Without PyObjC the daemon still streams,
+  badge-less. Tests give the daemon its own state file with `DRUMHERO_STREAM_STATE`.
 - **The ! layer** (`App.set_layer`, `layer_on`): the streamer's overlay over any screen, independent
   of the stream: the camera as the computer edition's picture-in-picture (`capture_pip` of the
   height in `capture_corner`, 30 fps preview, border purple while live, red while a take records
