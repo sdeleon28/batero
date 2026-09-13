@@ -526,6 +526,46 @@ intro. Songs from MIDI files get no backing, since a made-up progression would
 clash with the tune. Toggle it with B during play or from Setup, or start with
 `--no-backing`.
 
+## Waiting screen for the stream (`./agi`)
+
+```
+./agi                  # or .venv/bin/python -m drumhero.agi
+```
+
+takes over the terminal with a full-screen "be right back" card for the moments
+you walk away from the camera: a pulsing EN VIVO badge, the channel, an AFK
+timer, the big title and a line that rotates through the reasons you are not in
+the chair, over an animation that cycles six scenes - a latent space of drifting
+clusters, one head of self-attention with its arcs, Gray-Scott reaction-diffusion,
+a forward and backward pass through a transformer stack, a training run with its
+loss curve and its emergent capabilities, and a thought being generated token by
+token. Since the stream captures the whole display, put the terminal full screen
+on display 0 and the viewers see this instead of an empty chair.
+
+It is not ASCII art: every cell is the half block `U+2580` with a different
+colour above and below, so the picture is `cols x 2*rows` pixels in 24-bit
+colour, and a second layer puts real characters where text has to stay crisp.
+Only changed cells are written each frame, at 30 fps and around a quarter of a
+core.
+
+| key | |
+|---|---|
+| `q`, `Esc` | quit |
+| space | next scene |
+| `1`..`6` | jump to a scene |
+| `p` | pause |
+| `b` | the be-right-back card on/off (animation only) |
+| `h` | HUD on/off |
+| `f` | fps |
+
+```
+./agi --title "VUELVO EN 5"        # the big text
+./agi --note "fui a buscar hielo"  # a fixed line instead of the rotating one
+./agi --scene emergence            # one scene, no rotation
+./agi --seconds 40 --fps 24        # slower rotation, cheaper frames
+./agi --no-card                    # just the animation
+```
+
 ## Install as a Mac app
 
 ```

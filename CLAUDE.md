@@ -74,6 +74,36 @@ prints the received audio's level, so silence is caught) and
   (2.6..3.7 s under load). The user has two USB Ethernet adapters; a wired link is the fix
   if the stream drops frames. Ingest TCP round trip 47..51 ms.
 
+## Waiting screen (`./agi`)
+
+`drumhero/agi.py`, a separate terminal program (`./agi`, or
+`.venv/bin/python -m drumhero.agi`), for the moments the user leaves the camera:
+a Twitch-style be-right-back card (EN VIVO badge, channel, AFK timer, big title,
+a rotating line of excuses) over six scenes that cycle every 26 s. The stream
+captures the display, so a full-screen terminal on display 0 is what goes out;
+nothing of this touches the game or the stream code. Keys: q, space, 1..6, p, b,
+h, f. `--title`, `--note`, `--scene`, `--seconds`, `--fps`, `--no-card`.
+
+- Each cell is the half block U+2580 with the top half as the foreground colour
+  and the bottom as the background, so the canvas is cols x 2*rows pixels in
+  24-bit colour; a sparse layer of real characters on top keeps the HUD and the
+  labels crisp. Everything is composited additively in linear light and tone
+  mapped at the end, which is why the palette constants look so dark.
+- Two things keep it cheap enough for 30 fps at 212x58 (measured: 4..14 ms per
+  frame, 0.1..6.8 MB/s to the terminal): only the cells whose colour moved by
+  more than 3/255 are rewritten (and what is remembered is what was written, so
+  a slow drift still arrives), and a cell whose halves match is a space with one
+  colour instead of a half block with two. `splat()` scatters points with
+  np.bincount, or np.add.at when there are few enough that allocating a canvas
+  per channel would cost more.
+- The big title is rasterised by pygame (already a dependency) into a mask:
+  `font.render(..., True, ...)` puts the shape in the ALPHA channel, so it is
+  `surfarray.array_alpha`, not `array3d`. Set PYGAME_HIDE_SUPPORT_PROMPT before
+  importing pygame or the banner lands on the alt screen.
+- `--snap DIR` renders a frame of every scene to PNG (plus the character layer
+  as .txt) with SDL_VIDEODRIVER=dummy: that is how the look was checked without
+  a terminal, and how to check it after touching a scene.
+
 ## Open items
 
 `ROADMAP.md` lists the loose ends with their full context (hi-hat filter eating fast
