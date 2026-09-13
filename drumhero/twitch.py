@@ -83,6 +83,7 @@ DEFAULTS = {"twitch_channel": "xantwav", "stream_height": 1080, "stream_kbps": 6
 STREAMS_DIR = os.path.expanduser("~/Movies/drumhero/streams")   # the AAC copy of every stream's audio
 AUDIO_STALL_S = 1.0          # no audio callback this long: the input is reopened (at most 3 times)
 AUDIO_LAG_PAD_S = 0.25       # the audio timeline fell this far behind the wall clock: pad it with silence
+START_TIMEOUT_S = 15         # ffmpeg reported no progress this long after the start: the stream is declared dead
 CHAT_HOST, CHAT_PORT = "irc.chat.twitch.tv", 6697
 CHAT_KEEP = 60               # messages kept for the pane
 CHAT_RECONNECT_S = (2, 5, 10, 20, 30)
@@ -219,6 +220,10 @@ class Streamer:
     def _start_screen(self, size, url):
         """ffmpeg: the display through avfoundation + the interface's mix from the audio feeder
         process through a named pipe, both on the wall clock; encode; send (and keep the AAC)."""
+        # Leftovers of an earlier stream (the game killed under them, 2026-09-12) keep the display
+        # captured, and a second screen capture then waits for ever inside avformat_open_input;
+        # such an ffmpeg ignores SIGTERM, so SIGKILL. Ours carry the pipe's prefix on their command line.
+        subprocess.run(["pkill", "-9", "-f", "drumhero-stream-"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         display = int(self.settings.get("stream_display", 0))
         video_dev = self.settings.get("stream_video_device") or f"Capture screen {display}"
         dev = self.settings["capture_audio_device"]
@@ -367,6 +372,11 @@ class Streamer:
             return
         if self.ff.poll() is not None:                       # ffmpeg is gone: Twitch closed the connection, or an error
             self._ended()
+            return
+        if not self.progress and time.perf_counter() - self.started_at > START_TIMEOUT_S:
+            self.log(f"stream: no progress from ffmpeg in {START_TIMEOUT_S} s, giving up")
+            self.stop()
+            self.error = f"ffmpeg produced nothing in {START_TIMEOUT_S} s (screen capture stuck? permission?)"
             return
         if self.source == "screen":
             return
