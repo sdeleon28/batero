@@ -1225,32 +1225,33 @@ class App:
         target = 1.0 / max(5.0, float(self.args.fps))
         self.music.start()
         with Term() as term:
-            def on_resize(*_):
-                self.resized = True
-            signal.signal(signal.SIGWINCH, on_resize)
-            last = time.time()
-            acc = 0.0
-            n = 0
-            out = sys.stdout
-            while True:
-                now = time.time()
-                dt = min(0.1, now - last)
-                last = now
-                if not self.keys(term.keys()):
-                    break
-                if not self.paused and self.trans <= 0 and self.scene_t > self.args.seconds:
-                    self.next_scene()
-                out.write(self.frame(dt))
-                out.flush()
-                acc += dt
-                n += 1
-                if acc > 0.75:
-                    self.fps = n / acc
-                    acc = 0.0
-                    n = 0
-                rest = target - (time.time() - now)
-                if rest > 0:
-                    time.sleep(rest)
+            try:
+                signal.signal(signal.SIGWINCH, lambda *_: setattr(self, "resized", True))
+                last = time.time()
+                acc = 0.0
+                n = 0
+                out = sys.stdout
+                while True:
+                    now = time.time()
+                    dt = min(0.1, now - last)
+                    last = now
+                    if not self.keys(term.keys()):
+                        break
+                    if not self.paused and self.trans <= 0 and self.scene_t > self.args.seconds:
+                        self.next_scene()
+                    out.write(self.frame(dt))
+                    out.flush()
+                    acc += dt
+                    n += 1
+                    if acc > 0.75:
+                        self.fps = n / acc
+                        acc = 0.0
+                        n = 0
+                    rest = target - (time.time() - now)
+                    if rest > 0:
+                        time.sleep(rest)
+            except KeyboardInterrupt:
+                pass              # ctrl-c closes a screensaver as well as q does
         self.music.stop()
 
 
