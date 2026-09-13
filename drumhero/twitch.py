@@ -234,7 +234,9 @@ class Streamer:
         else:
             os.makedirs(STREAMS_DIR, exist_ok=True)
             self.audio_copy = os.path.join(STREAMS_DIR, time.strftime("%Y%m%d-%H%M%S") + " stream.aac")
-        self.feeder = subprocess.Popen([sys.executable, "-m", "drumhero.twitch", "--audio-feed", self.fifo, "--device", dev,
+        # not sys.executable: inside the app bundle that is a Python whose startup .pth launches the game itself
+        venv_py = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".venv", "bin", "python")
+        self.feeder = subprocess.Popen([venv_py if os.path.exists(venv_py) else sys.executable, "-m", "drumhero.twitch", "--audio-feed", self.fifo, "--device", dev,
                                         "--channels", ",".join(str(c) for c in chans), "--rate", str(sr)],
                                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
         t0 = time.time()
