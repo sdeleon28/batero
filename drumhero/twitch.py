@@ -233,7 +233,10 @@ class Streamer:
         # Leftovers of an earlier stream (the game killed under them, 2026-09-12) keep the display
         # captured, and a second screen capture then waits for ever inside avformat_open_input;
         # such an ffmpeg ignores SIGTERM, so SIGKILL. Ours carry the pipe's prefix on their command line.
-        subprocess.run(["pkill", "-9", "-f", "drumhero-stream-"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Never while a stream daemon is live: a selftest run during a stream killed it (2026-09-13).
+        st = read_state()
+        if not (st.get("active") and pid_alive(st.get("pid")) and st["pid"] != os.getpid()):
+            subprocess.run(["pkill", "-9", "-f", "drumhero-stream-"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         display = int(self.settings.get("stream_display", 0))
         video_dev = self.settings.get("stream_video_device") or f"Capture screen {display}"
         dev = self.settings["capture_audio_device"]
