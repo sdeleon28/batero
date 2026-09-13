@@ -33,14 +33,20 @@ presses T, and Claude does not press it for them.** For pipeline checks use
 prints the received audio's level, so silence is caught) and
 `python -m drumhero.twitch --chat xantwav` (reads the chat, no account needed).
 
-- Source (`stream_source`, default "screen", since the first live tests 2026-09-12): one ffmpeg
-  captures display `stream_display` (0) and the interface through avfoundation
-  ("Capture screen N:X18/XR18", the mix channels picked with `pan`), so the terminal or anything
-  else on that display goes out too, and nothing of the game process is in the path. It needs
-  the Screen Recording permission for drumhero.app (macOS asks once, then relaunch the app).
-  Why: with the "window" source (the game's frames by pipe, audio by a sounddevice input on the
-  XR18) the headphone return itself chopped while live, i.e. the PortAudio input on the
-  interface disturbed the device's output; the take (V) still uses that input, watch for it.
+- Source (`stream_source`, default "screen", since the first live tests 2026-09-12): ffmpeg
+  captures display `stream_display` (0) through avfoundation, so the terminal or anything else
+  on that display goes out too; the interface's mix comes from a separate feeder process
+  (`python -m drumhero.twitch --audio-feed`, a sounddevice input with the take's channels and
+  buffer settings) through a named pipe; both inputs on the wall clock (`-copyts`, setpts
+  minus the launch time), `aresample=async` for drift. Needs the Screen Recording permission
+  for drumhero.app (macOS asks once, then relaunch the app). Every stream keeps an AAC copy of
+  its audio in `~/Movies/drumhero/streams/` to check afterwards.
+  **Never capture the interface's audio with ffmpeg's avfoundation**: measured 2026-09-12 with
+  the native buffer timestamps, it drops buffers even capturing audio alone (6.1: 1.3 s lost
+  in 15 s; 8.0.1: 0.67 s) because it keeps one pending buffer and sleeps 10 ms between reads;
+  viewers heard those as pops. The feeder loses 0..2 ms in 15 s. And never a sounddevice
+  input inside the game process for the stream: the callback waits for the GIL and the
+  window source logged 0.25 s stalls; the headphone return also chopped that night.
   "window" stays as the fallback (`stream_source: "window"`).
 - While live the camera is drawn in the window as the computer edition's PiP (`capture_pip` of
   the height in `capture_corner`, 30 fps preview, purple border), whatever the `!` key says: that

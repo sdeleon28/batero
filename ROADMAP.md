@@ -98,6 +98,13 @@ the account xantwav and generated the profile picture and banner from the 2026-0
   no PortAudio, commit after f09f7c4), also what the user asked for (the terminal visible).
   Selftest in screen mode: 30 fps, 0 dropped, audio at -20 dB peak. To confirm on Twitch.
   If a take (V) chops the return the same way, the take's input is next.
+- 2026-09-12 night: viewers heard small pops. Measured (native avfoundation timestamps, 15 s
+  A/B captures): ffmpeg's avfoundation audio input drops buffers even alone (6.1: 113 drops /
+  1.3 s; 8.0.1: 58 / 0.67 s; combined with video: 123 / 1.5 s). Fixed by the audio feeder
+  process (sounddevice, its own process, named pipe, wall-clock alignment with the screen
+  input): selftest 0..2 ms lost in 15 s, 0 overflows, 30 fps, 0 dropped frames, real signal
+  through (webcam mic test, -19 dB mean). To confirm on Twitch with the AAC copy in
+  `~/Movies/drumhero/streams/` (a dropped buffer would show as a click there).
 - Open questions: a take (V) and the stream together open two PortAudio inputs on the XR18;
   not tried. Auto-reconnect when Twitch drops the connection (today: stop + toast).
   Writing to the chat from the game (needs an OAuth token).

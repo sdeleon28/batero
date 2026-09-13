@@ -6,14 +6,25 @@
 
 The stream (Streamer). Two sources, `stream_source` in settings:
 
-"screen" (the default since 2026-09-12): one ffmpeg captures display `stream_display` and the
-interface through avfoundation ("Capture screen N:X18/XR18"), picks the two mix channels with
-the pan filter, encodes and sends. Nothing of the game process is in the path: no PortAudio
-input on the interface (the first live tests had the headphone return chopping while the
-window mode's sounddevice input was open), no frame copies, and audio and video carry the
-same clock, so they stay in sync. What goes out is the whole display, the terminal included
-when it is on that screen. Needs the Screen Recording permission for drumhero.app (macOS
-asks once; then relaunch the app).
+"screen" (the default since 2026-09-12): ffmpeg captures display `stream_display` through
+avfoundation, and the interface's mix comes from a separate process, `python -m drumhero.twitch
+--audio-feed FIFO` (audio_feed): a sounddevice input on the interface (the take's channels and
+buffer settings), blocks queued and written to a named pipe as float32 stereo, which ffmpeg
+reads as its second input. Both inputs get wall-clock timestamps (-use_wallclock_as_timestamps,
+-copyts, setpts/asetpts minus the launch time), so they stay in sync whatever each took to
+open; aresample=async ties the audio's sample clock to it. What goes out is the whole display,
+the terminal included when it is on that screen. Needs the Screen Recording permission for
+drumhero.app (macOS asks once; then relaunch the app).
+Why not avfoundation for the audio too ("Capture screen N:X18/XR18", the first version):
+measured 2026-09-12 with the interface's native buffer timestamps, ffmpeg's avfoundation input
+drops audio buffers even capturing audio alone (6.1: 113 drops, 1.3 s lost in 15 s; 8.0.1: 58
+drops, 0.67 s), because it keeps a single pending audio buffer and sleeps 10 ms when it finds
+none; viewers heard those as small pops. And why a separate process rather than the game's:
+the sounddevice callback needs the GIL and the game's main loop holds it for milliseconds at a
+time; the window source's in-process input logged 0.25 s stalls. The feeder reports its own
+count of blocks against the wall clock (lost ms) when the stream stops.
+Every stream also keeps an AAC copy of what was sent (ffmpeg's tee muxer) in STREAMS_DIR, to
+check the audio afterwards.
 
 "window": the game's own frames, like a take:
 - Video: the main loop hands the surface to `push` after everything is drawn; a copy is taken
@@ -67,8 +78,9 @@ STREAM_URL_TWITCH = "rtmps://ingest.global-contribute.live-video.net:443/app/"
 STREAM_FPS = 30
 # Twitch's limits for a non-partner: 6000 kbps, 1080p, keyframes every 2 s, AAC 160 kbps 44.1/48 kHz.
 DEFAULTS = {"twitch_channel": "xantwav", "stream_height": 1080, "stream_kbps": 6000, "stream_url": None,
-            "stream_bandwidth_test": False, "stream_source": "screen", "stream_display": 0,
+            "stream_bandwidth_test": False, "stream_source": "screen", "stream_display": 0, "stream_video_device": None,
             "capture_audio_device": "X18/XR18", "capture_audio_channels": [17, 18]}
+STREAMS_DIR = os.path.expanduser("~/Movies/drumhero/streams")   # the AAC copy of every stream's audio
 AUDIO_STALL_S = 1.0          # no audio callback this long: the input is reopened (at most 3 times)
 AUDIO_LAG_PAD_S = 0.25       # the audio timeline fell this far behind the wall clock: pad it with silence
 CHAT_HOST, CHAT_PORT = "irc.chat.twitch.tv", 6697
@@ -101,12 +113,19 @@ def redact(text, key):
     return text.replace(key, "<key>") if key else text
 
 
-def encode_args(size, fps, kbps):
+def encode_args(size, fps, kbps, container=True):
     w, h = size
     return ["-c:v", "h264_videotoolbox", "-realtime", "true", "-profile:v", "high", "-pix_fmt", "yuv420p",
             "-b:v", f"{kbps}k", "-maxrate", f"{kbps}k", "-bufsize", f"{2 * kbps}k", "-g", str(2 * fps), "-r", str(fps),
-            "-c:a", "aac", "-b:a", "160k", "-ar", str(AUDIO_SR), "-ac", "2",
-            "-f", "flv", "-flvflags", "no_duration_filesize"]
+            "-c:a", "aac", "-b:a", "160k", "-ar", str(AUDIO_SR), "-ac", "2"] + (
+            ["-f", "flv", "-flvflags", "no_duration_filesize"] if container else [])
+
+
+def tee_output(url, audio_copy):
+    """ffmpeg's tee muxer: the FLV to `url` (a failure there ends the stream) and an AAC copy of
+    the audio to `audio_copy` (a failure there is ignored)."""
+    esc = lambda p: p.replace("\\", "\\\\").replace("|", "\\|").replace(":", "\\:").replace("[", "\\[").replace("]", "\\]")
+    return ["-f", "tee", f"[f=flv:flvflags=no_duration_filesize]{esc(url)}|[select=a:f=adts:onfail=ignore]{esc(audio_copy)}"]
 
 
 class Streamer:
@@ -148,6 +167,7 @@ class Streamer:
         self.audio_blocks = self.audio_restarts = self.audio_overflows = self.audio_pads = 0
         self.stopped_reason = None
         self.tmp = self.fifo = None
+        self.feeder = None
         self._audio = None
         self._q = self._writer = self._awriter = None
         if self.source == "screen":
@@ -197,26 +217,43 @@ class Streamer:
         return True
 
     def _start_screen(self, size, url):
-        """One ffmpeg: display + interface through avfoundation, the two mix channels, encode, send."""
+        """ffmpeg: the display through avfoundation + the interface's mix from the audio feeder
+        process through a named pipe, both on the wall clock; encode; send (and keep the AAC)."""
         display = int(self.settings.get("stream_display", 0))
-        chans = [int(c) - 1 for c in self.settings["capture_audio_channels"]][:2]
-        if len(chans) == 1:
-            chans = chans * 2
+        video_dev = self.settings.get("stream_video_device") or f"Capture screen {display}"
         dev = self.settings["capture_audio_device"]
+        chans = [int(c) for c in self.settings["capture_audio_channels"]][:2]
         th = int(self.settings["stream_height"])
         self.in_size = self.out_size = (0, th)          # the display's size is ffmpeg's business; only the height is known
+        sr = self._audio_rate()
+        self.tmp = tempfile.mkdtemp(prefix="drumhero-stream-")
+        self.fifo = os.path.join(self.tmp, "audio.pipe")
+        os.mkfifo(self.fifo)
+        if self.settings.get("stream_url"):               # a test: the copy stays with the pipe
+            self.audio_copy = os.path.join(self.tmp, "audio.aac")
+        else:
+            os.makedirs(STREAMS_DIR, exist_ok=True)
+            self.audio_copy = os.path.join(STREAMS_DIR, time.strftime("%Y%m%d-%H%M%S") + " stream.aac")
+        self.feeder = subprocess.Popen([sys.executable, "-m", "drumhero.twitch", "--audio-feed", self.fifo, "--device", dev,
+                                        "--channels", ",".join(str(c) for c in chans), "--rate", str(sr)],
+                                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        t0 = time.time()
         cmd = [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-               "-f", "avfoundation", "-framerate", str(self.fps), "-capture_cursor", "1",
-               "-thread_queue_size", "1024", "-i", f"Capture screen {display}:{dev}",
-               "-vf", f"scale=-2:'min({th},ih)':flags=bilinear",
-               "-af", f"pan=stereo|c0=c{chans[0]}|c1=c{chans[1]}",
-               *encode_args((0, th), self.fps, int(self.settings["stream_kbps"])), "-progress", "pipe:1", url]
+               "-f", "avfoundation", "-framerate", str(self.fps), "-capture_cursor", "1", "-use_wallclock_as_timestamps", "1",
+               "-thread_queue_size", "1024", "-i", f"{video_dev}:none",
+               "-f", "f32le", "-ar", str(sr), "-ac", "2", "-use_wallclock_as_timestamps", "1",
+               "-thread_queue_size", "1024", "-i", self.fifo,
+               "-copyts", "-map", "0:v", "-map", "1:a",
+               "-vf", f"setpts=PTS-{t0:.3f}/TB,scale=-2:'min({th},ih)':flags=bilinear", "-fps_mode", "cfr",
+               "-af", f"asetpts=PTS-{t0:.3f}/TB,aresample=async=1",
+               *encode_args((0, th), self.fps, int(self.settings["stream_kbps"]), container=False),
+               "-progress", "pipe:1", *tee_output(url, self.audio_copy)]
         self.ff = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self._progress_thread = threading.Thread(target=self._read_progress, daemon=True)
         self._progress_thread.start()
         self.active = True
-        self.log(f"stream: screen {display} + {dev} channels {[c + 1 for c in chans]} at {self.fps} fps, up to {th}p, "
-                 f"{self.settings['stream_kbps']} kbps, to {redact(url, self.key)}")
+        self.log(f"stream: {video_dev} + {dev} channels {chans} (feeder pid {self.feeder.pid}) at {self.fps} fps, up to {th}p, "
+                 f"{self.settings['stream_kbps']} kbps, to {redact(url, self.key)}, audio copy {self.audio_copy}")
         return True
 
     def _audio_rate(self):
@@ -398,10 +435,30 @@ class Streamer:
                 self.ff.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 self.ff.kill()
+            feed = ""
+            if self.feeder is not None:               # the feeder ends on the broken pipe and reports its tally
+                try:
+                    os.close(os.open(self.fifo, os.O_RDONLY | os.O_NONBLOCK))   # releases a feeder still blocked opening the pipe
+                except OSError:
+                    pass
+                try:
+                    _, err = self.feeder.communicate(timeout=5)
+                    feed = err.decode(errors="replace").strip().splitlines()[-1:] or [""]
+                    feed = feed[0]
+                except subprocess.TimeoutExpired:
+                    self.feeder.kill()
+                    feed = "feeder killed"
+            try:
+                os.unlink(self.fifo)
+                if self.audio_copy.startswith(self.tmp):
+                    os.unlink(self.audio_copy)
+                os.rmdir(self.tmp)
+            except OSError:
+                pass
             s = int(time.perf_counter() - self.started_at)
             p = self.progress
             self.log(f"stream: stopped after {s // 60:02d}:{s % 60:02d}, ffmpeg frame {p.get('frame', '?')}, dropped {p.get('drop_frames', '?')}, "
-                     f"last speed {p.get('speed', '?')}")
+                     f"last speed {p.get('speed', '?')}; {feed}")
             return
         self._q.put(None)
         self._writer.join(timeout=5)
@@ -448,6 +505,50 @@ class Streamer:
                 extra += f" · dropped {p['drop_frames']}"
             return f"LIVE {s // 60:02d}:{s % 60:02d}{extra}"
         return self.error or ""
+
+
+# ---------------------------------------------------------------------------
+def audio_feed(fifo, device, channels, rate):
+    """The audio feeder process: the interface's two channels to `fifo` as float32 stereo, from
+    the moment ffmpeg opens the pipe (so no backlog: the first block written is live). Blocks
+    are queued by the callback and written by the main thread; the pipe closing (ffmpeg gone)
+    ends it. The last stderr line is the tally: blocks, overflows, and the audio the device
+    delivered against the wall clock (lost ms = buffers PortAudio never gave us)."""
+    import sounddevice as sd
+    dev = audio_device_index(device)
+    if dev is None:
+        sys.exit(f"audio feed: device '{device}' not found")
+    idx, info = dev
+    nin = int(info["max_input_channels"])
+    chans = [c - 1 for c in channels if 0 < c <= nin] or [0, min(1, nin - 1)]
+    if len(chans) == 1:
+        chans = chans * 2
+    q = queue.Queue()
+    stats = {"blocks": 0, "overflows": 0, "frames": 0}
+
+    def cb(indata, frames, t, status):
+        if status.input_overflow:
+            stats["overflows"] += 1
+        stats["blocks"] += 1
+        stats["frames"] += frames
+        q.put(np.ascontiguousarray(indata[:, chans], dtype="float32").tobytes())
+
+    out = open(fifo, "wb", buffering=0)                  # blocks until ffmpeg opens its end
+    stream = sd.InputStream(device=idx, channels=nin, samplerate=rate, dtype="float32", callback=cb, **input_stream_kwargs(rate))
+    stream.start()
+    t0 = time.perf_counter()
+    try:
+        while True:
+            block = q.get()
+            try:
+                out.write(block)
+            except (BrokenPipeError, OSError):
+                break
+    finally:
+        elapsed = time.perf_counter() - t0
+        stream.stop(); stream.close()
+        lost = max(0.0, elapsed - stats["frames"] / rate) * 1000
+        print(f"audio feed: {stats['blocks']} blocks, {stats['overflows']} overflows, {elapsed:.1f} s, lost {lost:.0f} ms", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -569,7 +670,7 @@ class Chat:
 
 
 # ---------------------------------------------------------------------------
-def selftest(seconds=8, source="window"):
+def selftest(seconds=8, source="window", video_device=None, audio_device=None):
     """The stream pipeline against a local rtmp server (ffmpeg listening), no Twitch: synthetic
     frames (window) or the display (screen), the interface's audio, the received FLV probed
     at the end, with the audio's level so silence is caught."""
@@ -583,7 +684,9 @@ def selftest(seconds=8, source="window"):
     pygame.display.init()
     pygame.font.init()
     size = (1280, 720)
-    st = Streamer({"stream_url": f"rtmp://127.0.0.1:{port}/live/test", "stream_height": 720, "stream_kbps": 3000, "stream_source": source})
+    st = Streamer({"stream_url": f"rtmp://127.0.0.1:{port}/live/test", "stream_height": 720, "stream_kbps": 3000, "stream_source": source,
+                   "stream_video_device": video_device,
+                   **({"capture_audio_device": audio_device, "capture_audio_channels": [1, 2]} if audio_device else {})})
     surf = pygame.Surface(size)
     font = pygame.font.SysFont(None, 80)
     if not st.start(size):
@@ -619,8 +722,16 @@ def main(argv=None):
     ap.add_argument("--selftest", action="store_true", help="stream synthetic frames to a local rtmp server and probe the result")
     ap.add_argument("--seconds", type=float, default=8)
     ap.add_argument("--source", choices=["window", "screen"], default="window")
+    ap.add_argument("--video-device", help="screen source selftest: an avfoundation video device instead of the display")
+    ap.add_argument("--audio-device", help="selftest: another input device (channels 1-2) instead of the interface")
+    ap.add_argument("--audio-feed", metavar="FIFO", help="(internal) the stream's audio feeder process")
+    ap.add_argument("--device", default="X18/XR18")
+    ap.add_argument("--channels", default="17,18")
+    ap.add_argument("--rate", type=int, default=AUDIO_SR)
     args = ap.parse_args(argv)
-    if args.chat:
+    if args.audio_feed:
+        audio_feed(args.audio_feed, args.device, [int(c) for c in args.channels.split(",")], args.rate)
+    elif args.chat:
         c = Chat(args.chat, on_message=lambda name, text: print(f"{name}: {text}"))
         try:
             while True:
@@ -628,7 +739,7 @@ def main(argv=None):
         except KeyboardInterrupt:
             c.stop()
     elif args.selftest:
-        selftest(args.seconds, args.source)
+        selftest(args.seconds, args.source, args.video_device, args.audio_device)
     else:
         ap.print_help()
 
