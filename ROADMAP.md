@@ -70,6 +70,25 @@ level. Setup shows a "Volume" row (select raises, wraps to 5 %). The XR18's fade
 the overall level.
 
 
+### 2. Twitch stream from the game, no OBS (built 2026-09-12, not yet tested against Twitch)
+
+`drumhero/twitch.py`, see CLAUDE.md "Twitch stream (T) and chat". Done: the Streamer
+(window + interface audio to RTMPS, validated with `--selftest` against a local rtmp
+listener: H.264 1280x720 30 fps + AAC 44.1 kHz stereo received, 8 s), the Chat (joined
+#xantwav anonymously), the pane, the HUD line, the Setup row, the key file. The user made
+the account xantwav and generated the profile picture and banner from the 2026-09-10 take
+(`~/Movies/drumhero/twitch/`). Pending, in order, and every stream start is the user's:
+
+- First run with `stream_bandwidth_test: true` in settings.json (T, then inspector.twitch.tv
+  shows the session; nothing public). Check: speed stays 1.0x, no dropped frames, audio
+  present and in sync with the picture (the pane's velocity viewer against the sound).
+- Then a real stream at 1080p 6000 kbps; if frames drop, `stream_height: 720` and
+  `stream_kbps: 3500`, and the wired Ethernet (two USB adapters are plugged, the Mac is on
+  Wi-Fi en1 with low responsiveness under load).
+- Open questions: a take (V) and the stream together open two PortAudio inputs on the XR18;
+  not tried. Auto-reconnect when Twitch drops the connection (today: stop + toast).
+  Writing to the chat from the game (needs an OAuth token).
+
 ## A. Hi-hat detection drops notes (resolved 2026-09-09)
 
 Confirmed and fixed by recording real playing (paradiddles slow and fast, bow/edge

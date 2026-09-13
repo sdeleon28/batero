@@ -22,6 +22,8 @@ from .kit import (default_kit, describe, describe_pads, load_kit, load_progress,
                   save_progress, save_settings)
 from .runlog import RunLog
 from .capture import Recorder
+from .twitch import Chat, Streamer
+from . import twitch as TW
 from . import capture as CP
 from . import edit as E
 from . import stats as ST
@@ -94,6 +96,8 @@ class App:
         self.ghosts = GhostFilter()  # drops the hi-hat notes the pedal produces on its own
         self.runlog = RunLog()       # every level is written to ~/Library/Logs/drumhero/runs when it ends
         self.recorder = Recorder(self.settings)   # V: take of the game, the interface's mix and the camera
+        self.streamer = Streamer(self.settings)   # T: the window and the interface's mix live to Twitch
+        self.chat = None                          # the channel's chat while the stream is live
         self.editor = E.Editor(self.settings.get("claude_bin"))   # Edit with Claude
         self.coach = Coach(self.settings.get("claude_bin"), self.settings.get("coach_language", "es"),
                            self.settings.get("coach_model"))
@@ -706,6 +710,95 @@ class App:
         pygame.draw.rect(self.surface, (235, 70, 70) if self.recorder.active else DIM, (x0, y0, pw, ph), 1)
         self.surface.blit(f.text(label, f.small, TEXT), (x0 + 8 * S, y0 + 6 * S))
 
+    def toggle_stream(self):
+        """T: the stream starts and stops here and nowhere else (never on its own)."""
+        if self.streamer.active:
+            self.stop_stream()
+            self.toasts.add("stream stopped", DIM)
+        elif self.streamer.start(self.size):
+            self.chat = Chat(self.streamer.settings["twitch_channel"], log=print)
+            w, h = self.streamer.out_size
+            self.toasts.add(f"live on twitch.tv/{self.streamer.settings['twitch_channel']}: {w}x{h}, {self.streamer.settings['stream_kbps']} kbps"
+                            + (" (bandwidth test, not public)" if self.streamer.settings.get("stream_bandwidth_test") else ""), (145, 70, 255))
+        else:
+            self.toasts.add(f"stream could not start: {self.streamer.error}", JUDGE_COLORS["MISS"])
+            print(f"stream could not start: {self.streamer.error}")
+
+    def stop_stream(self):
+        self.streamer.stop()
+        if self.chat is not None:
+            self.chat.stop()
+            self.chat = None
+
+    def watch_stream(self):
+        """Every frame: the stream ended on its own (Twitch closed it, the network) -> the chat goes too and the HUD says why."""
+        if self.chat is not None and not self.streamer.active:
+            self.stop_stream()
+            self.toasts.add(f"stream ended: {self.streamer.error}", JUDGE_COLORS["MISS"])
+
+    def draw_stream_status(self, y_bottom):
+        """LIVE mm:ss with the bitrate and speed above the recording line; the last error when it ended. Returns the top y."""
+        status = self.streamer.status
+        if not status:
+            return y_bottom
+        S, f = self.scale, self.fonts
+        live = self.streamer.active
+        ts = f.text(status, f.small, (145, 70, 255) if live else JUDGE_COLORS["MISS"])
+        x = self.size[0] - ts.get_width() - 16 * S
+        y = y_bottom - ts.get_height()
+        if live and int(time.perf_counter() * 2) % 2 == 0:
+            pygame.draw.circle(self.surface, (145, 70, 255), (int(x - 12 * S), int(y + ts.get_height() / 2)), int(5 * S))
+        self.surface.blit(ts, (x, y))
+        return y - 4 * S
+
+    def draw_chat(self):
+        """The channel's chat while the stream is live: bottom left, the velocity viewer's place (above
+        it when both are on), the last messages that fit, name in the user's Twitch colour."""
+        chat = self.chat
+        if chat is None:
+            return
+        S, f = self.scale, self.fonts
+        w, h = 470 * S, 232 * S
+        x0 = 16 * S
+        y0 = self.size[1] - h - 16 * S - ((232 + 12) * S if self.debug_on else 0)
+        pane = pygame.Surface((int(w), int(h)), pygame.SRCALPHA)
+        pane.fill((*LANE_BG, 225))
+        self.surface.blit(pane, (x0, y0))
+        pygame.draw.rect(self.surface, DIM, (x0, y0, w, h), 1)
+        head = f"chat  #{chat.channel}" + ("" if chat.connected else f"  ({chat.error or 'connecting'})")
+        self.surface.blit(f.text(head, f.small, (145, 70, 255) if chat.connected else DIM), (x0 + 12 * S, y0 + 8 * S))
+        with chat._lock:
+            msgs = list(chat.messages)
+        lines = []                                    # (name, colour, text) per wrapped line, newest last; name only on the first
+        max_w = w - 24 * S
+        for t, name, text, colour in msgs[-24:]:
+            colour = colour or TEXT
+            prefix = f"{name}: "
+            pw = f.text(prefix, f.small, colour).get_width()
+            words = text.split(" ")
+            row, avail = "", max_w - pw
+            first = True
+            for word in words:
+                trial = (row + " " + word).strip()
+                if row and f.text(trial, f.small, TEXT).get_width() > avail:
+                    lines.append((prefix if first else "", colour, row))
+                    first, row, avail = False, word, max_w
+                else:
+                    row = trial
+            lines.append((prefix if first else "", colour, row))
+        lh = f.text("Ag", f.small, TEXT).get_height() + 2 * S
+        y = y0 + h - 10 * S - lh
+        top = y0 + 30 * S
+        for prefix, colour, row in reversed(lines):
+            if y < top:
+                break
+            x = x0 + 12 * S
+            if prefix:
+                ps = f.text(prefix, f.small, colour)
+                self.surface.blit(ps, (x, y)); x += ps.get_width()
+            self.surface.blit(f.text(row, f.small, TEXT), (x, y))
+            y -= lh
+
     def draw_recording_status(self):
         status = self.recorder.status
         rec = self.recorder.active
@@ -716,6 +809,7 @@ class App:
         if not status and self.coach.busy:
             status = self.coach.status + " ." * (int(time.perf_counter()) % 4)
         if not status:
+            self.draw_stream_status(self.size[1] - 8 * self.scale)
             return
         S = self.scale
         f = self.fonts
@@ -726,6 +820,7 @@ class App:
         if rec and int(time.perf_counter() * 2) % 2 == 0:
             pygame.draw.circle(self.surface, color, (int(x - 12 * S), int(y + ts.get_height() / 2)), int(5 * S))
         self.surface.blit(ts, (x, y))
+        self.draw_stream_status(y - 4 * S)
 
     def go(self, screen):
         self.screen_obj = screen
@@ -746,6 +841,8 @@ class App:
                         self.toggle_fullscreen()
                     elif ev.key == pygame.K_v:
                         self.toggle_recording()
+                    elif ev.key == pygame.K_t:
+                        self.toggle_stream()
                     elif ev.unicode == "{" or (ev.key == pygame.K_LEFTBRACKET and ev.mod & pygame.KMOD_SHIFT):
                         self.nudge_volume(-1)              # the plain brackets belong to the screens (tempo, corner)
                     elif ev.unicode == "}" or (ev.key == pygame.K_RIGHTBRACKET and ev.mod & pygame.KMOD_SHIFT):
@@ -771,7 +868,10 @@ class App:
             self.draw_recording_status()
             self.draw_toasts()
             self.draw_debug()
+            self.draw_chat()
             self.draw_cam_monitor()                       # after push: never in the take
+            self.streamer.push(self.surface)              # the stream is the window, every overlay included
+            self.watch_stream()
             pygame.display.flip()
             clock.tick(TARGET_FPS)
         if self.midi_in:
@@ -780,6 +880,8 @@ class App:
         self.close_cam_monitor()
         if self.recorder.active:
             self.recorder.stop()
+        if self.streamer.active:
+            self.stop_stream()
         if self.recorder.composing is not None:
             print("finishing the take...")
             self.recorder.composing[0].join(timeout=300)
@@ -979,6 +1081,8 @@ class ListScreen(Screen):
                     (f"Start fullscreen: {'on' if self.app.settings.get('fullscreen', True) else 'off'}", "F11 or Cmd+F toggles any time, saved"),
                     ("Recording (V)", f"audio {self.app.recorder.settings['capture_audio_device']} ch {self.app.recorder.settings['capture_audio_channels']}"
                                       f" · camera '{self.app.recorder.settings['capture_camera']}' · ~/Movies/drumhero"),
+                    ("Stream (T)", f"twitch.tv/{self.app.streamer.settings['twitch_channel']} · {self.app.streamer.settings['stream_height']}p "
+                                   f"{self.app.streamer.settings['stream_kbps']} kbps · the window as you see it, audio as the takes · key in ~/.config/drumhero/twitch_key"),
                     ("Camera & take check", "the iPhone next to the game picture, both editions' layout, the take's audio meter, a test take"),
                     ("Takes: editions, Claude edits", "every take renders a computer (16:9) and a social (9:16) edition; render one again, or have Claude cut it"),
                     ("Progress (S)", "streak, minutes, trends, records"),
@@ -1034,12 +1138,14 @@ class ListScreen(Screen):
             elif self.sel == 11:
                 self.app.toggle_recording()
             elif self.sel == 12:
-                self.app.go(CameraCheckScreen(self.app, self.app.surface))
+                self.app.toggle_stream()
             elif self.sel == 13:
-                self.app.go(EditScreen(self.app))
+                self.app.go(CameraCheckScreen(self.app, self.app.surface))
             elif self.sel == 14:
-                self.app.go(StatsScreen(self.app))
+                self.app.go(EditScreen(self.app))
             elif self.sel == 15:
+                self.app.go(StatsScreen(self.app))
+            elif self.sel == 16:
                 self.app.go(CoachScreen(self.app))
             else:
                 return False

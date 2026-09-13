@@ -24,6 +24,37 @@ relaunches it. Do this before reporting the change as done. The bundle does not 
 the code (it points at this repo), but a running instance keeps the old code loaded,
 so the relaunch is what matters.
 
+## Twitch stream (T) and chat
+
+`drumhero/twitch.py`. `T` starts and stops the stream (also the Setup row "Stream (T)").
+**The stream never starts on its own, never in a test, never from a script: only the user
+presses T, and Claude does not press it for them.** For pipeline checks use
+`python -m drumhero.twitch --selftest` (a local rtmp listener, no Twitch) and
+`python -m drumhero.twitch --chat xantwav` (reads the chat, no account needed).
+
+- What goes out is the window as the user sees it, every overlay included (`Streamer.push`
+  runs last in the main loop, after the toasts, the velocity viewer, the chat pane and the
+  camera monitor): not an edition, no PiP, no social layout.
+- Video: frames per wall-clock slot like the take (30 fps, missed slots repeat), H.264 on
+  VideoToolbox, `stream_height` (1080) and `stream_kbps` (6000) from settings, keyframe every
+  2 s, FLV over RTMPS to Twitch's ingest. Audio: the same interface channels as the take
+  (X18/XR18, USB 17/18 = Main L/R) through a sounddevice input with the mixer-sized buffer,
+  float32 stereo to ffmpeg through a named pipe, padded with silence onto the stream's clock.
+- The key lives in `~/.config/drumhero/twitch_key` (one line). Never log it, never copy it
+  into settings.json or the repo; `twitch.redact` strips it from ffmpeg's messages.
+  `stream_url` in settings replaces the whole URL (tests); `stream_bandwidth_test` appends
+  `?bandwidthtest=true` (Twitch takes the stream without going live, inspector.twitch.tv).
+- The chat pane (bottom left, the velocity viewer's place, above it when both are on) shows
+  the last messages of `twitch_channel` (xantwav) while the stream is live; anonymous IRC
+  over TLS, `justinfan` nick, reconnects by itself. Writing to the chat would need a token;
+  not built.
+- HUD: "LIVE mm:ss · bitrate · speed" in purple above the REC line, from ffmpeg's `-progress`;
+  speed under 1.0x means the encoder or the network is behind. When ffmpeg exits the stream
+  stops, the chat closes and the toast shows ffmpeg's last stderr line.
+- Network measured 2026-09-12 on Wi-Fi (en1): uplink 14..24 Mbps, responsiveness low
+  (2.6..3.7 s under load). The user has two USB Ethernet adapters; a wired link is the fix
+  if the stream drops frames. Ingest TCP round trip 47..51 ms.
+
 ## Open items
 
 `ROADMAP.md` lists the loose ends with their full context (hi-hat filter eating fast
