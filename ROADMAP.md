@@ -85,6 +85,13 @@ the account xantwav and generated the profile picture and banner from the 2026-0
 - Then a real stream at 1080p 6000 kbps; if frames drop, `stream_height: 720` and
   `stream_kbps: 3500`, and the wired Ethernet (two USB adapters are plugged, the Mac is on
   Wi-Fi en1 with low responsiveness under load).
+- First live tests 2026-09-12 (public, three streams from the dashboard): the picture and
+  the chat came through; the third stream (21:40, first build with the live camera PiP)
+  froze the game at "waiting for frames..." with the LIVE toast on screen, no "stopped"
+  line in the log, no macOS hang report. Not reproduced or explained; fixed what could do
+  it (commit f09f7c4: `find_camera` off the main thread and retried every 5 s, the camera
+  preview's stderr drained) and added `App._watchdog`: a frame over 2 s logs the main
+  thread's stack to ~/Library/Logs/drumhero.log. Next freeze: read that log first.
 - Open questions: a take (V) and the stream together open two PortAudio inputs on the XR18;
   not tried. Auto-reconnect when Twitch drops the connection (today: stop + toast).
   Writing to the chat from the game (needs an OAuth token).
