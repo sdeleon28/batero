@@ -7,6 +7,7 @@ and the kick goes back. The keyboard always works too.
 import argparse
 import glob
 import os
+import sys
 import threading
 import time
 from collections import deque
@@ -44,6 +45,8 @@ NAV_SOUND_MIN_VELOCITY = 15  # ...but every hit above this is heard, undebounced
 RESULTS_GRACE_S = 1.0     # after a level ends, ignore drum hits this long before they navigate
 VOLUME_STEP = 0.05        # { and } move the game's output level by this much
 DEBUG_HITS = 200          # hits the ` pane remembers
+STALL_S = 2.0             # a frame this long is logged with the main thread's stack (App._watchdog)
+CAM_RETRY_S = 5.0         # the camera monitor looks for a missing camera this often
 DEBUG_BARS = 48           # of which it draws as bars
 NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
@@ -115,6 +118,9 @@ class App:
         self.debug_on = False      # the ` key: velocity viewer over any screen
         self.cam_on = False        # the ! key: a small live picture of the camera over any screen
         self.cam_preview = None    # our own CameraPreview while the recorder does not hold the camera
+        self._cam_opening = None   # the thread opening it (open_cam_preview)
+        self._cam_tried = -1e9     # perf_counter of the last attempt
+        self._cam_wanted = False
         self._cam_cache = (None, None)   # (source frame counter, scaled surface)
         self.debug_hits = deque(maxlen=DEBUG_HITS)   # (wall t, note, velocity, instrument, outcome, is ghost)
 
@@ -672,6 +678,35 @@ class App:
         if self.cam_preview is not None:
             self.cam_preview.stop()
             self.cam_preview = None
+        self._cam_wanted = False
+
+    def open_cam_preview(self, fps):
+        """Open our camera preview in a thread: finding the camera spawns `ffmpeg -list_devices`
+        (0.7 s, 15 s when AVFoundation stalls) and used to run on the main thread, every frame
+        while no camera was found (2026-09-12: the game froze at "waiting for frames" during a
+        stream). A miss is retried after CAM_RETRY_S."""
+        now = time.perf_counter()
+        self._cam_wanted = True
+        if self._cam_opening is not None or now - self._cam_tried < CAM_RETRY_S:
+            return
+        self._cam_tried = now
+
+        def work():
+            preview = None
+            try:
+                cam = CP.find_camera(self.recorder.settings["capture_camera"])
+                if cam and CP.ffmpeg_path():
+                    preview = CP.CameraPreview(cam, fps=fps)
+            finally:
+                if preview is not None and (not self._cam_wanted or self.recorder.active or self.cam_preview is not None):
+                    preview.stop()                # nobody wants it any more (monitor closed, a take took the camera)
+                elif preview is not None:
+                    self.cam_preview = preview
+                    self._cam_cache = (None, None)
+                self._cam_opening = None
+
+        self._cam_opening = threading.Thread(target=work, daemon=True)
+        self._cam_opening.start()
 
     def draw_cam_monitor(self):
         """The ! pane: what the camera sees, small, bottom right, over any screen. While a take
@@ -697,10 +732,7 @@ class App:
             label, error = "camera · recording", self.recorder.feed.error
         else:
             if self.cam_preview is None and not self.recorder.active:
-                cam = CP.find_camera(self.recorder.settings["capture_camera"])
-                self.cam_preview = CP.CameraPreview(cam, fps=CP.CAMERA_FPS if live else 15) if cam and CP.ffmpeg_path() else None
-                if self.cam_preview is None:
-                    self._cam_cache = (None, None)
+                self.open_cam_preview(CP.CAMERA_FPS if live else 15)
             p = self.cam_preview
             src, frame, size, count = p, (p.frame if p else None), CP.PREVIEW_SIZE, (p.frames if p else 0)
             label = "camera · live" if live else "camera"
@@ -832,6 +864,23 @@ class App:
         self.surface.blit(ts, (x, y))
         self.draw_stream_status(y - 4 * S)
 
+    def _watchdog(self):
+        """A frame that takes longer than STALL_S: the main thread's stack goes to the log, once per
+        stall, so a frozen game explains itself (2026-09-12: froze during a stream, no trace)."""
+        import traceback
+        main_id = threading.main_thread().ident
+        reported = None
+        while True:
+            time.sleep(0.5)
+            at = self.frame_at
+            stalled = time.perf_counter() - at
+            if stalled < STALL_S or reported == at:
+                continue
+            reported = at
+            frame = sys._current_frames().get(main_id)
+            stack = "".join(traceback.format_stack(frame)) if frame is not None else "(no frame)"
+            print(f"main loop stalled {stalled:.1f} s, main thread at:\n{stack}")
+
     def go(self, screen):
         self.screen_obj = screen
         self.update_menu_music()
@@ -840,7 +889,10 @@ class App:
         self.go(SetupScreen(self, first_run=True) if self.first_run and self.midi_in else HubScreen(self))
         clock = pygame.time.Clock()
         running = True
+        self.frame_at = time.perf_counter()
+        threading.Thread(target=self._watchdog, daemon=True).start()
         while running:
+            self.frame_at = time.perf_counter()
             for ev in pygame.event.get():
                 if ev.type == pygame.QUIT:
                     running = False

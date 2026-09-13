@@ -1053,8 +1053,17 @@ class CameraPreview:
             self.proc = None
             self.error = str(e)
             return
+        self._err = []
+        threading.Thread(target=self._drain_stderr, daemon=True).start()
         self.thread = threading.Thread(target=self._read, daemon=True)
         self.thread.start()
+
+    def _drain_stderr(self):
+        """ffmpeg's stderr, read as it comes: left unread, 64 KB of AVFoundation warnings fill the
+        pipe and ffmpeg blocks on it, sending no more frames ("waiting for frames..." for ever)."""
+        for line in iter(self.proc.stderr.readline, b""):
+            self._err.append(line.decode(errors="replace"))
+            del self._err[:-50]
 
     def _read(self):
         n = self.size[0] * self.size[1] * 3
@@ -1064,7 +1073,8 @@ class CameraPreview:
                 break
             self.frame = buf
             self.frames += 1
-        err = self.proc.stderr.read().decode(errors="replace")
+        self.proc.wait()
+        err = "".join(self._err)
         if not self.frames:
             lines = [l for l in err.splitlines() if l.strip() and "deprecated" not in l and "NSKVO" not in l and "Please use" not in l]
             self.error = (lines[-1][-160:] if lines else "the camera sent no frames")
