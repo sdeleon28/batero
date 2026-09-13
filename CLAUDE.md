@@ -29,9 +29,19 @@ so the relaunch is what matters.
 `drumhero/twitch.py`. `T` starts and stops the stream (also the Setup row "Stream (T)").
 **The stream never starts on its own, never in a test, never from a script: only the user
 presses T, and Claude does not press it for them.** For pipeline checks use
-`python -m drumhero.twitch --selftest` (a local rtmp listener, no Twitch) and
+`python -m drumhero.twitch --selftest [--source screen]` (a local rtmp listener, no Twitch;
+prints the received audio's level, so silence is caught) and
 `python -m drumhero.twitch --chat xantwav` (reads the chat, no account needed).
 
+- Source (`stream_source`, default "screen", since the first live tests 2026-09-12): one ffmpeg
+  captures display `stream_display` (0) and the interface through avfoundation
+  ("Capture screen N:X18/XR18", the mix channels picked with `pan`), so the terminal or anything
+  else on that display goes out too, and nothing of the game process is in the path. It needs
+  the Screen Recording permission for drumhero.app (macOS asks once, then relaunch the app).
+  Why: with the "window" source (the game's frames by pipe, audio by a sounddevice input on the
+  XR18) the headphone return itself chopped while live, i.e. the PortAudio input on the
+  interface disturbed the device's output; the take (V) still uses that input, watch for it.
+  "window" stays as the fallback (`stream_source: "window"`).
 - While live the camera is drawn in the window as the computer edition's PiP (`capture_pip` of
   the height in `capture_corner`, 30 fps preview, purple border), whatever the `!` key says: that
   is how the iPhone gets into the stream (added 2026-09-12 after the first live test).

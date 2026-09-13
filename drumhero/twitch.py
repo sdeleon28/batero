@@ -4,7 +4,18 @@
     is the window itself (every overlay included: toasts, the velocity viewer, the chat, the
     camera monitor), not an edition. It never starts on its own.
 
-The stream (Streamer):
+The stream (Streamer). Two sources, `stream_source` in settings:
+
+"screen" (the default since 2026-09-12): one ffmpeg captures display `stream_display` and the
+interface through avfoundation ("Capture screen N:X18/XR18"), picks the two mix channels with
+the pan filter, encodes and sends. Nothing of the game process is in the path: no PortAudio
+input on the interface (the first live tests had the headphone return chopping while the
+window mode's sounddevice input was open), no frame copies, and audio and video carry the
+same clock, so they stay in sync. What goes out is the whole display, the terminal included
+when it is on that screen. Needs the Screen Recording permission for drumhero.app (macOS
+asks once; then relaunch the app).
+
+"window": the game's own frames, like a take:
 - Video: the main loop hands the surface to `push` after everything is drawn; a copy is taken
   once per 1/STREAM_FPS slot of the wall clock (the Recorder's scheme: a missed slot repeats
   the previous frame, so the picture stays on the wall clock and never runs ahead of the
@@ -56,7 +67,8 @@ STREAM_URL_TWITCH = "rtmps://ingest.global-contribute.live-video.net:443/app/"
 STREAM_FPS = 30
 # Twitch's limits for a non-partner: 6000 kbps, 1080p, keyframes every 2 s, AAC 160 kbps 44.1/48 kHz.
 DEFAULTS = {"twitch_channel": "xantwav", "stream_height": 1080, "stream_kbps": 6000, "stream_url": None,
-            "stream_bandwidth_test": False, "capture_audio_device": "X18/XR18", "capture_audio_channels": [17, 18]}
+            "stream_bandwidth_test": False, "stream_source": "screen", "stream_display": 0,
+            "capture_audio_device": "X18/XR18", "capture_audio_channels": [17, 18]}
 AUDIO_STALL_S = 1.0          # no audio callback this long: the input is reopened (at most 3 times)
 AUDIO_LAG_PAD_S = 0.25       # the audio timeline fell this far behind the wall clock: pad it with silence
 CHAT_HOST, CHAT_PORT = "irc.chat.twitch.tv", 6697
@@ -127,21 +139,27 @@ class Streamer:
         if not url:
             self.error = f"no stream key in {TWITCH_KEY_PATH}"
             return False
-        w, h = int(size[0]), int(size[1])
-        th = min(h, int(self.settings["stream_height"]))
-        tw = int(w * th / h)
-        self.in_size = (w // 2 * 2, h // 2 * 2)
-        self.out_size = (tw // 2 * 2, th // 2 * 2)
+        self.source = "screen" if self.settings.get("stream_source", "screen") != "window" else "window"
         self.fps = STREAM_FPS
-        self.tmp = tempfile.mkdtemp(prefix="drumhero-stream-")
-        self.fifo = os.path.join(self.tmp, "audio.pipe")
-        os.mkfifo(self.fifo)
         self.started_at = time.perf_counter()
         self._last_slot = -1
         self.frames = self.dropped = self.repeated = 0
         self.progress = {}
         self.audio_blocks = self.audio_restarts = self.audio_overflows = self.audio_pads = 0
         self.stopped_reason = None
+        self.tmp = self.fifo = None
+        self._audio = None
+        self._q = self._writer = self._awriter = None
+        if self.source == "screen":
+            return self._start_screen(size, url)
+        w, h = int(size[0]), int(size[1])
+        th = min(h, int(self.settings["stream_height"]))
+        tw = int(w * th / h)
+        self.in_size = (w // 2 * 2, h // 2 * 2)
+        self.out_size = (tw // 2 * 2, th // 2 * 2)
+        self.tmp = tempfile.mkdtemp(prefix="drumhero-stream-")
+        self.fifo = os.path.join(self.tmp, "audio.pipe")
+        os.mkfifo(self.fifo)
         vf = [] if self.out_size == self.in_size else ["-vf", "scale=%d:%d:flags=bilinear" % self.out_size]
         sr = self._audio_rate()
         cmd = [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
@@ -175,7 +193,30 @@ class Streamer:
             self._silence_thread = threading.Thread(target=self._feed_silence, daemon=True)
             self._silence_thread.start()
         self.active = True
-        self.log(f"stream: {self.out_size[0]}x{self.out_size[1]} at {self.fps} fps, {self.settings['stream_kbps']} kbps, to {redact(url, self.key)}")
+        self.log(f"stream: window {self.out_size[0]}x{self.out_size[1]} at {self.fps} fps, {self.settings['stream_kbps']} kbps, to {redact(url, self.key)}")
+        return True
+
+    def _start_screen(self, size, url):
+        """One ffmpeg: display + interface through avfoundation, the two mix channels, encode, send."""
+        display = int(self.settings.get("stream_display", 0))
+        chans = [int(c) - 1 for c in self.settings["capture_audio_channels"]][:2]
+        if len(chans) == 1:
+            chans = chans * 2
+        dev = self.settings["capture_audio_device"]
+        th = int(self.settings["stream_height"])
+        self.in_size = self.out_size = (0, th)          # the display's size is ffmpeg's business; only the height is known
+        cmd = [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+               "-f", "avfoundation", "-framerate", str(self.fps), "-capture_cursor", "1",
+               "-thread_queue_size", "1024", "-i", f"Capture screen {display}:{dev}",
+               "-vf", f"scale=-2:'min({th},ih)':flags=bilinear",
+               "-af", f"pan=stereo|c0=c{chans[0]}|c1=c{chans[1]}",
+               *encode_args((0, th), self.fps, int(self.settings["stream_kbps"])), "-progress", "pipe:1", url]
+        self.ff = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self._progress_thread = threading.Thread(target=self._read_progress, daemon=True)
+        self._progress_thread.start()
+        self.active = True
+        self.log(f"stream: screen {display} + {dev} channels {[c + 1 for c in chans]} at {self.fps} fps, up to {th}p, "
+                 f"{self.settings['stream_kbps']} kbps, to {redact(url, self.key)}")
         return True
 
     def _audio_rate(self):
@@ -288,6 +329,8 @@ class Streamer:
         if self.ff.poll() is not None:                       # ffmpeg is gone: Twitch closed the connection, or an error
             self._ended()
             return
+        if self.source == "screen":
+            return
         now = time.perf_counter()
         slot = int((now - self.started_at) * self.fps + 0.5)
         if slot <= self._last_slot:
@@ -348,6 +391,18 @@ class Streamer:
         if not self.active:
             return
         self.active = False
+        if self.source == "screen":
+            if self.ff.poll() is None:
+                self.ff.terminate()                   # ffmpeg flushes and closes the rtmp session on SIGTERM
+            try:
+                self.ff.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.ff.kill()
+            s = int(time.perf_counter() - self.started_at)
+            p = self.progress
+            self.log(f"stream: stopped after {s // 60:02d}:{s % 60:02d}, ffmpeg frame {p.get('frame', '?')}, dropped {p.get('drop_frames', '?')}, "
+                     f"last speed {p.get('speed', '?')}")
+            return
         self._q.put(None)
         self._writer.join(timeout=5)
         if self._audio is not None:
@@ -514,9 +569,10 @@ class Chat:
 
 
 # ---------------------------------------------------------------------------
-def selftest(seconds=8):
+def selftest(seconds=8, source="window"):
     """The stream pipeline against a local rtmp server (ffmpeg listening), no Twitch: synthetic
-    frames, the interface's audio (or silence), the received FLV probed at the end."""
+    frames (window) or the display (screen), the interface's audio, the received FLV probed
+    at the end, with the audio's level so silence is caught."""
     import pygame
     out = os.path.join(tempfile.mkdtemp(prefix="drumhero-selftest-"), "received.flv")
     port = 19350
@@ -527,7 +583,7 @@ def selftest(seconds=8):
     pygame.display.init()
     pygame.font.init()
     size = (1280, 720)
-    st = Streamer({"stream_url": f"rtmp://127.0.0.1:{port}/live/test", "stream_height": 720, "stream_kbps": 3000})
+    st = Streamer({"stream_url": f"rtmp://127.0.0.1:{port}/live/test", "stream_height": 720, "stream_kbps": 3000, "stream_source": source})
     surf = pygame.Surface(size)
     font = pygame.font.SysFont(None, 80)
     if not st.start(size):
@@ -551,6 +607,8 @@ def selftest(seconds=8):
     r = subprocess.run([ffprobe_path(), "-v", "error", "-show_entries", "stream=codec_name,width,height,r_frame_rate,sample_rate,channels:format=duration",
                         "-of", "default=nw=1", out], capture_output=True, text=True)
     print(r.stdout.strip() or r.stderr.strip())
+    r = subprocess.run([ffmpeg_path(), "-hide_banner", "-i", out, "-af", "volumedetect", "-vn", "-f", "null", "-"], capture_output=True, text=True)
+    print("\n".join(l.split("] ", 1)[-1] for l in r.stderr.splitlines() if "mean_volume" in l or "max_volume" in l))
     print("received:", out, os.path.getsize(out) if os.path.exists(out) else "missing")
 
 
@@ -560,6 +618,7 @@ def main(argv=None):
     ap.add_argument("--chat", metavar="CHANNEL", help="print the channel's chat until Ctrl-C")
     ap.add_argument("--selftest", action="store_true", help="stream synthetic frames to a local rtmp server and probe the result")
     ap.add_argument("--seconds", type=float, default=8)
+    ap.add_argument("--source", choices=["window", "screen"], default="window")
     args = ap.parse_args(argv)
     if args.chat:
         c = Chat(args.chat, on_message=lambda name, text: print(f"{name}: {text}"))
@@ -569,7 +628,7 @@ def main(argv=None):
         except KeyboardInterrupt:
             c.stop()
     elif args.selftest:
-        selftest(args.seconds)
+        selftest(args.seconds, args.source)
     else:
         ap.print_help()
 

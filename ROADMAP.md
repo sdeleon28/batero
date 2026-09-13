@@ -92,6 +92,12 @@ the account xantwav and generated the profile picture and banner from the 2026-0
   it (commit f09f7c4: `find_camera` off the main thread and retried every 5 s, the camera
   preview's stderr drained) and added `App._watchdog`: a frame over 2 s logs the main
   thread's stack to ~/Library/Logs/drumhero.log. Next freeze: read that log first.
+- 2026-09-12 later: the headphone return chopped while live ("zeros in the wav"), game and
+  Bitwig alike, only while the stream ran: the window source's sounddevice input on the XR18.
+  The stream moved to the "screen" source (one ffmpeg, display + interface by avfoundation,
+  no PortAudio, commit after f09f7c4), also what the user asked for (the terminal visible).
+  Selftest in screen mode: 30 fps, 0 dropped, audio at -20 dB peak. To confirm on Twitch.
+  If a take (V) chops the return the same way, the take's input is next.
 - Open questions: a take (V) and the stream together open two PortAudio inputs on the XR18;
   not tried. Auto-reconnect when Twitch drops the connection (today: stop + toast).
   Writing to the chat from the game (needs an OAuth token).

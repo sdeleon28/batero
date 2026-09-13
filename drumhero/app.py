@@ -758,8 +758,9 @@ class App:
             self.toasts.add("stream stopped", DIM)
         elif self.streamer.start(self.size):
             self.chat = Chat(self.streamer.settings["twitch_channel"], log=print)
-            w, h = self.streamer.out_size
-            self.toasts.add(f"live on twitch.tv/{self.streamer.settings['twitch_channel']}: {w}x{h}, {self.streamer.settings['stream_kbps']} kbps"
+            what = (f"screen {self.streamer.settings['stream_display']}" if self.streamer.source == "screen"
+                    else "%dx%d window" % self.streamer.out_size)
+            self.toasts.add(f"live on twitch.tv/{self.streamer.settings['twitch_channel']}: {what}, {self.streamer.settings['stream_kbps']} kbps"
                             + (" (bandwidth test, not public)" if self.streamer.settings.get("stream_bandwidth_test") else ""), (145, 70, 255))
         else:
             self.toasts.add(f"stream could not start: {self.streamer.error}", JUDGE_COLORS["MISS"])
@@ -1144,7 +1145,10 @@ class ListScreen(Screen):
                     ("Recording (V)", f"audio {self.app.recorder.settings['capture_audio_device']} ch {self.app.recorder.settings['capture_audio_channels']}"
                                       f" · camera '{self.app.recorder.settings['capture_camera']}' · ~/Movies/drumhero"),
                     ("Stream (T)", f"twitch.tv/{self.app.streamer.settings['twitch_channel']} · {self.app.streamer.settings['stream_height']}p "
-                                   f"{self.app.streamer.settings['stream_kbps']} kbps · the window as you see it, audio as the takes · key in ~/.config/drumhero/twitch_key"),
+                                   f"{self.app.streamer.settings['stream_kbps']} kbps · "
+                                   + (f"display {self.app.streamer.settings['stream_display']} and the interface, both by ffmpeg"
+                                      if self.app.streamer.settings.get('stream_source', 'screen') != 'window' else "the window as you see it, audio as the takes")
+                                   + " · key in ~/.config/drumhero/twitch_key"),
                     ("Camera & take check", "the iPhone next to the game picture, both editions' layout, the take's audio meter, a test take"),
                     ("Takes: editions, Claude edits", "every take renders a computer (16:9) and a social (9:16) edition; render one again, or have Claude cut it"),
                     ("Progress (S)", "streak, minutes, trends, records"),
