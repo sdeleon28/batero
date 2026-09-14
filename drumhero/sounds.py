@@ -455,13 +455,13 @@ SHUFFLE_STYLE = dict(
 # (2026-09-13: "Six stroke roll" was confusing). So only the beat: bass on the quarters, a pad,
 # no chords, no lead.
 SEXTUPLET_STYLE = dict(SHUFFLE_STYLE, plan=[("quarters", None, None, False, True)] * 6)
-# Plena uruguaya (Chart.backing == "plena", 2026-09-13: the generic arrangement did not sound
-# like one and did not help hear the groove): the cumbia tumbao on a round bass, the keyboard
+# Cumbia villera (Chart.backing == "cumbia", 2026-09-13, called plena until 2026-09-14: the generic
+# arrangement did not sound like one and did not help hear the groove): the cumbia tumbao on a round bass, the keyboard
 # chords on every & ("a contratiempo", a reed timbre), a güiro on every beat (a long scrape on
 # the beat, two short ticks on the e and the &... "chi-ki-chi-ki"), a flute-like tune now and
 # then, no pad: dry and rhythmic. The güiro is not a drum voice, so it never doubles what the
 # drummer plays on the bodies.
-PLENA_STYLE = dict(
+CUMBIA_STYLE = dict(
     progressions=("minor", "pop"), pad=None, bass="sine", chord="reed", lead="triangle", lead_kind="phrase",
     scale="natural", stab_rhythm=[2, 6, 10, 14], guiro=True, plan=[
         ("cumbia", "stab", None, False, False), ("cumbia", "stab", None, True, False),
@@ -476,8 +476,8 @@ SCALES = {"natural": {"M": [0, 2, 4, 5, 7, 9, 11], "m": [0, 2, 3, 5, 7, 8, 10]},
 
 
 def style_for(prog_index, feel="straight"):
-    if feel == "plena":
-        return "plena"
+    if feel == "cumbia":
+        return "cumbia"
     return "shuffle" if feel in ("triplet", "sextuplet") else STYLE_ORDER[prog_index % len(STYLE_ORDER)]
 
 
@@ -527,11 +527,11 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, 
     """Mono float32 of (intro_bars + bars) bars at bpm: intro (thin) then the arrangement,
     bar 0 of the level at intro_bars * bar seconds. Deterministic per prog_index.
     feel: "straight" (sixteenth grid, style by prog_index) or "triplet" (twelfth grid,
-    the shuffle style) for levels whose subdivision is 3; "plena" for the plena level."""
+    the shuffle style) for levels whose subdivision is 3; "cumbia" for the cumbia levels."""
     rng = np.random.default_rng(prog_index if seed is None else seed)
     triplet = feel in ("triplet", "sextuplet")
     style_name = style_for(prog_index, feel)
-    st = PLENA_STYLE if feel == "plena" else SEXTUPLET_STYLE if feel == "sextuplet" else SHUFFLE_STYLE if triplet else STYLES[style_name]
+    st = CUMBIA_STYLE if feel == "cumbia" else SEXTUPLET_STYLE if feel == "sextuplet" else SHUFFLE_STYLE if triplet else STYLES[style_name]
     bass_patterns = BASS_PATTERNS_TRIPLET if triplet else BASS_PATTERNS
     stab_rhythms = STAB_RHYTHMS_TRIPLET if triplet else STAB_RHYTHMS
     family = st["progressions"][int(rng.integers(0, len(st["progressions"])))]
@@ -629,7 +629,7 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, 
             sig = sum(pluck_tone(_midi_hz(m + 12), ta, kind) for m in chord)
             add(t0 + e * step, sig, (0.11 if kind == "reed" else 0.16) / max(1, len(chord) / 3))
 
-    # --- güiro (plena / cumbia) --------------------------------------------------------
+    # --- güiro (cumbia) --------------------------------------------------------------
     def guiro(t0, bar_index):
         """Per beat: a long scrape on the beat (noise through a rising resonance, 110 ms) and
         two short ticks on the e and the & ("chi-ki-chi-ki"); the & tick a touch louder."""

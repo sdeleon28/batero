@@ -174,7 +174,7 @@ class Chart:
     rate: float = 1.0           # tempo multiplier this chart was scaled by (see at_rate)
     lead: str = None            # "R" / "L": which hand leads; None when the level has no hand lead
                                 # (one instrument per hand, feet, hi-hat lessons). Set by the builders.
-    backing: str = None         # a backing style of its own ("plena": sounds.PLENA_STYLE); None = by subdivision
+    backing: str = None         # a backing style of its own ("cumbia": sounds.CUMBIA_STYLE); None = by subdivision
 
     @property
     def key(self):
@@ -827,21 +827,37 @@ BEATS = [
         {"cl": "x...............", "hh": "..x.x.x.x.x.x.x.", "kk": "x.xx......x.x...", "sn": _S24},
         {"kk": "x...x...x...x.x.", "sn": "xxxx........xx..", "t1": "....xxxx........", "ft": "........xxxx....", "cl": "..............x.", "cr": "..............x."},
     ], bars=16),
-    # Plena uruguaya on the three drum bodies (asked 2026-09-12): the cumbia sway, floor tom low
-    # on 1 and 3, rack tom on every &, snare on 2 and 4 (the redoblante), then the plena pickups:
-    # the tom's double into the beat, the floor's "4 a" into the 1. Hands free: no kick, no hats.
-    _groove("31 · Plena", "Plena uruguaya on the drum bodies: floor on 1 and 3, rack tom on every &, snare on 2 and 4; pickups on the tom and the floor.", 96, [
+    # Cumbia villera on the three drum bodies (asked 2026-09-12, named plena until 2026-09-14): the
+    # cumbia sway, floor tom low on 1 and 3, rack tom on every &, snare on 2 and 4 (the redoblante),
+    # then the pickups: the tom's double into the beat, the floor's "4 a" into the 1. Hands free: no
+    # kick, no hats.
+    _groove("31 · Cumbia", "Cumbia villera on the drum bodies: floor on 1 and 3, rack tom on every &, snare on 2 and 4; pickups on the tom and the floor.", 96, [
         {"ft": "x.......x.......", "t1": "..x...x...x...x.", "sn": _S24},
         {"ft": "x.......x.......", "t1": "..x...x...x...x.", "sn": _S24},
         {"ft": "x.......x.......", "t1": "..x...x...x...xx", "sn": _S24},
         {"ft": "x.......x.....x.", "t1": "..x...x...x....x", "sn": "....X.......X..."},
-    ], bars=16, backing="plena"),
+    ], bars=16, backing="cumbia"),
+    # The cumbia with the redoblante's repiques (asked 2026-09-14): the same sway and the two
+    # pickups of level 31, plus the snare's picado figures, staccato sixteenths: the drag (a
+    # ghost on the "a" into the backbeat), the run out of the 4 into the 1 (4 e & a), the run
+    # into the 4 (& a of 3), and a whole two-beat repique closing the phrase, accented on the
+    # beats. The rack tom yields its & where a repique needs the snare alone.
+    _groove("32 · Cumbia: repiques", "The cumbia of level 31 with the redoblante's repiques: ghost drags into the backbeat, staccato sixteenth runs out of the 4 and into it, and a two-beat repique closing the phrase.", 96, [
+        {"ft": "x.......x.......", "t1": "..x...x...x...x.", "sn": _S24},
+        {"ft": "x.......x.......", "t1": "..x...x...x...x.", "sn": "...oX......oX..."},
+        {"ft": "x.......x.......", "t1": "..x...x...x...xx", "sn": "...oX......oX..."},
+        {"ft": "x.......x.......", "t1": "..x...x...x.....", "sn": "....X.......Xxxx"},
+        {"ft": "x.......x.......", "t1": "..x...x...x...x.", "sn": "...oX......oX..."},
+        {"ft": "x.......x.......", "t1": "..x...x.......x.", "sn": "....X.....xxX..."},
+        {"ft": "x.......x.....x.", "t1": "..x...x...x....x", "sn": "...oX......oX..."},
+        {"ft": "x.......x.......", "t1": "..x...x.........", "sn": "....X...XxxxXxxx"},
+    ], bars=16, backing="cumbia"),
     # Reggae one drop with the classic fills (asked 2026-09-13): kick and cross-stick together on
     # the 3, hats on the eighths; every fourth bar a fill, the crash on the 1 after it.
     # Fills: the four sixteenths on beat 4 into the drop; the walk down snare, rack, floor over
     # beats 3 and 4 with the kick pickup on the "a" of 4; snare doubles then rack and floor on
     # beat 4; the sixteenth roll over beats 3 and 4 accented on every third stroke.
-    _groove("32 · Reggae: one drop, fills", "One drop (kick and cross-stick on the 3, hats on the eighths); every fourth bar a classic fill: the four on beat 4, the walk down the toms, snare doubles to the floor, the roll over 3 and 4.", 76, [
+    _groove("33 · Reggae: one drop, fills", "One drop (kick and cross-stick on the 3, hats on the eighths); every fourth bar a classic fill: the four on beat 4, the walk down the toms, snare doubles to the floor, the roll over 3 and 4.", 76, [
         {"hh": _H8, "kk": "........x.......", "sn": "........x......."},
         {"hh": _H8, "kk": "........x.......", "sn": "........x......."},
         {"hh": _H8, "kk": "........x.......", "sn": "........x......."},

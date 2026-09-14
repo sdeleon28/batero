@@ -727,7 +727,7 @@ class Telemetry(Scene):
         "contar el 1 despues de un fill de 7",
         "no acelerar en el estribillo",
         "hi-hat abierto justo antes del bombo",
-        "plena uruguaya en los cuerpos",
+        "cumbia villera en los cuerpos",
         "escuchar al bajo",
         "tocar mas bajo cuando entra la voz",
         "el silencio como golpe",

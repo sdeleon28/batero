@@ -348,7 +348,7 @@ class App:
         out = {}
         if prog_index is not None:
             # triplet and sextuplet levels get the shuffle arrangement: the music must confirm the subdivision;
-            # a level with a style of its own (the plena) names it
+            # a level with a style of its own (the cumbias) names it
             sub = chart.subdivision_at(0)
             feel = chart.backing or ("sextuplet" if sub % 6 == 0 else "triplet" if sub % 3 == 0 else "straight")
             key = ("backing", chart.name, round(chart.bpm, 3), prog_index, feel)

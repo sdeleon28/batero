@@ -36,6 +36,8 @@ PROGRESS_PATH = os.path.expanduser("~/.config/drumhero/progress.json")
 PROGRESS_MIGRATIONS = {
     "Paradiddle left lead": "Paradiddle (L)",                          # now the paradiddle's left-hand lead
     "Six stroke roll left lead": "Six stroke roll in triplets (L)",
+    "31 · Plena": "31 · Cumbia",                                        # it was a cumbia villera all along (2026-09-14)
+    "32 · Reggae: one drop, fills": "33 · Reggae: one drop, fills",     # 32 became the cumbia repiques
 }
 
 
