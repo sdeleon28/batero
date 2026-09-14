@@ -378,6 +378,7 @@ BASS_PATTERNS = {                          # (sixteenth index, degree, gain); de
     "chug": [(0, 0, 1.0), (2, 0, 0.8), (4, 0, 0.9), (6, 0, 0.8), (8, 0, 1.0), (10, 0, 0.8), (11, 0, 0.7), (14, 0, 0.8)],
     "funk": [(0, 0, 1.0), (3, 12, 0.7), (6, 7, 0.9), (8, 0, 0.9), (11, 12, 0.7), (13, 10, 0.6), (14, 0, 0.9)],
     "pump": [(e, 0, 1.0 if e % 4 == 0 else 0.7) for e in range(16)],
+    "cumbia": [(0, 0, 1.0), (6, 7, 0.85), (8, 0, 1.0), (14, 7, 0.85)],   # the tumbao: root on 1 and 3, the fifth on the & of 2 and 4
 }
 # The same for levels in triplets ("triplet" feel): indices are twelfths of a bar, beat q
 # at 3q, its third triplet (the shuffle "a") at 3q + 2. Nothing here falls on a straight
@@ -454,6 +455,17 @@ SHUFFLE_STYLE = dict(
 # (2026-09-13: "Six stroke roll" was confusing). So only the beat: bass on the quarters, a pad,
 # no chords, no lead.
 SEXTUPLET_STYLE = dict(SHUFFLE_STYLE, plan=[("quarters", None, None, False, True)] * 6)
+# Plena uruguaya (Chart.backing == "plena", 2026-09-13: the generic arrangement did not sound
+# like one and did not help hear the groove): the cumbia tumbao on a round bass, the keyboard
+# chords on every & ("a contratiempo", a reed timbre), a güiro on every beat (a long scrape on
+# the beat, two short ticks on the e and the &... "chi-ki-chi-ki"), a flute-like tune now and
+# then, no pad: dry and rhythmic. The güiro is not a drum voice, so it never doubles what the
+# drummer plays on the bodies.
+PLENA_STYLE = dict(
+    progressions=("minor", "pop"), pad=None, bass="sine", chord="reed", lead="triangle", lead_kind="phrase",
+    scale="natural", stab_rhythm=[2, 6, 10, 14], guiro=True, plan=[
+        ("cumbia", "stab", None, False, False), ("cumbia", "stab", None, True, False),
+        ("cumbia", "stab", None, False, False), ("cumbia", "stab", None, True, False)])
 STYLE_ORDER = ["synth", "metal", "chiptune", "punk", "organ", "strings", "funk"]
 STAB_RHYTHMS = [[0, 6, 8, 14], [2, 6, 10, 14], [0, 3, 6, 10, 12], [4, 12], [0, 7, 10]]   # sixteenth indices
 STAB_RHYTHMS_TRIPLET = [[3, 9], [0, 2, 6, 8], [3, 5, 9, 11], [2, 5, 8, 11]]              # twelfth indices
@@ -464,6 +476,8 @@ SCALES = {"natural": {"M": [0, 2, 4, 5, 7, 9, 11], "m": [0, 2, 3, 5, 7, 8, 10]},
 
 
 def style_for(prog_index, feel="straight"):
+    if feel == "plena":
+        return "plena"
     return "shuffle" if feel in ("triplet", "sextuplet") else STYLE_ORDER[prog_index % len(STYLE_ORDER)]
 
 
@@ -513,17 +527,17 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, 
     """Mono float32 of (intro_bars + bars) bars at bpm: intro (thin) then the arrangement,
     bar 0 of the level at intro_bars * bar seconds. Deterministic per prog_index.
     feel: "straight" (sixteenth grid, style by prog_index) or "triplet" (twelfth grid,
-    the shuffle style) for levels whose subdivision is 3."""
+    the shuffle style) for levels whose subdivision is 3; "plena" for the plena level."""
     rng = np.random.default_rng(prog_index if seed is None else seed)
     triplet = feel in ("triplet", "sextuplet")
     style_name = style_for(prog_index, feel)
-    st = SEXTUPLET_STYLE if feel == "sextuplet" else SHUFFLE_STYLE if triplet else STYLES[style_name]
+    st = PLENA_STYLE if feel == "plena" else SEXTUPLET_STYLE if feel == "sextuplet" else SHUFFLE_STYLE if triplet else STYLES[style_name]
     bass_patterns = BASS_PATTERNS_TRIPLET if triplet else BASS_PATTERNS
     stab_rhythms = STAB_RHYTHMS_TRIPLET if triplet else STAB_RHYTHMS
     family = st["progressions"][int(rng.integers(0, len(st["progressions"])))]
     prog = PROGRESSIONS[family][int(rng.integers(0, len(PROGRESSIONS[family])))]
     transpose = int(rng.integers(-4, 4))
-    stab_rhythm = stab_rhythms[int(rng.integers(0, len(stab_rhythms)))]
+    stab_rhythm = st.get("stab_rhythm") or stab_rhythms[int(rng.integers(0, len(stab_rhythms)))]
     riff = None                                             # built on first use, then transposed
     beat = 60 / bpm
     bar = 4 * beat
@@ -595,6 +609,8 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, 
             return (np.sin(2 * np.pi * f * ta) + 0.5 * np.sin(2 * np.pi * f * 2.76 * ta) * np.exp(-ta * 8)) * env_ad(ta, 0.002, 4)
         if kind == "clav":
             return _lowpass(_saw(ta * f) * _square(ta * f * 0.501), 3) * env_ad(ta, 0.001, 22)
+        if kind == "reed":                                # accordion / cumbia keyboard: two detuned saws, a little square, held
+            return _lowpass(_saw(ta * f * 1.004) + _saw(ta * f * 0.996) + 0.35 * _square(ta * f * 0.5), 7) * env_ad(ta, 0.006, 6, 0.2)
         return _saw(ta * f) * env_ad(ta, 0.002, 12)
 
     def arp(t0, chord, pattern, kind):
@@ -611,7 +627,22 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, 
         for e in rhythm:
             ta = np.arange(int(0.22 * sr)) / sr
             sig = sum(pluck_tone(_midi_hz(m + 12), ta, kind) for m in chord)
-            add(t0 + e * step, sig, 0.16 / max(1, len(chord) / 3))
+            add(t0 + e * step, sig, (0.11 if kind == "reed" else 0.16) / max(1, len(chord) / 3))
+
+    # --- güiro (plena / cumbia) --------------------------------------------------------
+    def guiro(t0, bar_index):
+        """Per beat: a long scrape on the beat (noise through a rising resonance, 110 ms) and
+        two short ticks on the e and the & ("chi-ki-chi-ki"); the & tick a touch louder."""
+        for q in range(4):
+            tb = np.arange(int(0.11 * sr)) / sr
+            scrape = _noise(len(tb), 300 + bar_index * 4 + q)
+            scrape = np.diff(scrape, prepend=0.0) * (1 + 3 * tb / 0.11)      # brighter as the stick travels
+            scrape *= np.minimum(1.0, tb / 0.004) * np.exp(-tb * 18) * np.minimum(1.0, np.maximum(0.0, (0.11 - tb) / 0.01))
+            add(t0 + q * beat, scrape, 0.07)
+            for k, gain in ((2, 0.55), (3, 0.7)):
+                tt = np.arange(int(0.03 * sr)) / sr
+                tick = np.diff(_noise(len(tt), 700 + bar_index * 8 + q * 2 + k), prepend=0.0) * np.exp(-tt * 140)
+                add(t0 + q * beat + k * step, tick, 0.07 * gain)
 
     def power(t0, root_note, pattern_or_rhythm, strum):
         """Distorted power chord: root, fifth, octave through tanh; on the bass rhythm
@@ -706,6 +737,8 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, 
             power(t0, bass_root + 12, None, strum=True)
         if lead_on and st["lead"]:
             lead(t0, root, quality, chord, b % SECTION_BARS, st["lead_kind"])
+        if st.get("guiro") and b >= 0:
+            guiro(t0, i)
 
     out = out[:n]
     out = out / (np.max(np.abs(out)) or 1.0) * 0.8

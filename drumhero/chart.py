@@ -174,6 +174,7 @@ class Chart:
     rate: float = 1.0           # tempo multiplier this chart was scaled by (see at_rate)
     lead: str = None            # "R" / "L": which hand leads; None when the level has no hand lead
                                 # (one instrument per hand, feet, hi-hat lessons). Set by the builders.
+    backing: str = None         # a backing style of its own ("plena": sounds.PLENA_STYLE); None = by subdivision
 
     @property
     def key(self):
@@ -585,8 +586,9 @@ GROOVE_VEL = {"X": 120, "x": 96, "o": 62}      # only X draws as an accent
 HH_LETTERS = {"t": "tight body", "T": "tight edge", "m": "mid body", "M": "mid edge", "a": "open body", "A": "open edge"}
 
 
-def _groove(name, desc, bpm, phrase, bars=8):
-    """A groove level from `phrase` (list of bar dicts, see GROOVE_KEYS) repeated to `bars`."""
+def _groove(name, desc, bpm, phrase, bars=8, backing=None):
+    """A groove level from `phrase` (list of bar dicts, see GROOVE_KEYS) repeated to `bars`.
+    backing: a style of its own for the music (sounds.make_arrangement's feel), else generic."""
     beat = 60 / bpm
     notes = []
     for bar in range(bars):
@@ -605,6 +607,7 @@ def _groove(name, desc, bpm, phrase, bars=8):
     notes.sort(key=lambda n: (n.t, INSTRUMENTS.index(n.key)))
     ch = Chart(name, notes, bpm, desc)
     ch.expression = any(n.art for n in notes)
+    ch.backing = backing
     return ch
 
 
@@ -832,7 +835,7 @@ BEATS = [
         {"ft": "x.......x.......", "t1": "..x...x...x...x.", "sn": _S24},
         {"ft": "x.......x.......", "t1": "..x...x...x...xx", "sn": _S24},
         {"ft": "x.......x.....x.", "t1": "..x...x...x....x", "sn": "....X.......X..."},
-    ], bars=16),
+    ], bars=16, backing="plena"),
     # Reggae one drop with the classic fills (asked 2026-09-13): kick and cross-stick together on
     # the 3, hats on the eighths; every fourth bar a fill, the crash on the 1 after it.
     # Fills: the four sixteenths on beat 4 into the drop; the walk down snare, rack, floor over
