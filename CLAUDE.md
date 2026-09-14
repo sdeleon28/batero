@@ -155,6 +155,11 @@ h, f. `--title`, `--note`, `--scene`, `--seconds`, `--fps`, `--no-card`.
   since play started, a Sound on a channel has no cursor). `Scene.low` / `.high`
   are set every frame: the card breathes with the kick, Gray-Scott drops a cell on
   it, the forward pass rides it, the arcs and the particles brighten with the hats.
+- Leaving is an outro, not a stop: q (Esc, ctrl-c) fades the picture to black
+  while `Sound.fadeout` takes the music down, 1.4 s, 0.45 s for ctrl-c, then one
+  black frame. The fade factor is squared in linear light, which the tone map's
+  gamma turns into an even ramp for the eye; it multiplies the character colours
+  too, or the HUD would stay lit over a black screen.
 - `--snap DIR` renders a frame of every scene to PNG (plus the character layer
   as .txt) with SDL_VIDEODRIVER=dummy: that is how the look was checked without
   a terminal, and how to check it after touching a scene.

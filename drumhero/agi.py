@@ -1106,6 +1106,10 @@ class Music:
             return "sin musica"
         return "%s %.0f" % (self.track["key"], self.track["bpm"])
 
+    def fade(self, ms):
+        if self.snd is not None and self.t0 is not None:
+            self.snd.fadeout(int(ms))
+
     def stop(self):
         if self.snd is not None:
             self.snd.stop()
@@ -1114,6 +1118,8 @@ class Music:
 # ---------------------------------------------------------------- the loop
 SCENES = [Latent, Attention, Diffusion, Network, Telemetry, TokenStream]
 TRANSITION = 0.9
+FADE_OUT = 1.4        # q closes the curtain: picture and music go down together
+FADE_INT = 0.45       # ctrl-c is in more of a hurry
 
 
 class App:
@@ -1191,7 +1197,7 @@ class App:
                     self.next_scene(jump=i)
         return True
 
-    def frame(self, dt):
+    def frame(self, dt, fade=1.0):
         if self.resized:
             self.layout()
         if not self.paused:
@@ -1219,7 +1225,35 @@ class App:
                 self.music, self.lvl)
         if self.show_card:
             self.card.draw(cv, self.t, time.time() - self.started, *self.lvl)
+        if fade < 1.0:
+            cv.px *= fade
+            cv.chars = {k: (ch, (c[0] * fade, c[1] * fade, c[2] * fade))
+                        for k, (ch, c) in cv.chars.items()}
         return self.screen.frame(cv)
+
+    def outro(self, out, seconds):
+        """Close the curtain: the picture dims to black while the music fades,
+        then one black frame so nothing is left burning on the alt screen."""
+        self.music.fade(seconds * 1000)
+        t0 = last = time.time()
+        try:
+            while True:
+                now = time.time()
+                u = (now - t0) / seconds
+                if u >= 1.0:
+                    break
+                dt = min(0.1, now - last)
+                last = now
+                # squared in linear light is a straight line once the tone map
+                # has applied its gamma: the eye sees the picture go down evenly
+                out.write(self.frame(dt, fade=(1.0 - u) ** 2.2))
+                out.flush()
+                time.sleep(max(0.0, 1 / 30.0 - (time.time() - now)))
+        except KeyboardInterrupt:
+            pass                  # a second ctrl-c: skip the rest of the fade
+        self.cv.clear((0.0, 0.0, 0.0))
+        out.write(self.screen.frame(self.cv))
+        out.flush()
 
     def run(self):
         target = 1.0 / max(5.0, float(self.args.fps))
@@ -1250,8 +1284,9 @@ class App:
                     rest = target - (time.time() - now)
                     if rest > 0:
                         time.sleep(rest)
+                self.outro(out, FADE_OUT)
             except KeyboardInterrupt:
-                pass              # ctrl-c closes a screensaver as well as q does
+                self.outro(out, FADE_INT)   # ctrl-c closes it as well as q does
         self.music.stop()
 
 

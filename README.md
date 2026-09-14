@@ -556,6 +556,10 @@ it, the arpeggio lights the arcs and the particles. `python -m drumhero.keygen
 through the link and runs `.venv/bin/python -m drumhero.agi`; if the repo moves,
 `ln -sfn <repo>/cortina ~/bin/cortina` again.
 
+`q` (or `Esc`, or `Ctrl-C`) closes the curtain instead of cutting it: the whole
+picture fades to black over a second and a bit while the music fades with it, so
+on stream it reads as an ending and not as a crash.
+
 It is not ASCII art: every cell is the half block `U+2580` with a different
 colour above and below, so the picture is `cols x 2*rows` pixels in 24-bit
 colour, and a second layer puts real characters where text has to stay crisp.
@@ -564,7 +568,7 @@ core.
 
 | key | |
 |---|---|
-| `q`, `Esc` | quit |
+| `q`, `Esc` | quit: the picture dims to black while the music fades out |
 | space | next scene |
 | `1`..`6` | jump to a scene |
 | `p` | pause |
