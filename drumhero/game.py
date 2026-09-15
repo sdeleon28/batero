@@ -90,6 +90,9 @@ def lead_in_for(bpm: float) -> float:
 
 
 class Game:
+    metronome_mode = "full"     # set by PlayScreen from the app (full / beats / off)
+    metro_volume = 1.0          # the metronome's level relative to the mix (= and -)
+
     def __init__(self, chart, lanes, by_note, offset_ms=0.0, speed=1.0, sounds=None, guide=True, log=None,
                  night=None, dyn_scale=1.0):
         self.log = log                      # RunLog or None; append-only, never blocks

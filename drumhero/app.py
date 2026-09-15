@@ -44,6 +44,8 @@ NAV_MIN_VELOCITY = 25     # softer hits never navigate (sticks resting on the sn
 NAV_SOUND_MIN_VELOCITY = 15  # ...but every hit above this is heard, undebounced, so rolls sound whole
 RESULTS_GRACE_S = 1.0     # after a level ends, ignore drum hits this long before they navigate
 VOLUME_STEP = 0.05        # { and } move the game's output level by this much
+METRO_VOLUME_STEP = 0.1   # = and - move the metronome's own level by this much
+METRO_VOLUME_MAX = 1.6    # over that the track's gain would clip at the mixer's ceiling
 DEBUG_HITS = 200          # hits the ` pane remembers
 STALL_S = 2.0             # a frame this long is logged with the main thread's stack (App._watchdog)
 CAM_RETRY_S = 5.0         # the ! layer looks for a missing camera this often
@@ -235,6 +237,28 @@ class App:
         self.set_volume(round(SND.master() + d * VOLUME_STEP, 2))
 
     @property
+    def metro_volume(self):
+        return self.settings.get("metronome_volume", 1.0)
+
+    def set_metro_volume(self, v):
+        """The metronome's level relative to the rest of the mix (= and -), 0..METRO_VOLUME_MAX
+        of METRONOME_GAIN: it gets lost under the backing or the song otherwise. Applies to the
+        level being played (the track keeps its gain, which is cached with it); saved."""
+        v = round(max(0.0, min(METRO_VOLUME_MAX, float(v))), 2)
+        self.settings["metronome_volume"] = v
+        save_settings(self.settings)
+        if isinstance(self.screen_obj, PlayScreen):
+            self.screen_obj.game.metro_volume = v
+            track = self.screen_obj.game.tracks.get("metronome")
+            if track:
+                track[0].gain = METRONOME_GAIN * v
+                track[0].apply_gain()
+        self.toasts.add(f"metronome {v:.0%}" + (" (off)" if v == 0 else ""), ACCENT, key="metro_volume")
+
+    def nudge_metro_volume(self, d):
+        self.set_metro_volume(self.metro_volume + d * METRO_VOLUME_STEP)
+
+    @property
     def dyn_scale(self):
         return self.settings.get("dyn_scale", 1.0)
 
@@ -359,6 +383,7 @@ class App:
             key = ("metro", chart.name, round(chart.bpm, 3), self.metronome_mode)
             if key not in self.track_cache:
                 self.track_cache[key] = Track(render_metronome(chart, lead_in, total, self.metronome_mode), -lead_in, METRONOME_GAIN)
+            self.track_cache[key].gain = METRONOME_GAIN * self.metro_volume
             out["metronome"] = self.track_cache[key]
         if chart.audio:
             key = ("music", chart.audio, round(chart.rate, 3))
@@ -950,6 +975,10 @@ class App:
                         self.debug_on = not self.debug_on
                     elif ev.unicode == "!" or (ev.key == pygame.K_1 and ev.mod & pygame.KMOD_SHIFT):
                         self.set_layer(not self.layer_on)
+                    elif ev.unicode in ("-", "_") or ev.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
+                        self.nudge_metro_volume(-1)        # the metronome's own level, so it is not lost under the music
+                    elif ev.unicode in ("=", "+") or ev.key in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
+                        self.nudge_metro_volume(+1)
                     elif ev.unicode == ";" or ev.key == pygame.K_SEMICOLON:
                         self.nudge_dyn_scale(-1)           # softer accents count
                     elif ev.unicode == "'" or ev.key == pygame.K_QUOTE:
@@ -1170,7 +1199,8 @@ class ListScreen(Screen):
                     (f"Drum sounds: {'on' if self.app.sounds.drums else 'off'}", "off: the kit is silent here, the module or Bitwig makes the sound"),
                     (f"Guide sounds: {'on' if self.app.guide else 'off'}", "hear the chart as it crosses the line"),
                     (f"Backing loop: {'on' if self.app.backing_on else 'off'}", "bass, chords and arpeggio under the built-in levels"),
-                    (f"Metronome: {self.app.metronome_mode}", "congas: full follows the subdivision, beats only marks the beats"),
+                    (f"Metronome: {self.app.metronome_mode} · {self.app.metro_volume:.0%}", "congas: full follows the subdivision, beats only marks the beats; "
+                                                                                            "= and - raise / lower its level anywhere, saved"),
                     (f"Menu music: {'on' if self.app.menu_music_on else 'off'}", "ambient texture outside the game"),
                     (f"Audio output: {self.app.sounds.device or 'system default'}", "select cycles through the outputs, saved"),
                     (f"Volume: {self.app.volume:.0%}", "{ and } lower / raise the game's own level anywhere, saved; select raises, wraps to 5 %"),
@@ -2189,6 +2219,7 @@ class PlayScreen(Screen):
                          sounds=app.sounds, guide=app.guide and not self.chart.audio,   # the record has its own drums
                          log=app.runlog, dyn_scale=app.dyn_scale)
         self.game.metronome_mode = app.metronome_mode
+        self.game.metro_volume = app.metro_volume
         app.runlog.start(self.chart, self.lanes, app.kit, app.settings, {
             "offset_ms": app.offset_ms, "guide": self.game.guide, "metronome": app.metronome_mode,
             "backing": app.backing_on, "drum_sounds": app.sounds.drums, "dyn_thresholds": self.game.dyn_thresholds(),

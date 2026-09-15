@@ -460,6 +460,7 @@ timing errors; the mean is your latency, the deviation is you.
 | D             | drum sounds on/off (saved)         |
 | V             | start / stop a take (screen + mix + camera, both editions rendered) |
 | { / }         | game volume -/+ 5 % (saved), any screen; the mixer fader stays the overall level |
+| - / =         | metronome volume -/+ 10 % (saved), any screen: 0..160 % of its level in the mix, for when it gets lost under the music |
 | ; / '         | accent sensitivity -/+ 5 % (saved), any screen: scales the accent and tap thresholds, 50..130 % |
 | `             | debug pane on / off, any screen: the last 48 hits' velocities as bars against the accent / tap thresholds in force (green accent, blue tap, grey between, red outline a filtered ghost), the last hit big, the last four as text with note, instrument and outcome, and the pedal CC |
 | S / C (hub)   | progress / coach                   |
@@ -494,6 +495,13 @@ The whole metronome is pre-rendered for the level, sample-accurate, and started
 with the count-in; after a pause it restarts from the exact position. Modes:
 `full` (subdivisions), `beats` (beats only), `off`. Press M during play or
 change it in Setup; `--no-metronome` starts off.
+
+**Its level.** `-` and `=` lower and raise the metronome alone by 10 %, anywhere,
+0 to 160 % of its gain in the mix (over that it would clip against the mixer's
+ceiling); saved as `metronome_volume` and applied to the level being played. It
+is there because the congas get lost under a backing or a song. The HUD shows
+the percentage next to the mode when it is not 100 %, and Setup's Metronome row
+shows it too.
 
 ## Menu music
 

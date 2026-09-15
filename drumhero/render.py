@@ -321,7 +321,7 @@ class Renderer:
                  f"{g.chart.bpm:.0f} bpm" + (f" (of {g.chart.bpm / g.chart.rate:.0f})" if g.chart.rate != 1.0 else ""),
                  f"guide {'on' if g.guide else 'off'}" + ("" if g.sounds is None or g.sounds.drums else "  ·  drums off"),
                  f"backing {'on' if g.track_enabled('backing') else 'off'}" if 'backing' in g.tracks else "no backing",
-                 f"metronome {g.metronome_mode}"]
+                 f"metronome {g.metronome_mode}" + ("" if g.metronome_mode == "off" or g.metro_volume == 1.0 else f" {g.metro_volume:.0%}")]
         if g.chart.dynamics:
             a, tp = dyn_band(None, g.night, g.dyn_scale)
             right.append(f"accent >= {a}  tap <= {tp}  ({g.dyn_scale:.0%}{', night' if g.night else ''})")
