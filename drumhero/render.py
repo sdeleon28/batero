@@ -360,7 +360,7 @@ class Renderer:
         if any(l.key == "hihat" for l in g.lanes):     # under the right column, whatever it lists
             draw_hihat_state(surf, f, self.ghosts, self.w - 110 * S, (len(right) * 20 + 80) * S + self.top_inset, S)
 
-        self.transport_bar(surf, now, loop)
+        self.transport_bar(surf, now, loop, count_in_end)
         self.loop_badge(surf, loop)
         if paused:
             f.center(surf, "PAUSED", f.huge, TEXT, self.h * 0.45)
@@ -370,8 +370,13 @@ class Renderer:
             f.center(surf, str((beats_left - 1) % 4 + 1), f.huge, TEXT, self.h * 0.45)
             f.center(surf, g.chart.desc, f.mid, DIM, self.h * 0.45 + 80 * S)
         elif count_in_end is not None and now < count_in_end:
+            # the run-up to a jump: the phrase it lands in, named, over a smaller count (the
+            # huge digits read as "the number I pressed" and they are not)
             beats_left = math.ceil((count_in_end - now) / g.beat)
-            f.center(surf, str((beats_left - 1) % 4 + 1), f.huge, TEXT, self.h * 0.45)
+            i = g.chart.phrase_at(count_in_end)
+            if i is not None:
+                f.center(surf, f"phrase {(i + 1) % 10}", f.large, ACCENT, self.h * 0.45 - 44 * S)
+            f.center(surf, f"in {(beats_left - 1) % 4 + 1}", f.big, TEXT, self.h * 0.45 + 16 * S)
         if finished:
             self.results(surf)
 
@@ -406,8 +411,9 @@ class Renderer:
                         marks.append((t + shift, (label + " again") if t == bounds[a] else label, col, wd))
         x0, x1 = int(self.lane_x[0]), int(self.lane_x[-1] + self.lane_w)
         self.marker_labels = []
+        landing = self.game.count_in_end if self.game.count_in_end is not None and now < self.game.count_in_end else None
         for t, label, col, wd in marks:
-            if t > top or t < now - 0.5:
+            if t > top or t < now - 0.5 or (landing is not None and t < landing and wd == 1):
                 continue
             y = self.y_for(t, now)
             if y < -4 or y > self.line_y + 2:
@@ -452,18 +458,22 @@ class Renderer:
                 f.center(surf, f"loop {a}-{b} off", f.mid, DIM, y)
                 f.center(surf, "\\ starts it again", f.small, DIM, y + 24 * S)
 
-    def transport_bar(self, surf, now, loop):
+    def transport_bar(self, surf, now, loop, count_in_end=None):
         """The timeline under the lanes: the whole level as one bar in ten cells, one per
         number key, each as wide as the tenth it stands for; the playhead sweeps the whole
         bar, the cell being played is lit, the marked loop is a framed band, the digits
-        typed after l light their cells, and a line says what 1..0 do."""
+        typed after l light their cells, and a line says what 1..0 do. During the run-up to
+        a jump the ruler already shows where it lands (the key's cell lit, the playhead
+        parked at its start): otherwise pressing 3 lights cell 2 for a bar."""
         g, f, S = self.game, self.f, self.s
         tr = self.transport
         keys = tr.get("keys")                       # 1..0 hit the lanes instead of jumping
         bounds = g.chart.phrase_bounds()
         n = len(bounds) - 1
         span = max(1e-6, bounds[-1] - bounds[0])
-        cur = None if keys else g.chart.phrase_at(max(now, 0.0))
+        landing = count_in_end is not None and now < count_in_end
+        pos = count_in_end if landing else now
+        cur = None if keys else g.chart.phrase_at(max(pos, 0.0))
         rng = tr.get("range")
         pending = tr.get("pending")
         typed = set() if pending is None else {(int(d) - 1) % 10 for d in pending}
@@ -494,12 +504,12 @@ class Renderer:
                                 int(X(bounds[b + 1]) - X(bounds[a]) + 4 * S), int(H + 6 * S))
             pygame.draw.rect(surf, self.loop_colour(loop), frame, max(1, int(2 * S)), border_radius=int(4 * S))
         if not keys:                                   # the playhead, over everything, dark-edged so it reads on any cell
-            px = int(X(max(bounds[0], min(now, bounds[-1]))))
+            px = int(X(max(bounds[0], min(pos, bounds[-1]))))
             pygame.draw.line(surf, BG, (px, int(y - 6 * S)), (px, int(y + H + 6 * S)), max(3, int(6 * S)))
             pygame.draw.line(surf, TEXT, (px, int(y - 5 * S)), (px, int(y + H + 5 * S)), max(1, int(2 * S)))
         f.center(surf, "phrase", f.tiny, DIM, y + H / 2, x0 - 24 * S)
-        if now >= 0:
-            ts = f.text(f"{g.chart.place(now)} of {g.chart.bars}", f.tiny, DIM)
+        if landing or now >= 0:
+            ts = f.text(f"{g.chart.place(pos)} of {g.chart.bars}", f.tiny, ACCENT if landing else DIM)
             surf.blit(ts, (x0 + W + 8 * S, y + H / 2 - ts.get_height() / 2))
         if pending is not None:
             what = "type the last phrase" if pending else "type the first and last phrase"

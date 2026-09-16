@@ -215,10 +215,13 @@ ruler.
   stopped so `_drive_tracks` restarts them at the new position (`Track.start_at` already
   played from any point, for pause/resume). It sets `seeked`, which is what makes the run a
   rehearsal.
-- **`1`..`9`, `0` jump** to phrases 1..10 with one bar of run-up (`count_in_end`, the big
-  beat digits of the level's own count-in): the chart is silent through it, the metronome
-  and the backing keep playing, so the first notes of the phrase come down the screen
-  instead of landing on the line.
+- **`1`..`9`, `0` jump** to phrases 1..10 with one bar of run-up (`count_in_end`): the chart
+  is silent through it, the metronome and the backing keep playing, so the first notes of
+  the phrase come down the screen instead of landing on the line. **Through the run-up the
+  screen shows the landing, not the bar being crossed** (2026-09-16: pressing 3 lit cell 2
+  for a bar and the huge count digits read as "the number I pressed"): the ruler lights the
+  key's cell with the playhead parked at its start, the centre says "phrase 3" over a
+  smaller "in 4 .. in 1", and phrase markers before the landing are not drawn.
 - **`l` + two digits** marks and starts a loop (`l35` = phrases 3 to 5, inclusive; `l33` one
   phrase; reversed digits are sorted). The pending gesture lapses after `LOOP_GESTURE_S`.
   `\` switches the marked loop off and on. The loop lives in the App (`loop_range`,
