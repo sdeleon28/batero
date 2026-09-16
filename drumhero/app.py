@@ -2355,15 +2355,24 @@ class PlayScreen(Screen):
 
     def phrase_jump(self, i, count_in=True):
         """Jump to phrase i (0-based), preceded by one silent bar of count-in so the notes
-        have time to come down. The chart is silent during it; the metronome keeps counting."""
+        have time to come down. The chart is silent during it; the metronome keeps counting.
+        A key past the level's last phrase does nothing but say so (no clamping: pressing 5
+        and landing on 2 is the confusion this replaced)."""
         bounds = self.phrases()
-        i = max(0, min(i, len(bounds) - 2))
+        n = len(bounds) - 1
+        if i >= n:
+            self.app.toasts.add(self.no_phrase(i, n), DIM, key="phrase")
+            return None
         t = bounds[i]
         pre = t - self.chart.beat_time(self.chart.beat_pos(t) - 4) if count_in else 0.0
         self.game.seek(t, pre)
-        self.app.toasts.add(f"phrase {(i + 1) % 10}", ACCENT, key="phrase")
+        self.app.toasts.add(f"phrase {(i + 1) % 10}  ·  bar {i * C.TRANSPORT_BARS + 1}", ACCENT, key="phrase")
         self.app.runlog.add("seek", phrase=i + 1, chart_t=round(t, 4))
         return i
+
+    def no_phrase(self, i, n):
+        return (f"no phrase {(i + 1) % 10}: this level has {n} phrase{'' if n == 1 else 's'} "
+                f"of {C.TRANSPORT_BARS} bars")
 
     def apply_loop(self):
         """Hand the marked range to the game, clamped to the phrases this chart has."""
@@ -2378,7 +2387,11 @@ class PlayScreen(Screen):
 
     def set_loop(self, a, b):
         n = len(self.phrases()) - 1
-        a, b = sorted((max(0, min(a, n - 1)), max(0, min(b, n - 1))))
+        a, b = sorted((a, b))
+        if a >= n:
+            self.app.toasts.add(self.no_phrase(a, n), DIM, key="loop")
+            return
+        b = min(b, n - 1)                                 # a loop past the end stops at the last phrase
         self.app.loop_range, self.app.loop_on = (a, b), True
         self.apply_loop()
         self.phrase_jump(a)

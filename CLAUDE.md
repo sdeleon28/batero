@@ -197,10 +197,15 @@ lessons have no lead (one version).
 ## The transport: phrases, loop, practice (play screen)
 
 Navigating a level like a DAW, asked for 2026-09-15. `Chart.phrase_bounds()` cuts the level
-into at most ten equal parts (`PHRASE_KEYS`), each snapped to a bar, and returns the marker
-times plus the end of the last bar, so phrase i is `[out[i], out[i+1])`. Equal parts, but
-truly equal when a few less divide the level (16 bars are 8 phrases of 2, not 10 of 1.6
-rounded onto a ragged grid); levels shorter than ten bars get one bar per phrase.
+into phrases of `TRANSPORT_BARS` (8) bars from the top, at most `PHRASE_KEYS` (10) of them,
+and returns the marker times plus the end of the last one, so phrase i is `[out[i], out[i+1])`.
+**Fixed size, on purpose**: the first version cut the level into ten equal parts, and the
+user could not tell what a key would do (16 bars were 8 phrases of 2; the cell numbers on the
+ruler did not match what the keys did). Now key 5 is bar 33 in every level; an 8-bar exercise
+has one phrase, a song has ten and anything past bar 80 is out of reach (paging is the
+obvious follow-up). A key past the level's last phrase does nothing but toast "no phrase 5:
+this level has 2 phrases of 8 bars" (`PlayScreen.no_phrase`); never clamp, pressing 5 and
+landing on 2 is exactly the confusion. `Chart.phrase_at` is None past the last phrase.
 
 - **`Game.seek(t, count_in)`** is the whole mechanism: notes before t become state `"skip"`
   (never judged, never sounded by the guide, never drawn), notes from t on are re-armed to
@@ -220,6 +225,14 @@ rounded onto a ragged grid); levels shorter than ten bars get one bar per phrase
   moment `t >= loop[1]`, and the renderer draws the loop's first bar a lap early, above the
   line (`Renderer.note(..., coming=True)`), so the scroll is continuous. A level never
   finishes while a loop runs.
+- **What the screen shows** (`Renderer.transport_bar`, `markers`, `marker_names`,
+  `loop_badge`): ten ruler cells always in the same place (the ones the level lacks drawn
+  empty), the current phrase lit with a playhead through it, `bar n / total` beside it, the
+  loop framed on the ruler and named under the metronome's beat squares ("LOOP 3-5" bright,
+  "loop 3-5 off" dim). On the lanes every phrase start scrolls down as a line with its key's
+  number (drawn under the notes, the labels after them so a single lane does not hide them);
+  the loop's start and end are lines in the loop's colour, and while the loop runs the start
+  is drawn again at the end ("loop 3 again"), because that is where the notes come back to.
 - **`K`** swaps the number keys between the transport and the old keyboard lane hits
   (`KEY_LANES`, for playing without the module); they are mutually exclusive and the ruler
   under the lanes says which is on. **`P`** is practice: no progress written.

@@ -5,7 +5,7 @@ import time
 
 import pygame
 
-from .chart import COUNT_LABELS, HH_GLYPH
+from .chart import COUNT_LABELS, HH_GLYPH, PHRASE_KEYS, TRANSPORT_BARS
 from .game import CONTRAST_TARGET, Game, dyn_band
 from .ghost import PEDAL_CLOSED_CC, openness_label
 
@@ -165,6 +165,7 @@ class Renderer:
         self.glow_h = int(GLOW_H * self.s)
         self.pps = (self.line_y - 60 * self.s) / LOOKAHEAD_S     # pixels per second at speed 1.0
         self.finished_at = None                                  # set by the play screen for the star animation
+        self.marker_labels = []
         self.transport = {}      # set by the play screen: keys mode, practice, the pending l gesture
 
     def y_for(self, note_t, now):
@@ -243,6 +244,7 @@ class Renderer:
 
         # notes: from a bit before the cursor so missed ones can fade out
         top = now + LOOKAHEAD_S / speed + 0.2
+        self.markers(surf, now, top, loop)
         for n in g.notes[max(0, lo - 64):]:
             if n.t > top:
                 break
@@ -259,6 +261,7 @@ class Renderer:
                     if n.t > a + ahead:
                         break
                     self.note(surf, n, n.t + (b - a), now, coming=True)
+        self.marker_names(surf)
 
         # flashes: ring at the line + error number, drawn the frame after the hit arrives
         latest = None
@@ -358,6 +361,7 @@ class Renderer:
             draw_hihat_state(surf, f, self.ghosts, self.w - 110 * S, (len(right) * 20 + 80) * S + self.top_inset, S)
 
         self.transport_bar(surf, now, loop)
+        self.loop_badge(surf, loop)
         if paused:
             f.center(surf, "PAUSED", f.huge, TEXT, self.h * 0.45)
             f.center(surf, "space resume · R restart · Esc menu", f.small, DIM, self.h * 0.45 + 70 * S)
@@ -371,34 +375,126 @@ class Renderer:
         if finished:
             self.results(surf)
 
+    def loop_colour(self, loop):
+        return ACCENT if loop is not None else lerp(ACCENT, BG, 0.5)
+
+    def markers(self, surf, now, top, loop):
+        """Phrase starts scrolling down the lanes with their key's number, like a DAW's
+        section markers, so what 1..0 address is on the highway itself. The loop's start and
+        end in the loop's colour; while it runs the start is drawn again a lap early, at the
+        end, since that is where the notes go back to."""
+        g, f, S = self.game, self.f, self.s
+        bounds = g.chart.phrase_bounds()
+        n = len(bounds) - 1
+        rng = self.transport.get("range")
+        a, b = (None, None) if rng is None else (rng[0], min(rng[1], n - 1))
+        marks = []                                        # (chart time, label, colour, width)
+        for i in range(n):
+            key = str((i + 1) % 10)
+            if i == a:
+                marks.append((bounds[i], f"loop {key}", self.loop_colour(loop), 2))
+            else:
+                marks.append((bounds[i], key, DIM, 1))
+        if a is not None:
+            if loop is None:
+                marks.append((bounds[b + 1], "loop end", self.loop_colour(loop), 2))
+            else:
+                # the wrap: the loop's head again where its tail ends, over the coming notes
+                shift = bounds[b + 1] - bounds[a]
+                for t, label, col, wd in list(marks):
+                    if bounds[a] <= t <= bounds[b] and t + shift <= top:
+                        marks.append((t + shift, (label + " again") if t == bounds[a] else label, col, wd))
+        x0, x1 = int(self.lane_x[0]), int(self.lane_x[-1] + self.lane_w)
+        self.marker_labels = []
+        for t, label, col, wd in marks:
+            if t > top or t < now - 0.5:
+                continue
+            y = self.y_for(t, now)
+            if y < -4 or y > self.line_y + 2:
+                continue
+            pygame.draw.line(surf, col, (x0, int(y)), (x1, int(y)), max(1, int(wd * S)))
+            self.marker_labels.append((label, TEXT if wd == 1 else col, y))
+
+    def marker_names(self, surf):
+        """The markers' labels, after the notes so a note never hides them."""
+        f, S = self.f, self.s
+        x0 = int(self.lane_x[0])
+        for label, col, y in self.marker_labels:
+            ts = f.text(label, f.small, col)
+            back = pygame.Surface((ts.get_width() + 8 * S, ts.get_height()))
+            back.fill(BG)
+            back.set_alpha(200)
+            surf.blit(back, (x0 + 2 * S, y - ts.get_height() - 1 * S))
+            surf.blit(ts, (x0 + 6 * S, y - ts.get_height() - 1 * S))
+
+    def loop_badge(self, surf, loop):
+        """Top centre: the loop that runs, or the one marked and off, or the gesture typed."""
+        f, S = self.f, self.s
+        tr = self.transport
+        pending, rng = tr.get("pending"), tr.get("range")
+        y = 126 * S                                   # under the metronome's beat squares
+        if pending is not None:
+            what = "type the last phrase" if pending else "type the first and last phrase"
+            f.center(surf, f"loop  l{pending}_", f.mid, ACCENT, y)
+            f.center(surf, what, f.small, ACCENT, y + 24 * S)
+        elif rng is not None and not tr.get("keys"):
+            n = len(self.game.chart.phrase_bounds()) - 1
+            a, b = (rng[0] + 1) % 10, (min(rng[1], n - 1) + 1) % 10
+            if loop is not None:
+                f.center(surf, f"LOOP {a}-{b}", f.mid, ACCENT, y)
+                f.center(surf, "\\ stops it", f.small, DIM, y + 24 * S)
+            else:
+                f.center(surf, f"loop {a}-{b} off", f.mid, DIM, y)
+                f.center(surf, "\\ starts it again", f.small, DIM, y + 24 * S)
+
     def transport_bar(self, surf, now, loop):
-        """The phrase ruler under the lanes: one cell per number key, the phrase being
-        played lit, the marked loop framed, and the line that says what 1..0 do."""
+        """The ruler under the lanes: ten cells, one per number key, always in the same
+        place (key 5 is the fifth cell is bar 33), the cells past the level's length empty;
+        the phrase being played lit with a playhead moving through it, the marked loop
+        framed, the bar number beside, and the line that says what 1..0 do."""
         g, f, S = self.game, self.f, self.s
         tr = self.transport
         keys = tr.get("keys")                       # 1..0 hit the lanes instead of jumping
         bounds = g.chart.phrase_bounds()
-        n = len(bounds) - 1
-        cur = g.chart.phrase_at(max(now, 0.0))
+        n = len(bounds) - 1                         # phrases this level has
+        cur = None if keys else g.chart.phrase_at(max(now, 0.0))
         rng = tr.get("range")
-        cw, ch, gap = 30 * S, 20 * S, 4 * S
-        total = n * cw + (n - 1) * gap
+        cw, ch, gap = 34 * S, 22 * S, 4 * S
+        total = PHRASE_KEYS * cw + (PHRASE_KEYS - 1) * gap
         x0 = self.w / 2 - total / 2
-        y = self.line_y + 66 * S      # under the lane labels, over the session line
-        for i in range(n):
+        y = self.line_y + 64 * S      # under the lane labels, over the hint and the session line
+        for i in range(PHRASE_KEYS):
             x = x0 + i * (cw + gap)
             box = pygame.Rect(int(x), int(y), int(cw), int(ch))
+            if i >= n:                              # past the level: the key does nothing here
+                pygame.draw.rect(surf, lerp(LANE_BG, DIM, 0.25), box, 1, border_radius=int(4 * S))
+                f.center(surf, str((i + 1) % 10), f.small, lerp(BG, DIM, 0.4), y + ch / 2, x + cw / 2)
+                continue
             inside = rng is not None and rng[0] <= i <= rng[1]
             fill = LANE_BG
             if inside:
-                fill = lerp(LANE_BG, ACCENT, 0.5 if loop is not None else 0.2)
-            if i == cur and not keys:
-                fill = lerp(fill, (255, 255, 255), 0.55)
-            pygame.draw.rect(surf, fill, box, border_radius=int(4 * S))
+                fill = lerp(LANE_BG, ACCENT, 0.45 if loop is not None else 0.18)
             if i == cur:
-                pygame.draw.rect(surf, TEXT if not keys else DIM, box, 1, border_radius=int(4 * S))
-            color = (20, 20, 24) if (i == cur and not keys) else (TEXT if not keys else (70, 70, 80))
+                fill = lerp(fill, (255, 255, 255), 0.6)
+            pygame.draw.rect(surf, fill, box, border_radius=int(4 * S))
+            pygame.draw.rect(surf, TEXT if i == cur else (lerp(LANE_BG, DIM, 0.3) if keys else DIM), box, 1, border_radius=int(4 * S))
+            color = (20, 20, 24) if i == cur else ((70, 70, 80) if keys else TEXT)
             f.center(surf, str((i + 1) % 10), f.small, color, y + ch / 2, x + cw / 2)
+            if i == cur:                            # the playhead inside the phrase
+                frac = (now - bounds[i]) / (bounds[i + 1] - bounds[i])
+                px = int(x + max(0.0, min(1.0, frac)) * cw)
+                pygame.draw.line(surf, ACCENT, (px, int(y - 3 * S)), (px, int(y + ch + 3 * S)), max(1, int(2 * S)))
+        if rng is not None:                         # the loop's frame around its cells
+            a, b = rng[0], min(rng[1], n - 1)
+            if a < n:
+                frame = pygame.Rect(int(x0 + a * (cw + gap) - 3 * S), int(y - 3 * S),
+                                    int((b - a + 1) * cw + (b - a) * gap + 6 * S), int(ch + 6 * S))
+                pygame.draw.rect(surf, self.loop_colour(loop), frame, max(1, int(2 * S)), border_radius=int(6 * S))
+        f.center(surf, "phrase", f.tiny, DIM, y + ch / 2, x0 - 26 * S)
+        if now >= 0:
+            bar = int(g.chart.beat_pos(now) // 4) + 1
+            ts = f.text(f"bar {min(bar, g.chart.bars)} / {g.chart.bars}", f.tiny, DIM)
+            surf.blit(ts, (x0 + total + 10 * S, y + ch / 2 - ts.get_height() / 2))
         pending = tr.get("pending")
         if pending is not None:
             what = "type the last phrase" if pending else "type the first and last phrase"
@@ -406,9 +502,8 @@ class Renderer:
         elif keys:
             hint, col = "1-0 hit the lanes  ·  K back to the transport", DIM
         else:
-            loop_txt = "" if rng is None else f"  ·  loop {(rng[0] + 1) % 10}-{(rng[1] + 1) % 10} {'on' if loop is not None else 'off'}"
-            hint, col = f"1-0 jump  ·  l35 loop 3-5  ·  \\ loop on/off  ·  K keyboard hits{loop_txt}", DIM
-        f.center(surf, hint, f.small, col, y + ch + 12 * S)
+            hint, col = f"1-0 jump to a phrase of {TRANSPORT_BARS} bars  ·  l35 loop 3-5  ·  \\ loop on/off  ·  K keyboard hits", DIM
+        f.center(surf, hint, f.small, col, y + ch + 16 * S)
 
     def dynamics_meter(self, surf, dyn, x, y):
         """Accent and tap tallies plus a contrast bar (median accent / median tap velocity
