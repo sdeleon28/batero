@@ -76,10 +76,22 @@ prints the received audio's level, so silence is caught) and
   captures display `stream_display` (0) through avfoundation, so the terminal or anything else
   on that display goes out too; the interface's mix comes from a separate feeder process
   (`python -m drumhero.twitch --audio-feed`, a sounddevice input with the take's channels and
-  buffer settings) through a named pipe; both inputs on the wall clock (`-copyts`, setpts
-  minus the launch time), `aresample=async` for drift. Needs the Screen Recording permission
+  buffer settings) through a named pipe; the video on the wall clock (`-copyts`, setpts
+  minus the launch time t0), the audio on its own sample count, which the feeder anchors to
+  the same t0 (`--t0`: the callback pads the head, and any gap over 0.25 s, with silence),
+  `aresample=async` for drift. Needs the Screen Recording permission
   for drumhero.app (macOS asks once, then relaunch the app). Every stream keeps an AAC copy of
   its audio in `~/Movies/drumhero/streams/` to check afterwards.
+  **Never stamp the audio pipe with the wall clock**
+  (`-use_wallclock_as_timestamps` on the f32le input, until 2026-09-14): that dates each block
+  by the moment ffmpeg got round to reading the pipe, so any hiccup in its loop (the screen
+  capture, the rtmp send) bunches a clump of blocks onto one timestamp and `aresample=async`
+  throws away everything that arrived late, filling the hole with silence. Measured that night:
+  half the audio gone, metronomic, 200 ms of sound and 200 ms of silence, on every stream of
+  the evening, while the interface read clean and the feeder reported `lost 1 ms`. Three
+  networks were tried; it was never the network. The audio's clock is the interface's, and the
+  feeder is what places it against t0. Reproduced and fixed by freezing ffmpeg 150 ms at a time
+  (SIGSTOP/SIGCONT): the old chain 31.6 % silence, the new one 0.
   **Never capture the interface's audio with ffmpeg's avfoundation**: measured 2026-09-12 with
   the native buffer timestamps, it drops buffers even capturing audio alone (6.1: 1.3 s lost
   in 15 s; 8.0.1: 0.67 s) because it keeps one pending buffer and sleeps 10 ms between reads;

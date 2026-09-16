@@ -18,11 +18,16 @@ The stream itself (Streamer). Two sources, `stream_source` in settings:
 avfoundation, and the interface's mix comes from a separate process, `python -m drumhero.twitch
 --audio-feed FIFO` (audio_feed): a sounddevice input on the interface (the take's channels and
 buffer settings), blocks queued and written to a named pipe as float32 stereo, which ffmpeg
-reads as its second input. Both inputs get wall-clock timestamps (-use_wallclock_as_timestamps,
--copyts, setpts/asetpts minus the launch time), so they stay in sync whatever each took to
-open; aresample=async ties the audio's sample clock to it. What goes out is the whole display,
-the terminal included when it is on that screen. Needs the Screen Recording permission for
-drumhero.app (macOS asks once; then relaunch the app).
+reads as its second input. The video gets wall-clock timestamps (-use_wallclock_as_timestamps,
+-copyts, setpts minus the launch time t0); the audio's clock is its own sample count, which the
+feeder anchors to the same t0 (it pads the head, and any gap, with silence from the callback),
+so the two stay in sync whatever each took to open. Never stamp the audio pipe with the wall
+clock: that dates each block by the moment ffmpeg read it, and aresample=async then discards
+everything that arrived while the loop was busy -- measured 2026-09-14, half the audio gone in
+200 ms chunks, metronomic, for as long as anything (the screen capture, the rtmp send) made
+ffmpeg hiccup; three networks were tried and the interface measured clean, and the cut was here.
+What goes out is the whole display, the terminal included when it is on that screen.
+Needs the Screen Recording permission for drumhero.app (macOS asks once; then relaunch the app).
 Why not avfoundation for the audio too ("Capture screen N:X18/XR18", the first version):
 measured 2026-09-12 with the interface's native buffer timestamps, ffmpeg's avfoundation input
 drops audio buffers even capturing audio alone (6.1: 113 drops, 1.3 s lost in 15 s; 8.0.1: 58
@@ -274,20 +279,25 @@ class Streamer:
             self.audio_copy = os.path.join(STREAMS_DIR, time.strftime("%Y%m%d-%H%M%S") + " stream.aac")
         # not sys.executable: inside the app bundle that is a Python whose startup .pth launches the game itself
         venv_py = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".venv", "bin", "python")
+        # the stream's clock: the video's first frame and the feeder's first sample are both placed against it
+        t0 = time.time()
         self.feeder = subprocess.Popen([venv_py if os.path.exists(venv_py) else sys.executable, "-m", "drumhero.twitch", "--audio-feed", self.fifo, "--device", dev,
-                                        "--channels", ",".join(str(c) for c in chans), "--rate", str(sr)],
+                                        "--channels", ",".join(str(c) for c in chans), "--rate", str(sr), "--t0", "%.3f" % t0],
                                        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.audio_level = (-99.0, -99.0)            # (peak dB, rms dB) of what the feeder sent lately, after the gain
         threading.Thread(target=self._read_level, daemon=True).start()
-        t0 = time.time()
         cmd = [ffmpeg_path(), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
                "-f", "avfoundation", "-framerate", str(self.fps), "-capture_cursor", "1", "-use_wallclock_as_timestamps", "1",
                "-thread_queue_size", "1024", "-i", f"{video_dev}:none",
-               "-f", "f32le", "-ar", str(sr), "-ac", "2", "-use_wallclock_as_timestamps", "1",
+               # never -use_wallclock_as_timestamps on this one: it would stamp the audio with the moment
+               # ffmpeg got round to reading the pipe, and aresample would then throw away every block that
+               # arrived while the loop was busy (2026-09-14: half the audio, in 200 ms chunks). The feeder
+               # anchors the sample count to t0 instead, so the clock is the interface's.
+               "-f", "f32le", "-ar", str(sr), "-ac", "2",
                "-thread_queue_size", "1024", "-i", self.fifo,
                "-copyts", "-map", "0:v", "-map", "1:a",
                "-vf", f"setpts=PTS-{t0:.3f}/TB,scale=-2:'min({th},ih)':flags=bilinear", "-fps_mode", "cfr",
-               "-af", f"asetpts=PTS-{t0:.3f}/TB,aresample=async=1,alimiter=limit=0.97:level=0",
+               "-af", "aresample=async=1,alimiter=limit=0.97:level=0",
                *encode_args((0, th), self.fps, int(self.settings["stream_kbps"]), container=False),
                "-progress", "pipe:1", *tee_output(url, self.audio_copy)]
         self.ff = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -877,12 +887,17 @@ class StreamLink:
 
 
 # ---------------------------------------------------------------------------
-def audio_feed(fifo, device, channels, rate):
+def audio_feed(fifo, device, channels, rate, t0=None):
     """The audio feeder process: the interface's two channels to `fifo` as float32 stereo, from
     the moment ffmpeg opens the pipe (so no backlog: the first block written is live). Blocks
     are queued by the callback and written by the main thread; the pipe closing (ffmpeg gone)
     ends it. The last stderr line is the tally: blocks, overflows, and the audio the device
-    delivered against the wall clock (lost ms = buffers PortAudio never gave us)."""
+    delivered against the wall clock (lost ms = buffers PortAudio never gave us).
+
+    What goes into the pipe IS the stream's audio clock (ffmpeg counts samples, it does not
+    stamp what it reads), so the callback places every block against `t0`, the stream's start:
+    the head, and any gap over AUDIO_LAG_PAD_S, is filled with silence here, where the block's
+    capture time is known. The same thing the window source does in `_open_audio`."""
     import sounddevice as sd
     dev = audio_device_index(device)
     if dev is None:
@@ -893,13 +908,25 @@ def audio_feed(fifo, device, channels, rate):
     if len(chans) == 1:
         chans = chans * 2
     q = queue.Queue()
-    stats = {"blocks": 0, "overflows": 0, "frames": 0, "gain": 10 ** (read_gain() / 20), "peak": 0.0, "sq": 0.0, "n": 0}
+    stats = {"blocks": 0, "overflows": 0, "frames": 0, "gain": 10 ** (read_gain() / 20), "peak": 0.0, "sq": 0.0, "n": 0,
+             "samples": 0, "pads": 0, "padded": 0}
+    latency = [float(input_stream_kwargs(rate).get("latency") or 0)]
 
     def cb(indata, frames, t, status):
         if status.input_overflow:
             stats["overflows"] += 1
         stats["blocks"] += 1
         stats["frames"] += frames
+        if t0 is not None:
+            # where this block belongs on the stream's clock: captured `frames` ago, plus the input latency
+            expected = int((time.time() - t0 - frames / rate - latency[0]) * rate)
+            lag = expected - stats["samples"]
+            if lag > AUDIO_LAG_PAD_S * rate or (stats["samples"] == 0 and lag > 0):
+                q.put(np.zeros((lag, 2), dtype="float32").tobytes())
+                stats["samples"] += lag
+                stats["pads"] += 1
+                stats["padded"] += lag
+        stats["samples"] += frames
         block = np.ascontiguousarray(indata[:, chans], dtype="float32") * stats["gain"]
         stats["peak"] = max(stats["peak"], float(np.abs(block).max()) if frames else 0.0)
         stats["sq"] += float((block * block).sum()); stats["n"] += block.size
@@ -907,9 +934,10 @@ def audio_feed(fifo, device, channels, rate):
 
     out = open(fifo, "wb", buffering=0)                  # blocks until ffmpeg opens its end
     stream = sd.InputStream(device=idx, channels=nin, samplerate=rate, dtype="float32", callback=cb, **input_stream_kwargs(rate))
+    latency[0] = float(stream.latency or latency[0])
     stream.start()
-    t0 = time.perf_counter()
-    gain_db, checked, reported = read_gain(), t0, t0
+    started_pc = time.perf_counter()                     # not t0: that one is the stream's epoch clock, the callback's
+    gain_db, checked, reported = read_gain(), started_pc, started_pc
     try:
         while True:
             block = q.get()
@@ -931,10 +959,11 @@ def audio_feed(fifo, device, channels, rate):
                 rms = (sq / n) ** 0.5 if n else 0.0
                 print(f"level {20 * np.log10(max(peak, 1e-5)):.1f} {20 * np.log10(max(rms, 1e-5)):.1f}", flush=True)
     finally:
-        elapsed = time.perf_counter() - t0
+        elapsed = time.perf_counter() - started_pc
         stream.stop(); stream.close()
         lost = max(0.0, elapsed - stats["frames"] / rate) * 1000
-        print(f"audio feed: {stats['blocks']} blocks, {stats['overflows']} overflows, {elapsed:.1f} s, lost {lost:.0f} ms, gain {gain_db:+.1f} dB", file=sys.stderr)
+        print(f"audio feed: {stats['blocks']} blocks, {stats['overflows']} overflows, {elapsed:.1f} s, lost {lost:.0f} ms, "
+              f"{stats['pads']} pads ({stats['padded'] / rate * 1000:.0f} ms), gain {gain_db:+.1f} dB", file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -1114,13 +1143,14 @@ def main(argv=None):
     ap.add_argument("--device", default="X18/XR18")
     ap.add_argument("--channels", default="17,18")
     ap.add_argument("--rate", type=int, default=AUDIO_SR)
+    ap.add_argument("--t0", type=float, help="(internal) the stream's start (epoch): the feeder anchors its samples to it")
     ap.add_argument("--daemon", action="store_true", help="(internal, the game's T) the stream process: runs until SIGTERM")
     ap.add_argument("--settings", metavar="JSON", help="--daemon: the stream settings as JSON (the game's settings.json otherwise)")
     ap.add_argument("--status", action="store_true", help="print the stream daemon's state")
     ap.add_argument("--stop", action="store_true", help="stop a live stream daemon (what the game's T does)")
     args = ap.parse_args(argv)
     if args.audio_feed:
-        audio_feed(args.audio_feed, args.device, [int(c) for c in args.channels.split(",")], args.rate)
+        audio_feed(args.audio_feed, args.device, [int(c) for c in args.channels.split(",")], args.rate, args.t0)
     elif args.daemon:
         if args.settings:
             settings = json.loads(args.settings)
