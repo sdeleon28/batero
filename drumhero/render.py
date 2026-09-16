@@ -5,7 +5,7 @@ import time
 
 import pygame
 
-from .chart import COUNT_LABELS, HH_GLYPH, PHRASE_KEYS, TRANSPORT_BARS
+from .chart import COUNT_LABELS, HH_GLYPH, PHRASE_KEYS
 from .game import CONTRAST_TARGET, Game, dyn_band
 from .ghost import PEDAL_CLOSED_CC, openness_label
 
@@ -433,6 +433,11 @@ class Renderer:
         tr = self.transport
         pending, rng = tr.get("pending"), tr.get("range")
         y = 126 * S                                   # under the metronome's beat squares
+        if pending is not None or (rng is not None and not tr.get("keys")):
+            back = pygame.Surface((int(300 * S), int(48 * S)))
+            back.fill(BG)
+            back.set_alpha(215)
+            surf.blit(back, (surf.get_width() / 2 - 150 * S, y - 14 * S))
         if pending is not None:
             what = "type the last phrase" if pending else "type the first and last phrase"
             f.center(surf, f"loop  l{pending}_", f.mid, ACCENT, y)
@@ -448,62 +453,62 @@ class Renderer:
                 f.center(surf, "\\ starts it again", f.small, DIM, y + 24 * S)
 
     def transport_bar(self, surf, now, loop):
-        """The ruler under the lanes: ten cells, one per number key, always in the same
-        place (key 5 is the fifth cell is bar 33), the cells past the level's length empty;
-        the phrase being played lit with a playhead moving through it, the marked loop
-        framed, the bar number beside, and the line that says what 1..0 do."""
+        """The timeline under the lanes: the whole level as one bar in ten cells, one per
+        number key, each as wide as the tenth it stands for; the playhead sweeps the whole
+        bar, the cell being played is lit, the marked loop is a framed band, the digits
+        typed after l light their cells, and a line says what 1..0 do."""
         g, f, S = self.game, self.f, self.s
         tr = self.transport
         keys = tr.get("keys")                       # 1..0 hit the lanes instead of jumping
         bounds = g.chart.phrase_bounds()
-        n = len(bounds) - 1                         # phrases this level has
+        n = len(bounds) - 1
+        span = max(1e-6, bounds[-1] - bounds[0])
         cur = None if keys else g.chart.phrase_at(max(now, 0.0))
         rng = tr.get("range")
-        cw, ch, gap = 34 * S, 22 * S, 4 * S
-        total = PHRASE_KEYS * cw + (PHRASE_KEYS - 1) * gap
-        x0 = self.w / 2 - total / 2
-        y = self.line_y + 64 * S      # under the lane labels, over the hint and the session line
-        for i in range(PHRASE_KEYS):
-            x = x0 + i * (cw + gap)
-            box = pygame.Rect(int(x), int(y), int(cw), int(ch))
-            if i >= n:                              # past the level: the key does nothing here
-                pygame.draw.rect(surf, lerp(LANE_BG, DIM, 0.25), box, 1, border_radius=int(4 * S))
-                f.center(surf, str((i + 1) % 10), f.small, lerp(BG, DIM, 0.4), y + ch / 2, x + cw / 2)
-                continue
+        pending = tr.get("pending")
+        typed = set() if pending is None else {(int(d) - 1) % 10 for d in pending}
+        W = min(self.w - 240 * S, 720 * S)          # the level's whole length, lanes or not
+        x0, H = self.w / 2 - W / 2, 26 * S
+        y = self.line_y + 60 * S      # under the lane labels, over the hint and the session line
+        X = lambda t: x0 + (t - bounds[0]) / span * W
+        for i in range(n):
+            xa, xb = X(bounds[i]), X(bounds[i + 1])
+            box = pygame.Rect(int(xa), int(y), int(xb) - int(xa), int(H))
             inside = rng is not None and rng[0] <= i <= rng[1]
             fill = LANE_BG
             if inside:
                 fill = lerp(LANE_BG, ACCENT, 0.45 if loop is not None else 0.18)
+            if i in typed:
+                fill = lerp(fill, ACCENT, 0.5)
             if i == cur:
                 fill = lerp(fill, (255, 255, 255), 0.6)
-            pygame.draw.rect(surf, fill, box, border_radius=int(4 * S))
-            pygame.draw.rect(surf, TEXT if i == cur else (lerp(LANE_BG, DIM, 0.3) if keys else DIM), box, 1, border_radius=int(4 * S))
+            pygame.draw.rect(surf, fill, box)
+            if i > 0:
+                pygame.draw.line(surf, LANE_EDGE if i != cur else TEXT, (int(xa), int(y)), (int(xa), int(y + H)))
             color = (20, 20, 24) if i == cur else ((70, 70, 80) if keys else TEXT)
-            f.center(surf, str((i + 1) % 10), f.small, color, y + ch / 2, x + cw / 2)
-            if i == cur:                            # the playhead inside the phrase
-                frac = (now - bounds[i]) / (bounds[i + 1] - bounds[i])
-                px = int(x + max(0.0, min(1.0, frac)) * cw)
-                pygame.draw.line(surf, ACCENT, (px, int(y - 3 * S)), (px, int(y + ch + 3 * S)), max(1, int(2 * S)))
-        if rng is not None:                         # the loop's frame around its cells
+            f.center(surf, str((i + 1) % 10), f.small, color, y + H / 2, (xa + xb) / 2)
+        pygame.draw.rect(surf, DIM if not keys else lerp(LANE_BG, DIM, 0.3), pygame.Rect(int(x0), int(y), int(W), int(H)), 1)
+        if rng is not None and rng[0] < n:            # the loop's frame around its band
             a, b = rng[0], min(rng[1], n - 1)
-            if a < n:
-                frame = pygame.Rect(int(x0 + a * (cw + gap) - 3 * S), int(y - 3 * S),
-                                    int((b - a + 1) * cw + (b - a) * gap + 6 * S), int(ch + 6 * S))
-                pygame.draw.rect(surf, self.loop_colour(loop), frame, max(1, int(2 * S)), border_radius=int(6 * S))
-        f.center(surf, "phrase", f.tiny, DIM, y + ch / 2, x0 - 26 * S)
+            frame = pygame.Rect(int(X(bounds[a]) - 2 * S), int(y - 3 * S),
+                                int(X(bounds[b + 1]) - X(bounds[a]) + 4 * S), int(H + 6 * S))
+            pygame.draw.rect(surf, self.loop_colour(loop), frame, max(1, int(2 * S)), border_radius=int(4 * S))
+        if not keys:                                   # the playhead, over everything, dark-edged so it reads on any cell
+            px = int(X(max(bounds[0], min(now, bounds[-1]))))
+            pygame.draw.line(surf, BG, (px, int(y - 6 * S)), (px, int(y + H + 6 * S)), max(3, int(6 * S)))
+            pygame.draw.line(surf, TEXT, (px, int(y - 5 * S)), (px, int(y + H + 5 * S)), max(1, int(2 * S)))
+        f.center(surf, "phrase", f.tiny, DIM, y + H / 2, x0 - 24 * S)
         if now >= 0:
-            bar = int(g.chart.beat_pos(now) // 4) + 1
-            ts = f.text(f"bar {min(bar, g.chart.bars)} / {g.chart.bars}", f.tiny, DIM)
-            surf.blit(ts, (x0 + total + 10 * S, y + ch / 2 - ts.get_height() / 2))
-        pending = tr.get("pending")
+            ts = f.text(f"{g.chart.place(now)} of {g.chart.bars}", f.tiny, DIM)
+            surf.blit(ts, (x0 + W + 8 * S, y + H / 2 - ts.get_height() / 2))
         if pending is not None:
             what = "type the last phrase" if pending else "type the first and last phrase"
             hint, col = f"loop: l{pending}_  ·  {what}", ACCENT
         elif keys:
             hint, col = "1-0 hit the lanes  ·  K back to the transport", DIM
         else:
-            hint, col = f"1-0 jump to a phrase of {TRANSPORT_BARS} bars  ·  l35 loop 3-5  ·  \\ loop on/off  ·  K keyboard hits", DIM
-        f.center(surf, hint, f.small, col, y + ch + 16 * S)
+            hint, col = "1-0 jump to a tenth of the level  ·  l35 loop 3-5  ·  \\ loop on/off  ·  K keyboard hits", DIM
+        f.center(surf, hint, f.small, col, y + H + 14 * S)
 
     def dynamics_meter(self, surf, dyn, x, y):
         """Accent and tap tallies plus a contrast bar (median accent / median tap velocity

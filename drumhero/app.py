@@ -2356,8 +2356,7 @@ class PlayScreen(Screen):
     def phrase_jump(self, i, count_in=True):
         """Jump to phrase i (0-based), preceded by one silent bar of count-in so the notes
         have time to come down. The chart is silent during it; the metronome keeps counting.
-        A key past the level's last phrase does nothing but say so (no clamping: pressing 5
-        and landing on 2 is the confusion this replaced)."""
+        Only a level too short for ten distinct tenths has keys that do nothing; they say so."""
         bounds = self.phrases()
         n = len(bounds) - 1
         if i >= n:
@@ -2366,13 +2365,12 @@ class PlayScreen(Screen):
         t = bounds[i]
         pre = t - self.chart.beat_time(self.chart.beat_pos(t) - 4) if count_in else 0.0
         self.game.seek(t, pre)
-        self.app.toasts.add(f"phrase {(i + 1) % 10}  ·  bar {i * C.TRANSPORT_BARS + 1}", ACCENT, key="phrase")
+        self.app.toasts.add(f"phrase {(i + 1) % 10}  ·  {self.chart.place(t)}", ACCENT, key="phrase")
         self.app.runlog.add("seek", phrase=i + 1, chart_t=round(t, 4))
         return i
 
     def no_phrase(self, i, n):
-        return (f"no phrase {(i + 1) % 10}: this level has {n} phrase{'' if n == 1 else 's'} "
-                f"of {C.TRANSPORT_BARS} bars")
+        return f"no phrase {(i + 1) % 10}: this level is too short, it has {n}"
 
     def apply_loop(self):
         """Hand the marked range to the game, clamped to the phrases this chart has."""

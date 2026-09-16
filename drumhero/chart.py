@@ -153,8 +153,7 @@ GRIDS = [1, 2, 3, 4]            # subdivisions per beat we recognise, coarsest f
 GRID_TOLERANCE = 0.12           # of a grid step
 GRID_COVERAGE = 0.95            # fraction of onsets that must sit on the grid
 PHRASE_BARS = 4                 # subdivision is decided per phrase of this many bars
-PHRASE_KEYS = 10                # transport: the number keys 1..9 and 0 address phrases 1..10
-TRANSPORT_BARS = 8              # a transport phrase is this many bars, fixed: key 5 is always bar 33
+PHRASE_KEYS = 10                # transport: the number keys 1..9 and 0 address the level's ten tenths
 
 
 @dataclass
@@ -254,25 +253,27 @@ class Chart:
         return b[k] + (i - k) * (b[k + 1] - b[k])
 
     def phrase_bounds(self, count=PHRASE_KEYS):
-        """The transport's markers: phrases of TRANSPORT_BARS bars from the top of the
-        level, at most `count` of them (one per number key), plus the end of the last one,
-        so phrase i (0-based) is [out[i], out[i + 1]) and there are len(out) - 1. The size is
-        fixed, so key 5 is always bar 33: an 8-bar exercise has one phrase, a song has ten and
-        whatever lies past bar 80 is out of the transport's reach (no paging yet)."""
+        """The transport's markers: the level cut into `count` tenths, one per number key,
+        plus the end, so phrase i (0-based) is [out[i], out[i + 1]). Every level fills the
+        ten keys: 1 is the start, 6 the middle, 0 the last tenth. Each tenth starts on the
+        coarsest grid that keeps the ten distinct: a bar when the level has ten bars or more,
+        half a bar in an 8-bar exercise, a beat in a 4-bar one."""
         cached = getattr(self, "_phrase_cache", None)
         if cached is not None and cached[0] == count:
             return cached[1]
-        bars = self.bars
-        n = max(1, min(count, -(-bars // TRANSPORT_BARS)))
-        starts = [i * TRANSPORT_BARS for i in range(n)]
-        end = min(bars, n * TRANSPORT_BARS)
-        out = [self.beat_time(b * 4) for b in starts] + [self.beat_time(end * 4)]
+        beats = self.bars * 4
+        for unit in (4, 2, 1):
+            if beats / unit >= count:
+                break
+        units = beats / unit
+        marks = sorted({round(i * units / count) for i in range(count)})     # distinct unless the level is tiny
+        out = [self.beat_time(m * unit) for m in marks] + [self.beat_time(beats)]
         self._phrase_cache = (count, out)
         return out
 
     def phrase_at(self, t: float, count=PHRASE_KEYS):
         """Index of the phrase holding chart time t (the first one during the count-in);
-        None past the last phrase the transport reaches."""
+        None past the end of the level."""
         bounds = self.phrase_bounds(count)
         if t >= bounds[-1]:
             return None
@@ -280,6 +281,12 @@ class Chart:
             if t >= bounds[i - 1]:
                 return i - 1
         return 0
+
+    def place(self, t: float) -> str:
+        """'bar 3' or 'bar 3 beat 3': where chart time t falls, 1-based, for the transport."""
+        pos = self.beat_pos(max(t, 0.0)) + 1e-6          # beat_time and beat_pos round-trip a hair short
+        bar, beat = int(pos // 4) + 1, int(pos % 4) + 1
+        return f"bar {bar}" if beat == 1 else f"bar {bar} beat {beat}"
 
     def segment_list(self):
         if self.segments is None:

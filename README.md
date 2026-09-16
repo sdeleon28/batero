@@ -464,7 +464,7 @@ timing errors; the mean is your latency, the deviation is you.
 | ; / '         | accent sensitivity -/+ 5 % (saved), any screen: scales the accent and tap thresholds, 50..130 % |
 | `             | debug pane on / off, any screen: the last 48 hits' velocities as bars against the accent / tap thresholds in force (green accent, blue tap, grey between, red outline a filtered ghost), the last hit big, the last four as text with note, instrument and outcome, and the pedal CC |
 | S / C (hub)   | progress / coach                   |
-| 1..9, 0       | jump to phrase 1..10 of the level, 8 bars each (transport; `K` gives them to the lanes) |
+| 1..9, 0       | jump to a tenth of the level: 1 the start, 6 the middle, 0 the last tenth (transport; `K` gives them to the lanes) |
 | l + 2 digits  | loop from one phrase to another: `l35` loops phrases 3 to 5, `l33` just phrase 3 |
 | \             | the marked loop on / off           |
 | K             | 1..0 jump to a phrase / hit the lanes from the keyboard (exclusive) |
@@ -472,24 +472,24 @@ timing errors; the mean is your latency, the deviation is you.
 
 ### Transport
 
-A level is cut into phrases of eight bars, fixed: phrase 1 is bar 1, phrase 5 is
-bar 33, whatever the level. The ten number keys address the first ten (80
-bars); a longer song plays on past them but they are out of reach for now. An
-8-bar exercise has one phrase, a 16-bar level two, and a key past the last one
-just says so. The ruler under the lanes has ten cells, always in the same
-place, the ones the level has not got left empty; the phrase being played is
-lit with a playhead moving through it, the bar number is beside it, and each
-phrase's start comes down the lanes as a line with its key's number, like a
-DAW's section markers.
+The ten number keys are the level's timeline: `1` is the start, `6` the middle,
+`0` the last tenth, whatever the level's length. The ruler under the lanes is
+that timeline, the whole level as one bar in ten cells numbered like the keys,
+each as wide as the tenth it stands for; the playhead sweeps across it, the
+cell being played is lit, and beside it is where you are ("bar 6 beat 3 of
+16"). Each tenth starts on the coarsest grid that keeps the ten distinct: a bar
+when the level has ten bars or more, half a bar in an 8-bar exercise, a beat
+in a 4-bar one. On the lanes every tenth's start comes down as a line with its
+key's number, like a DAW's section markers, so what you see scroll past is what
+you press.
 
 `1`..`0` jump to a phrase, with one bar of run-up so the notes have time to come
 down: during it the chart is silent and nothing is judged, the metronome counts
 you in. `l` then two digits marks a loop and starts it (`l35`, phrases 3 to 5;
-the gesture lapses if the digits do not arrive in two seconds; a last phrase past
-the level's end stops at its last phrase), `\` switches that loop off and on
-again. The loop is framed on the ruler, named under the beat squares ("LOOP 3-5",
-dim with "off" while it is off), and its start and end are lines in that colour
-on the lanes; while it runs the start line comes down again at the end, since
+the gesture lapses if the digits do not arrive in two seconds; the cells light
+up as you type), `\` switches that loop off and on again. The loop is a framed
+band on the ruler, named under the beat squares ("LOOP 3-5", dim with "off"
+while it is off), and its start and end are lines in that colour on the lanes; while it runs the start line comes down again at the end, since
 that is where the notes go back to. The loop wraps without a count-in, on the
 beat, and the notes of its first bar scroll in over the last one, so it is
 continuous. A loop survives `[` and `]` (the tempo change restarts the level),
