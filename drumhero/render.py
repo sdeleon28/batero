@@ -165,9 +165,46 @@ class Renderer:
         self.glow_h = int(GLOW_H * self.s)
         self.pps = (self.line_y - 60 * self.s) / LOOKAHEAD_S     # pixels per second at speed 1.0
         self.finished_at = None                                  # set by the play screen for the star animation
+        self.transport = {}      # set by the play screen: keys mode, practice, the pending l gesture
 
     def y_for(self, note_t, now):
         return self.line_y - (note_t - now) * self.pps * self.game.speed
+
+    def note(self, surf, n, t_draw, now, coming=False):
+        """One chart note at chart time t_draw (the loop's head is drawn a lap early, and
+        then always as pending). Skipped notes (before a jump) are not drawn at all."""
+        g, f, S = self.game, self.f, self.s
+        if n.state == "skip" or (n.state == "hit" and not coming):
+            return
+        y = self.y_for(t_draw, now)
+        if y > self.h + self.note_h:
+            return
+        x = int(self.lane_x[n.lane] + 6 * S)
+        w = int(self.lane_w - 14 * S)
+        color = g.lanes[n.lane].color
+        missed = n.state == "miss" and not coming
+        if missed:
+            age = (now - t_draw) / MISS_FADE_S
+            if age > 1:
+                return
+            color = lerp(JUDGE_COLORS["MISS"], BG, age)
+        accent = n.accent or (not g.chart.dynamics and n.velocity >= 100)
+        nh = int(self.note_h * ACCENT_NOTE_SCALE) if accent else self.note_h
+        if g.chart.dynamics and not accent:
+            x, w = x + int(w * 0.15), int(w * 0.7)        # taps: narrower and dimmer
+            if not missed:
+                color = lerp(color, LANE_BG, 0.35)
+        rect = (x, int(y - nh / 2), w, nh)
+        pygame.draw.rect(surf, color, rect, border_radius=int(6 * S))
+        if accent:
+            pygame.draw.rect(surf, (255, 255, 255), rect, 2, border_radius=int(6 * S))
+        if not missed:
+            if n.art:
+                label = HH_GLYPH.get(n.art, "")                 # + tight, / mid, o open, > edge, ^ chick
+            else:
+                label = (">" + n.hand if accent and n.hand else (">" if accent else n.hand))
+            if label:
+                f.center(surf, label, f.mid if (accent or n.art) else f.small, (20, 20, 24), y, x + w / 2)
 
     def draw(self, surf, fps=0.0):
         g = self.game
@@ -179,6 +216,7 @@ class Renderer:
             flashes = list(g.flashes)
             lo = g.cursor
             paused, finished = g.paused, g.finished
+            loop, count_in_end = g.loop, g.count_in_end
             score, combo, counts, offset, speed = g.score, g.combo, dict(g.counts), g.offset_ms, g.speed
 
         surf.fill(BG)
@@ -208,36 +246,19 @@ class Renderer:
         for n in g.notes[max(0, lo - 64):]:
             if n.t > top:
                 break
-            if n.state == "hit":
-                continue
-            y = self.y_for(n.t, now)
-            if y > self.h + self.note_h:
-                continue
-            x = int(self.lane_x[n.lane] + 6 * S)
-            w = int(self.lane_w - 14 * S)
-            color = g.lanes[n.lane].color
-            if n.state == "miss":
-                age = (now - n.t) / MISS_FADE_S
-                if age > 1:
-                    continue
-                color = lerp(JUDGE_COLORS["MISS"], BG, age)
-            accent = n.accent or (not g.chart.dynamics and n.velocity >= 100)
-            nh = int(self.note_h * ACCENT_NOTE_SCALE) if accent else self.note_h
-            if g.chart.dynamics and not accent:
-                x, w = x + int(w * 0.15), int(w * 0.7)        # taps: narrower and dimmer
-                if n.state != "miss":
-                    color = lerp(color, LANE_BG, 0.35)
-            rect = (x, int(y - nh / 2), w, nh)
-            pygame.draw.rect(surf, color, rect, border_radius=int(6 * S))
-            if accent:
-                pygame.draw.rect(surf, (255, 255, 255), rect, 2, border_radius=int(6 * S))
-            if n.state != "miss":
-                if n.art:
-                    label = HH_GLYPH.get(n.art, "")                 # + tight, / mid, o open, > edge, ^ chick
-                else:
-                    label = (">" + n.hand if accent and n.hand else (">" if accent else n.hand))
-                if label:
-                    f.center(surf, label, f.mid if (accent or n.art) else f.small, (20, 20, 24), y, x + w / 2)
+            self.note(surf, n, n.t, now)
+        if loop is not None:
+            # the loop's head, drawn above the line during the tail of the lap, so the notes
+            # of the first bar come down instead of appearing on the line at the wrap
+            a, b = loop
+            ahead = top - b
+            if ahead > 0:
+                for n in g.notes:
+                    if n.t < a:
+                        continue
+                    if n.t > a + ahead:
+                        break
+                    self.note(surf, n, n.t + (b - a), now, coming=True)
 
         # flashes: ring at the line + error number, drawn the frame after the hit arrives
         latest = None
@@ -292,9 +313,6 @@ class Renderer:
                 surf.blit(ds, (self.w / 2 - ds.get_width() / 2, self.h * 0.30 + 90 * S))
                 ds.set_alpha(255)
 
-        self.metronome(surf, now)
-        if any(l.key == "hihat" for l in g.lanes):
-            draw_hihat_state(surf, f, self.ghosts, self.w - 110 * S, 200 * S, S)
 
         # HUD with a backing so it stays readable over notes
         dyn = g.dynamics(32) if g.chart.dynamics else None
@@ -325,10 +343,21 @@ class Renderer:
         if g.chart.dynamics:
             a, tp = dyn_band(None, g.night, g.dyn_scale)
             right.append(f"accent >= {a}  tap <= {tp}  ({g.dyn_scale:.0%}{', night' if g.night else ''})")
+        tr = self.transport
+        right.append("1-0 keyboard hits (K)" if tr.get("keys") else "1-0 phrase jump (K)")
+        if tr.get("practice"):
+            right.append("practice (P): nothing saved")
+        elif g.seeked:
+            right.append("rehearsal: jumped, not saved")
         for i, s in enumerate(right):
             ts = f.text(s, f.small, DIM)
             surf.blit(ts, (self.w - ts.get_width() - 12 * S, (10 + i * 20) * S + self.top_inset))
 
+        self.metronome(surf, now)
+        if any(l.key == "hihat" for l in g.lanes):     # under the right column, whatever it lists
+            draw_hihat_state(surf, f, self.ghosts, self.w - 110 * S, (len(right) * 20 + 80) * S + self.top_inset, S)
+
+        self.transport_bar(surf, now, loop)
         if paused:
             f.center(surf, "PAUSED", f.huge, TEXT, self.h * 0.45)
             f.center(surf, "space resume · R restart · Esc menu", f.small, DIM, self.h * 0.45 + 70 * S)
@@ -336,8 +365,50 @@ class Renderer:
             beats_left = math.ceil(-now / g.beat)
             f.center(surf, str((beats_left - 1) % 4 + 1), f.huge, TEXT, self.h * 0.45)
             f.center(surf, g.chart.desc, f.mid, DIM, self.h * 0.45 + 80 * S)
+        elif count_in_end is not None and now < count_in_end:
+            beats_left = math.ceil((count_in_end - now) / g.beat)
+            f.center(surf, str((beats_left - 1) % 4 + 1), f.huge, TEXT, self.h * 0.45)
         if finished:
             self.results(surf)
+
+    def transport_bar(self, surf, now, loop):
+        """The phrase ruler under the lanes: one cell per number key, the phrase being
+        played lit, the marked loop framed, and the line that says what 1..0 do."""
+        g, f, S = self.game, self.f, self.s
+        tr = self.transport
+        keys = tr.get("keys")                       # 1..0 hit the lanes instead of jumping
+        bounds = g.chart.phrase_bounds()
+        n = len(bounds) - 1
+        cur = g.chart.phrase_at(max(now, 0.0))
+        rng = tr.get("range")
+        cw, ch, gap = 30 * S, 20 * S, 4 * S
+        total = n * cw + (n - 1) * gap
+        x0 = self.w / 2 - total / 2
+        y = self.line_y + 66 * S      # under the lane labels, over the session line
+        for i in range(n):
+            x = x0 + i * (cw + gap)
+            box = pygame.Rect(int(x), int(y), int(cw), int(ch))
+            inside = rng is not None and rng[0] <= i <= rng[1]
+            fill = LANE_BG
+            if inside:
+                fill = lerp(LANE_BG, ACCENT, 0.5 if loop is not None else 0.2)
+            if i == cur and not keys:
+                fill = lerp(fill, (255, 255, 255), 0.55)
+            pygame.draw.rect(surf, fill, box, border_radius=int(4 * S))
+            if i == cur:
+                pygame.draw.rect(surf, TEXT if not keys else DIM, box, 1, border_radius=int(4 * S))
+            color = (20, 20, 24) if (i == cur and not keys) else (TEXT if not keys else (70, 70, 80))
+            f.center(surf, str((i + 1) % 10), f.small, color, y + ch / 2, x + cw / 2)
+        pending = tr.get("pending")
+        if pending is not None:
+            what = "type the last phrase" if pending else "type the first and last phrase"
+            hint, col = f"loop: l{pending}_  ·  {what}", ACCENT
+        elif keys:
+            hint, col = "1-0 hit the lanes  ·  K back to the transport", DIM
+        else:
+            loop_txt = "" if rng is None else f"  ·  loop {(rng[0] + 1) % 10}-{(rng[1] + 1) % 10} {'on' if loop is not None else 'off'}"
+            hint, col = f"1-0 jump  ·  l35 loop 3-5  ·  \\ loop on/off  ·  K keyboard hits{loop_txt}", DIM
+        f.center(surf, hint, f.small, col, y + ch + 12 * S)
 
     def dynamics_meter(self, surf, dyn, x, y):
         """Accent and tap tallies plus a contrast bar (median accent / median tap velocity
@@ -479,8 +550,11 @@ class Renderer:
             r = st["art_rate"]
             lines.append((f"hat articulations {st['art_ok']}/{st['art_ok'] + st['art_wrong']}  ({r * 100:.0f}%)", self.f.mid,
                           JUDGE_COLORS["PERFECT"] if r >= 0.85 else JUDGE_COLORS["OK"]))
+        rehearsal = self.transport.get("practice") or g.seeked
+        if rehearsal:
+            lines.append(("practice run · progress not saved", self.f.small, JUDGE_COLORS["OK"]))
         lines.append(("Enter next · R retry · Esc back", self.f.small, DIM))
-        bh = 370 + (40 if g.chart.dynamics else 0) + (40 if g.chart.expression else 0)
+        bh = 370 + (40 if g.chart.dynamics else 0) + (40 if g.chart.expression else 0) + (28 if rehearsal else 0)
         box = pygame.Surface((int(600 * S), int(bh * S)))
         box.fill((10, 10, 14))
         box.set_alpha(250)

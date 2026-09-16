@@ -24,8 +24,8 @@ python3 -m venv .venv
 .venv/bin/python -m drumhero --log hits.csv       # dump every judged hit of the last run
 ```
 
-Without a MIDI input you can play with the keyboard: keys `1`..`9`, `0` hit
-lanes 1..10.
+Without a MIDI input you can play with the keyboard: `K` in a level gives the
+keys `1`..`9`, `0` the lanes 1..10 (they drive the transport otherwise).
 
 ## Navigating with the drums
 
@@ -464,7 +464,31 @@ timing errors; the mean is your latency, the deviation is you.
 | ; / '         | accent sensitivity -/+ 5 % (saved), any screen: scales the accent and tap thresholds, 50..130 % |
 | `             | debug pane on / off, any screen: the last 48 hits' velocities as bars against the accent / tap thresholds in force (green accent, blue tap, grey between, red outline a filtered ghost), the last hit big, the last four as text with note, instrument and outcome, and the pedal CC |
 | S / C (hub)   | progress / coach                   |
-| 1..9, 0       | hit lanes from the keyboard        |
+| 1..9, 0       | jump to phrase 1..10 of the level (transport; `K` gives them to the lanes) |
+| l + 2 digits  | loop from one phrase to another: `l35` loops phrases 3 to 5, `l33` just phrase 3 |
+| \             | the marked loop on / off           |
+| K             | 1..0 jump to a phrase / hit the lanes from the keyboard (exclusive) |
+| P             | practice: the run saves no progress |
+
+### Transport
+
+A level is cut into as many equal phrases as the number keys allow (ten, or a
+few less when the level divides evenly: 16 bars are 8 phrases of 2, not 10 of
+1.6), each starting on a bar. The ruler under the lanes shows them, the phrase
+being played lit and the marked loop framed.
+
+`1`..`0` jump to a phrase, with one bar of run-up so the notes have time to come
+down: during it the chart is silent and nothing is judged, the metronome counts
+you in. `l` then two digits marks a loop and starts it (`l35`, phrases 3 to 5;
+the gesture lapses if the digits do not arrive in two seconds), `\` switches
+that loop off and on again. The loop wraps without a count-in, on the beat, and
+the notes of its first bar scroll in over the last one, so it is continuous.
+A loop survives `[` and `]` (the tempo change restarts the level), not leaving
+the level.
+
+Jumping or looping makes the run a rehearsal: it writes no progress, because its
+notes were played out of order or several times. `P` does the same on purpose,
+for a run you do not want recorded. The results screen says so.
 
 `--no-sound` disables audio entirely, `--no-guide` starts with the guide track
 off. If the audio crackles, raise `MIXER_BUFFER` in `drumhero/sounds.py`.

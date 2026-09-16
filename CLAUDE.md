@@ -194,6 +194,39 @@ the hub counts both. Old level names map to current keys in `kit.PROGRESS_MIGRAT
 applied when progress loads. Levels with hands on different drums, feet patterns and hi-hat
 lessons have no lead (one version).
 
+## The transport: phrases, loop, practice (play screen)
+
+Navigating a level like a DAW, asked for 2026-09-15. `Chart.phrase_bounds()` cuts the level
+into at most ten equal parts (`PHRASE_KEYS`), each snapped to a bar, and returns the marker
+times plus the end of the last bar, so phrase i is `[out[i], out[i+1])`. Equal parts, but
+truly equal when a few less divide the level (16 bars are 8 phrases of 2, not 10 of 1.6
+rounded onto a ragged grid); levels shorter than ten bars get one bar per phrase.
+
+- **`Game.seek(t, count_in)`** is the whole mechanism: notes before t become state `"skip"`
+  (never judged, never sounded by the guide, never drawn), notes from t on are re-armed to
+  pending, `wall_start` is moved so `song_time()` is `t - count_in`, and the tracks are
+  stopped so `_drive_tracks` restarts them at the new position (`Track.start_at` already
+  played from any point, for pause/resume). It sets `seeked`, which is what makes the run a
+  rehearsal.
+- **`1`..`9`, `0` jump** to phrases 1..10 with one bar of run-up (`count_in_end`, the big
+  beat digits of the level's own count-in): the chart is silent through it, the metronome
+  and the backing keep playing, so the first notes of the phrase come down the screen
+  instead of landing on the line.
+- **`l` + two digits** marks and starts a loop (`l35` = phrases 3 to 5, inclusive; `l33` one
+  phrase; reversed digits are sorted). The pending gesture lapses after `LOOP_GESTURE_S`.
+  `\` switches the marked loop off and on. The loop lives in the App (`loop_range`,
+  `loop_on`) so it survives the restart `[` and `]` cause, and is cleared when the level is
+  left. **The wrap has no count-in** (it would break the pulse): `Game.update` seeks back the
+  moment `t >= loop[1]`, and the renderer draws the loop's first bar a lap early, above the
+  line (`Renderer.note(..., coming=True)`), so the scroll is continuous. A level never
+  finishes while a loop runs.
+- **`K`** swaps the number keys between the transport and the old keyboard lane hits
+  (`KEY_LANES`, for playing without the module); they are mutually exclusive and the ruler
+  under the lanes says which is on. **`P`** is practice: no progress written.
+- **A rehearsal saves nothing**: `PlayScreen.record` returns early when `app.practice` or
+  `game.seeked`, because notes played out of order or several times would make the stars a
+  lie. The results screen says "practice run · progress not saved".
+
 ## Testing
 
 Headless tests use `SDL_VIDEODRIVER=dummy` and `SDL_AUDIODRIVER=dummy`; screens can be

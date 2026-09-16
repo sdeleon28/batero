@@ -133,6 +133,9 @@ class Game:
             self.guide_cursor = 0
             self.last_click_beat = None
             self.finished = False
+            self.loop = None                    # (start, end) in chart seconds while a loop runs
+            self.count_in_end = None            # chart time the run-up before a jump ends
+            self.seeked = False                 # the transport was used: the run is a rehearsal
 
     def song_time(self, wall_t=None):
         if wall_t is None:
@@ -148,6 +151,40 @@ class Game:
     def dyn_thresholds(self):
         return {"default": list(dyn_band(None, self.night, self.dyn_scale)), "night": self.night, "scale": self.dyn_scale,
                 **{k: list(dyn_band(k, self.night, self.dyn_scale)) for k in DYN_THRESHOLDS}}
+
+    # --- transport ---------------------------------------------------------
+    def seek(self, t, count_in=0.0):
+        with self.lock:
+            self._seek(t, count_in)
+
+    def _seek(self, t, count_in=0.0):
+        """Jump to chart time t; the lock must be held. Notes before t are skipped (never
+        judged, never sounded by the guide, never drawn), notes from t on are re-armed, so
+        a phrase can be played again. count_in: seconds of run-up before t, chart silent,
+        for the notes to come down the screen."""
+        for n in self.notes:
+            n.judge = n.error_ms = n.hit_velocity = n.dyn = n.art_ok = n.played = None
+            if n.t < t:
+                n.state, n.sounded = "skip", True
+            else:
+                n.state, n.sounded = "pending", False
+        self.cursor = self.guide_cursor = next((i for i, n in enumerate(self.notes) if n.t >= t), len(self.notes))
+        now = time.perf_counter()
+        self.paused_total = 0.0                          # folded into wall_start below
+        self.wall_start = now - self.lead_in - (t - count_in)
+        if self.paused_at is not None:
+            self.paused_at = now
+        self.count_in_end = t if count_in > 0 else None
+        self.finished = False
+        self.seeked = True
+        self.combo = 0
+        self.flashes.clear()
+        self.stop_tracks()                               # _drive_tracks restarts them at the new position
+
+    def set_loop(self, bounds):
+        """bounds: (start, end) in chart seconds, or None to stop looping."""
+        with self.lock:
+            self.loop = bounds
 
     def toggle_pause(self):
         with self.lock:
@@ -271,6 +308,9 @@ class Game:
             if self.paused:
                 return
             t = self.song_time()
+            if self.loop is not None and t >= self.loop[1]:
+                self._seek(self.loop[0])        # straight back, no run-up: the loop keeps the pulse
+                t = self.song_time()
             for i in range(self.cursor, len(self.notes)):
                 n = self.notes[i]
                 if n.t > t - OK_MS / 1000:
@@ -282,7 +322,7 @@ class Game:
                         self.log.add("miss", key=n.key, chart_t=round(n.t, 4), accent=n.accent, hand=n.hand)
             while self.cursor < len(self.notes) and self.notes[self.cursor].state != "pending":
                 self.cursor += 1
-            if not self.finished and t > self.notes[-1].t + TAIL_S:
+            if not self.finished and self.loop is None and t > self.notes[-1].t + TAIL_S:
                 self.finished = True
             self._drive_tracks(t)
 

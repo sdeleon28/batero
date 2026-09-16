@@ -46,6 +46,7 @@ RESULTS_GRACE_S = 1.0     # after a level ends, ignore drum hits this long befor
 VOLUME_STEP = 0.05        # { and } move the game's output level by this much
 METRO_VOLUME_STEP = 0.1   # = and - move the metronome's own level by this much
 METRO_VOLUME_MAX = 1.6    # over that the track's gain would clip at the mixer's ceiling
+LOOP_GESTURE_S = 2.0      # after l, the two phrase digits must arrive within this; then it lapses
 DEBUG_HITS = 200          # hits the ` pane remembers
 STALL_S = 2.0             # a frame this long is logged with the main thread's stack (App._watchdog)
 CAM_RETRY_S = 5.0         # the ! layer looks for a missing camera this often
@@ -109,6 +110,12 @@ class App:
                            self.settings.get("coach_model"))
         self.session = None          # {"name", "items": [(cat, index, rate, reps, why, lead)], "pos", "rep"} while a playlist runs
         self.lead = "R"              # the hand leading the exercises that have a lead (Chart.lead); toms swap it
+        # the transport (play screen): 1..0 jump to a phrase, l35 marks a loop, \ switches it,
+        # K gives the numbers back to the lanes (the two are exclusive), P stops saving progress
+        self.keys_hit = False        # K: 1..0 hit the lanes from the keyboard instead of jumping
+        self.practice = False        # P: the run writes no progress
+        self.loop_range = None       # (first phrase, last phrase), kept across a retry (tempo change)
+        self.loop_on = False
         self.toasts = Toasts()
         self.camera_name = None
         self.watcher = DeviceWatcher(args.port, self.settings.get("audio_device"), self.settings.get("capture_camera", "iPhone"),
@@ -983,8 +990,12 @@ class App:
                         self.nudge_dyn_scale(-1)           # softer accents count
                     elif ev.unicode == "'" or ev.key == pygame.K_QUOTE:
                         self.nudge_dyn_scale(+1)
-                    elif self.screen_obj.on_key(ev.key) is False:
-                        running = False
+                    else:
+                        key = ev.key
+                        if ev.unicode == "\\":
+                            key = pygame.K_BACKSLASH     # layouts where the backslash needs a modifier
+                        if self.screen_obj.on_key(key) is False:
+                            running = False
             while self.drum_queue:
                 if self.screen_obj.on_drum(self.drum_queue.popleft()) is False:
                     running = False
@@ -2236,7 +2247,10 @@ class PlayScreen(Screen):
         self.renderer = Renderer(self.game, app.size, app.fonts, app.ghosts)
         self.recorded = False
         self.finished_at = None
+        self.loop_digits = None       # the phrases typed after l, or None when no gesture is pending
+        self.loop_at = 0.0
         self.game.reset()
+        self.apply_loop()             # a loop marked before a tempo change keeps running
 
     def on_resize(self):
         self.renderer = Renderer(self.game, self.app.size, self.app.fonts, self.app.ghosts)
@@ -2303,12 +2317,96 @@ class PlayScreen(Screen):
             else:
                 prog = None if self.cat == "hihat" else self.index + (0 if self.cat == "kick" else 2)
                 g.set_track("metronome", self.app.tracks_for(self.chart, prog)["metronome"], True)
-        elif key in KEY_LANES and KEY_LANES[key] < len(self.lanes) and not g.finished:
-            g.hit_lane(KEY_LANES[key], 100)
+        elif key == pygame.K_k:
+            self.app.keys_hit = not self.app.keys_hit
+            self.loop_digits = None
+            self.app.toasts.add("keyboard hits: 1-0 play the lanes" if self.app.keys_hit else
+                                "transport: 1-0 jump to a phrase", ACCENT, key="keymode")
+        elif key == pygame.K_p:
+            self.app.practice = not self.app.practice
+            self.app.toasts.add("practice: this run saves no progress" if self.app.practice else
+                                ("practice off · this run already jumped, R starts a clean one" if g.seeked
+                                 else "practice off: this run counts"), ACCENT, key="practice")
+        elif self.app.keys_hit:
+            if key in KEY_LANES and KEY_LANES[key] < len(self.lanes) and not g.finished:
+                g.hit_lane(KEY_LANES[key], 100)
+        elif g.finished:
+            pass                                          # the results screen is no place for the transport
+        elif key == pygame.K_l:
+            self.loop_digits, self.loop_at = [], time.perf_counter()
+        elif key == pygame.K_BACKSLASH:
+            self.toggle_loop()
+        elif key in KEY_LANES:
+            i = KEY_LANES[key]                            # 1..9, 0 -> phrases 0..9
+            if self.loop_digits is None:
+                self.phrase_jump(i)
+            else:
+                self.loop_digits.append(i)
+                self.loop_at = time.perf_counter()
+                if len(self.loop_digits) == 2:
+                    a, b = self.loop_digits
+                    self.loop_digits = None
+                    self.set_loop(a, b)
         return True
+
+    # --- transport ---------------------------------------------------------------
+    def phrases(self):
+        return self.chart.phrase_bounds()
+
+    def phrase_jump(self, i, count_in=True):
+        """Jump to phrase i (0-based), preceded by one silent bar of count-in so the notes
+        have time to come down. The chart is silent during it; the metronome keeps counting."""
+        bounds = self.phrases()
+        i = max(0, min(i, len(bounds) - 2))
+        t = bounds[i]
+        pre = t - self.chart.beat_time(self.chart.beat_pos(t) - 4) if count_in else 0.0
+        self.game.seek(t, pre)
+        self.app.toasts.add(f"phrase {(i + 1) % 10}", ACCENT, key="phrase")
+        self.app.runlog.add("seek", phrase=i + 1, chart_t=round(t, 4))
+        return i
+
+    def apply_loop(self):
+        """Hand the marked range to the game, clamped to the phrases this chart has."""
+        rng = self.app.loop_range
+        bounds = self.phrases()
+        n = len(bounds) - 1
+        if rng is None or not self.app.loop_on:
+            self.game.set_loop(None)
+            return
+        a, b = min(rng[0], n - 1), min(rng[1], n - 1)
+        self.game.set_loop((bounds[a], bounds[b + 1]))
+
+    def set_loop(self, a, b):
+        n = len(self.phrases()) - 1
+        a, b = sorted((max(0, min(a, n - 1)), max(0, min(b, n - 1))))
+        self.app.loop_range, self.app.loop_on = (a, b), True
+        self.apply_loop()
+        self.phrase_jump(a)
+        self.app.toasts.add(f"loop {(a + 1) % 10}-{(b + 1) % 10} on", ACCENT, key="loop")
+        self.app.runlog.add("loop", on=True, phrases=[a + 1, b + 1])
+
+    def toggle_loop(self):
+        if self.app.loop_range is None:
+            self.app.toasts.add("no loop marked: l35 loops phrases 3 to 5", DIM, key="loop")
+            return
+        self.app.loop_on = not self.app.loop_on
+        self.apply_loop()
+        a, b = self.app.loop_range
+        if self.app.loop_on:
+            bounds = self.phrases()
+            t = self.game.song_time()
+            if not (bounds[a] <= t < bounds[min(b + 1, len(bounds) - 1)]):
+                self.phrase_jump(a)                       # outside the range: go there, or it never wraps
+        self.app.toasts.add(f"loop {(a + 1) % 10}-{(b + 1) % 10} {'on' if self.app.loop_on else 'off'}",
+                            ACCENT, key="loop")
+        self.app.runlog.add("loop", on=self.app.loop_on, phrases=[a + 1, b + 1])
+
+    def clear_loop(self):
+        self.app.loop_range, self.app.loop_on = None, False
 
     def to_list(self):
         self.leave()
+        self.clear_loop()
         if self.app.session is not None:
             self.app.session = None
             self.app.rate = 1.0
@@ -2322,6 +2420,7 @@ class PlayScreen(Screen):
 
     def next_level(self):
         self.leave()
+        self.clear_loop()
         if self.app.session_advance():
             return
         nxt = self.index + 1
@@ -2342,7 +2441,9 @@ class PlayScreen(Screen):
             self.app.runlog.header = None
 
     def record(self):
-        if self.recorded or not self.game.hits:
+        # a run that used the transport, or that asked for practice with P, is a rehearsal:
+        # its notes were played out of order or several times, so its stars would be a lie
+        if self.recorded or not self.game.hits or self.app.practice or self.game.seeked:
             return
         st = self.game.stats()
         best = self.app.results.get(self.chart.key)
@@ -2354,6 +2455,8 @@ class PlayScreen(Screen):
         self.recorded = True
 
     def update(self):
+        if self.loop_digits is not None and time.perf_counter() - self.loop_at > LOOP_GESTURE_S:
+            self.loop_digits = None
         self.game.update()
         if self.game.finished:
             self.record()
@@ -2365,6 +2468,10 @@ class PlayScreen(Screen):
 
     def draw(self, surf, fps):
         self.renderer.top_inset = self.app.badge_height()
+        self.renderer.transport = {"keys": self.app.keys_hit, "practice": self.app.practice,
+                                   "range": self.app.loop_range,
+                                   "pending": None if self.loop_digits is None else
+                                   "".join(str((i + 1) % 10) for i in self.loop_digits)}
         self.renderer.draw(surf, fps)
         ss = self.app.session
         if ss is not None:
@@ -2373,7 +2480,7 @@ class PlayScreen(Screen):
             label = f"session {ss['name']}  ·  {ss['pos'] + 1}/{len(ss['items'])}" + (f"  ·  rep {ss['rep']}/{reps}" if reps > 1 else "")
             if why and not self.game.finished:
                 label += f"  ·  {why}"
-            self.f.center(surf, label, self.f.small, ACCENT, self.h - (64 if self.game.finished else 24) * S)
+            self.f.center(surf, label, self.f.small, ACCENT, self.h - (64 if self.game.finished else 14) * S)
         if self.game.finished:
             self.legend(surf, [("snare", "next"), ("hihat", "retry"), ("kick", "back")], y=self.h - 30 * self.s,
                         keys=None)
