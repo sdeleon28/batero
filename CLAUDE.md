@@ -171,6 +171,15 @@ h, f. `--title`, `--note`, `--scene`, `--seconds`, `--fps`, `--no-card`.
   Balance measured by band energy after the mix (2026-09-13); the first version
   buried the melody (3 % between 400 and 4000 Hz) because the bass doubled itself
   an octave below its root at 27 Hz.
+- **The tune is also a level backing** (asked for 2026-09-16): `Chart.backing == "keygen"`
+  (the four all-sextuplet rudiments: Six stroke roll, Six stroke roll R L R R L L, Double
+  paradiddle + six stroke, Six stroke + paradiddle-diddle; the `backing=` argument of
+  `_rudiment` / `_rudiment_mix` adds more). `App.tracks_for` calls `keygen.render_level`:
+  the tune at twice the level's tempo on a triplet grid (`render(grid=12)`, its own
+  pattern tables in `GRIDS`), so its arpeggio falls on the level's sextuplets and its
+  backbeat on the off-beat eighths; the count-in is the intro section, bar 0 is the drop
+  of "main", the sections go round from there. One tune per level, seeded by the name
+  (both hand leads, every rate). The cortina's own render is unchanged (grid 16, looped).
 - `render()` also returns `low` and `high` envelopes, one value per 60th of a
   second, so the animation follows the music by indexing (position = wall clock
   since play started, a Sound on a channel has no cursor). `Scene.low` / `.high`

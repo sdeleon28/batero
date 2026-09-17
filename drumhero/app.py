@@ -10,6 +10,7 @@ import os
 import sys
 import threading
 import time
+import zlib
 from collections import deque
 
 import mido
@@ -33,6 +34,7 @@ from .devices import DeviceWatcher, Toasts, TOAST_S
 from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, draw_hihat_state, draw_stars, lerp
 from .game import TAIL_S, lead_in_for
 from . import ghost as GH
+from . import keygen
 from .ghost import GhostFilter
 from .sounds import (BACKING_GAIN, METRONOME_GAIN, PROGRESSIONS, SoundBank, Track, load_audio_track,
                      menu_music_sound, output_devices, render_backing_track, render_metronome, MENU_CHANNEL)
@@ -384,7 +386,11 @@ class App:
             feel = chart.backing or ("sextuplet" if sub % 6 == 0 else "triplet" if sub % 3 == 0 else "straight")
             key = ("backing", chart.name, round(chart.bpm, 3), prog_index, feel)
             if key not in self.track_cache:
-                self.track_cache[key] = Track(render_backing_track(chart.bpm, prog_index, lead_in, total, feel), -lead_in, BACKING_GAIN)
+                if feel == "keygen":                  # the waiting screen's tune, one per level (seeded by the name)
+                    data = keygen.render_level(chart.bpm, zlib.crc32(chart.name.encode()), lead_in, total)
+                else:
+                    data = render_backing_track(chart.bpm, prog_index, lead_in, total, feel)
+                self.track_cache[key] = Track(data, -lead_in, BACKING_GAIN)
             out["backing"] = self.track_cache[key]
         if self.metronome_mode != "off":
             key = ("metro", chart.name, round(chart.bpm, 3), self.metronome_mode)

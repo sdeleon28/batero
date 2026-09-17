@@ -175,7 +175,7 @@ class Chart:
     rate: float = 1.0           # tempo multiplier this chart was scaled by (see at_rate)
     lead: str = None            # "R" / "L": which hand leads; None when the level has no hand lead
                                 # (one instrument per hand, feet, hi-hat lessons). Set by the builders.
-    backing: str = None         # a backing style of its own ("cumbia": sounds.CUMBIA_STYLE); None = by subdivision
+    backing: str = None         # a backing of its own ("cumbia": sounds.CUMBIA_STYLE, "keygen": the waiting screen's tune); None = by subdivision
 
     @property
     def key(self):
@@ -504,11 +504,11 @@ def _crash_quarters(bar):
     return [(b, "crash", 110) for b in range(4)]
 
 
-def _rudiment(name, desc, bpm, bars, sticking, sub, accents=(0,), lanes=None):
+def _rudiment(name, desc, bpm, bars, sticking, sub, accents=(0,), lanes=None, backing=None):
     """A practice-pad rudiment: `sticking` repeats over the bar at `sub` notes per beat.
     accents: indices within the sticking pattern that are accented; the chart then judges
     dynamics (accent vs tap velocity). lanes: optional map hand -> instrument key
-    (default: everything on the snare)."""
+    (default: everything on the snare). backing: see Chart.backing."""
     beat = 60 / bpm
     lanes = lanes or {"R": "snare", "L": "snare"}
     notes = []
@@ -524,6 +524,7 @@ def _rudiment(name, desc, bpm, bars, sticking, sub, accents=(0,), lanes=None):
     ch.accents = set(accents)
     ch.dynamics = bool(accents)
     ch.lead = _lead_of(sticking, lanes)
+    ch.backing = backing
     return ch
 
 
@@ -541,11 +542,11 @@ def _reversed(cells):
     return [(_swap(s), sub, acc) for s, sub, acc in cells]
 
 
-def _rudiment_mix(name, desc, bpm, bars, phrase, lanes=None):
+def _rudiment_mix(name, desc, bpm, bars, phrase, lanes=None, backing=None):
     """A rudiment whose beats can differ in subdivision. phrase: cells (sticking, sub,
     accents), each lasting len(sticking) / sub beats, repeated to `bars`. The chart's
     segments carry the subdivision per cell (fractional bar starts), so the count panel,
-    the congas and the sticking strip follow every switch."""
+    the congas and the sticking strip follow every switch. backing: see Chart.backing."""
     beat = 60 / bpm
     lanes = lanes or {"R": "snare", "L": "snare"}
     phrase_beats = sum(len(s) / sub for s, sub, _ in phrase)
@@ -570,6 +571,7 @@ def _rudiment_mix(name, desc, bpm, bars, phrase, lanes=None):
     ch.sticking, ch.accents, ch.dynamics = sticking, accents, True
     ch.sticking_groups = groups[1:]
     ch.lead = _lead_of(sticking, lanes)
+    ch.backing = backing
     return ch
 
 
@@ -600,9 +602,9 @@ RUDIMENTS = [
     _rudiment("Six stroke roll in triplets", "R L L R R L over two beats of triplets: accent the singles, keep the doubles soft.",
               70, 8, "RLLRRL", 3, accents=(0, 5)),
     _rudiment("Six stroke roll", "The same six strokes inside one beat: a sextuplet, accents on the first and the last.",
-              60, 8, "RLLRRL", 6, accents=(0, 5)),
+              60, 8, "RLLRRL", 6, accents=(0, 5), backing="keygen"),
     _rudiment("Six stroke roll R L R R L L", "Singles first: the two accents land together, then the two doubles.",
-              60, 8, "RLRRLL", 6, accents=(0, 1)),
+              60, 8, "RLRRLL", 6, accents=(0, 1), backing="keygen"),
     # combinations: the six stroke roll inside sixteenth flow or next to other sextuplet rudiments.
     # Tempo is one number each; the game's rate control is the speed ladder.
     _rudiment_mix("Sixteenths + six stroke roll", "Single strokes on the sixteenths, a six stroke roll as a sextuplet on beat 4.",
@@ -612,9 +614,9 @@ RUDIMENTS = [
     _rudiment_mix("2 paradiddles, six stroke, 1 more", "Two paradiddles, a six stroke roll as a sextuplet, one more paradiddle: the bar ends on the right, so the next one starts on the left and the whole thing plays reversed.",
                   60, 8, _PPSP + _reversed(_PPSP)),
     _rudiment_mix("Double paradiddle + six stroke", "All sextuplets: a double paradiddle, then a six stroke roll, alternating beats and hands.",
-                  60, 8, [_DP, _SSR_L, _DP_L, _SSR]),
+                  60, 8, [_DP, _SSR_L, _DP_L, _SSR], backing="keygen"),
     _rudiment_mix("Six stroke + paradiddle-diddle", "All sextuplets: the same six strokes with the doubles in two different places, one beat each.",
-                  60, 8, [_SSR, _PDD, _SSR, _PDD]),
+                  60, 8, [_SSR, _PDD, _SSR, _PDD], backing="keygen"),
     _rudiment("Doubles 16ths", "R R L L on the sixteenths.", 70, 8, "RRLL", 4, accents=(0,)),
     # accent control: same hands, the accent walks through the sixteenth
     _rudiment("Accent on 1", "Sixteenths, accent on the beat, taps in between.", 70, 8, "RLRL", 4, accents=(0,)),

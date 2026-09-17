@@ -15,6 +15,13 @@ screen does it in a thread and fades the music in when it is ready.
 `render()` also returns the two envelopes the animation reacts to (low = kick and
 bass, high = hats and arpeggio), one value per 60th of a second, so the card can
 pulse on the beat without any analysis at playback time.
+
+Some levels play it as their backing (`Chart.backing == "keygen"`, `render_level`):
+the sextuplet rudiments, which at 60 bpm feel like triplets at 120. The tune goes
+out at twice the level's tempo on a triplet grid (12 slots a bar instead of 16), so
+its arpeggio lands on the level's sextuplets, its beat is the level's eighth and its
+backbeat the level's off-beats; the count-in is the tune's intro and the level's bar 0
+the drop of the main section. One tune per level (the seed is the level's name).
 """
 import math
 
@@ -49,15 +56,26 @@ PLAN = [
 ]
 SECTION_BARS = 8
 
-KICKS = {1: [0, 8], 2: [0, 6, 8, 14], 3: [0, 4, 8, 12]}
-SNARES = {1: [], 2: [4, 12], 3: [4, 12]}
-GHOSTS = {3: [7, 15, 11]}
-BASS_PATTERNS = [
-    [(0, 0), (3, 0), (6, 12), (8, 0), (11, 0), (14, 12)],
-    [(0, 0), (2, 12), (3, 0), (6, 0), (8, 0), (10, 12), (11, 0), (14, 0)],
-    [(0, 0), (4, 7), (6, 0), (8, 0), (12, 7), (14, 0)],
-    [(2, 0), (6, 0), (10, 0), (14, 0)],
-]
+# The pattern tables per grid: 16 slots a bar (sixteenths, the cracktro proper) or 12
+# (triplets, the level backing). Slots are the bar's grid positions; the bass carries
+# (slot, semitones over the root); riff slots span two bars; hats are the closed
+# pattern of the thin sections (the thick ones play every slot).
+GRIDS = {
+    16: dict(kicks={1: [0, 8], 2: [0, 6, 8, 14], 3: [0, 4, 8, 12]}, pickups=[2, 10],
+             snares={1: [], 2: [4, 12], 3: [4, 12]}, ghosts={3: [7, 15, 11]},
+             bass=[[(0, 0), (3, 0), (6, 12), (8, 0), (11, 0), (14, 12)],
+                   [(0, 0), (2, 12), (3, 0), (6, 0), (8, 0), (10, 12), (11, 0), (14, 0)],
+                   [(0, 0), (4, 7), (6, 0), (8, 0), (12, 7), (14, 0)],
+                   [(2, 0), (6, 0), (10, 0), (14, 0)]],
+             riff_slots=list(range(0, 32, 2)), hats=list(range(0, 16, 2)), delay=3),
+    12: dict(kicks={1: [0, 6], 2: [0, 4, 6, 10], 3: [0, 3, 6, 9]}, pickups=[2, 8],
+             snares={1: [], 2: [3, 9], 3: [3, 9]}, ghosts={3: [5, 11, 8]},
+             bass=[[(0, 0), (2, 0), (5, 12), (6, 0), (8, 0), (11, 12)],
+                   [(0, 0), (2, 12), (3, 0), (5, 0), (6, 0), (8, 12), (9, 0), (11, 0)],
+                   [(0, 0), (3, 7), (5, 0), (6, 0), (9, 7), (11, 0)],
+                   [(2, 0), (5, 0), (8, 0), (11, 0)]],
+             riff_slots=[s for s in range(24) if s % 3 != 1], hats=[0, 2, 3, 5, 6, 8, 9, 11], delay=2),
+}
 
 
 def _pulse(phase, duty):
@@ -123,17 +141,26 @@ def _riser(n, sr=SR):
     return ((hiss + swoop) * np.minimum(1.0, (1 - up) * 6 + 0.15)).astype(np.float32)
 
 
-def render(bpm=None, seed=None, sections=None, sr=SR):
+def render(bpm=None, seed=None, sections=None, sr=SR, grid=16, plan=None, loop=True):
     """The whole loop. Returns a dict with the stereo int16 samples and the
-    envelopes the animation follows."""
+    envelopes the animation follows.
+    grid: slots a bar, 16 (sixteenths) or 12 (triplets, see GRIDS). plan: the sections
+    to play instead of PLAN, each with an optional "bars" (SECTION_BARS otherwise).
+    loop: fold what rings past the end back onto the top (the waiting screen loops it)."""
     rng = np.random.default_rng(seed)
     bpm = float(bpm or rng.integers(146, 163))
     prog = PROGS[int(rng.integers(0, len(PROGS)))]
-    plan = PLAN if sections is None else PLAN[:sections]
+    if plan is None:
+        plan = PLAN if sections is None else PLAN[:sections]
+    G = GRIDS[grid]
     beat = 60.0 / bpm
     bar = 4 * beat
-    step = bar / 16                                  # one sixteenth
-    bars = len(plan) * SECTION_BARS
+    step = bar / grid                                # one slot of the grid
+    q = grid // 4                                    # slots a beat
+    # every bar: (section index, bar within the section, the section's length)
+    layout = [(si, b, sec.get("bars", SECTION_BARS)) for si, sec in enumerate(plan)
+              for b in range(sec.get("bars", SECTION_BARS))]
+    bars = len(layout)
     n = int(bars * bar * sr) + int(2.0 * sr)
     mid = np.zeros(n, np.float32)                    # kick, snare, bass: centred
     wide = np.zeros((2, n), np.float32)              # arp, lead, pad, hats
@@ -158,7 +185,7 @@ def render(bpm=None, seed=None, sections=None, sr=SR):
     key_root = prog[0][0]
     scale = [key_root + 60 + d for d in MINOR] + [key_root + 72, key_root + 74, key_root + 75]
     # One riff for the whole tune, in sixteenths: a shape the ear can hold on to.
-    slots = sorted(rng.choice(np.arange(0, 32, 2), size=int(rng.integers(7, 11)), replace=False))
+    slots = sorted(rng.choice(np.array(G["riff_slots"]), size=int(rng.integers(7, 11)), replace=False))
     riff = []
     pos = int(rng.integers(2, 6))
     for sl in slots:
@@ -166,13 +193,12 @@ def render(bpm=None, seed=None, sections=None, sr=SR):
         riff.append((int(sl), pos))
     arp_dir = ["up", "updown", "up2"][int(rng.integers(0, 3))]
 
-    for bi in range(bars):
-        sec = plan[bi // SECTION_BARS]
-        b_in_sec = bi % SECTION_BARS
+    for bi, (si, b_in_sec, sec_bars) in enumerate(layout):
+        sec = plan[si]
         root, quality = prog[bi % len(prog)]
         chord = _chord_notes(root, quality)
         t0 = bi * bar
-        last = b_in_sec == SECTION_BARS - 1
+        last = b_in_sec == sec_bars - 1
 
         # --- pad -------------------------------------------------------------
         if sec["pad"]:
@@ -184,7 +210,7 @@ def render(bpm=None, seed=None, sections=None, sr=SR):
 
         # --- bass ------------------------------------------------------------
         if sec["bass"]:
-            pat = BASS_PATTERNS[(bi // SECTION_BARS + sec["bass"]) % len(BASS_PATTERNS)]
+            pat = G["bass"][(si + sec["bass"]) % len(G["bass"])]
             for e, deg in pat:
                 f = _midi_hz(chord[0] - 24 + deg)
                 add(mid, t0 + e * step, v.get("bass", f, step * 1.9), 0.52)
@@ -196,9 +222,9 @@ def render(bpm=None, seed=None, sections=None, sr=SR):
             order = {"up": up, "up2": up + [m + 12 for m in up],
                      "updown": up + up[-2:0:-1]}[arp_dir]
             duty = 0.25 if sec["arp"] > 1 else 0.5
-            for e in range(16):
+            for e in range(grid):
                 f = _midi_hz(order[e % len(order)])
-                g = 0.23 * (1.0 if e % 4 == 0 else 0.78)
+                g = 0.23 * (1.0 if e % q == 0 else 0.78)
                 add(wide[e % 2], t0 + e * step, v.get("arp", f, step * 1.6, duty), g)
 
         # --- lead ------------------------------------------------------------
@@ -206,7 +232,7 @@ def render(bpm=None, seed=None, sections=None, sr=SR):
             tones = {m % 12 for m in chord}
             for sl, deg in riff:
                 p = deg
-                if sl % 8 == 0:                      # land the strong slots on a chord tone
+                if sl % (2 * q) == 0:                # land the strong slots on a chord tone
                     cands = [i for i, m in enumerate(scale) if m % 12 in tones] or [p]
                     p = min(cands, key=lambda i: abs(i - p))
                 f = _midi_hz(scale[p] + (24 if sec["lead"] > 1 else 12))
@@ -217,15 +243,14 @@ def render(bpm=None, seed=None, sections=None, sr=SR):
         # --- drums -----------------------------------------------------------
         d = sec["drums"]
         if d:
-            for e in KICKS[d] + ([2, 10] if d == 3 and b_in_sec % 4 == 2 else []):
+            for e in G["kicks"][d] + (G["pickups"] if d == 3 and b_in_sec % 4 == 2 else []):
                 add(mid, t0 + e * step, kck, 0.80)
-            for e in SNARES[d]:
+            for e in G["snares"][d]:
                 add(mid, t0 + e * step, snr, 0.62)
-            for e in GHOSTS.get(d, []) if b_in_sec % 2 else []:
+            for e in G["ghosts"].get(d, []) if b_in_sec % 2 else []:
                 add(mid, t0 + e * step, snr, 0.12)
-            every = 1 if d >= 2 else 2
-            for e in range(0, 16, every):
-                openhat = d >= 2 and e % 4 == 2 and (b_in_sec % 2 == 1)
+            for e in range(grid) if d >= 2 else G["hats"]:
+                openhat = d >= 2 and e % q == 2 and (b_in_sec % 2 == 1)
                 sig = hato if openhat else hat
                 g = (0.10 if openhat else 0.16 * (1.0 if e % 4 == 0 else 0.62))
                 add(wide[e % 2], t0 + e * step, sig, g * 0.85)
@@ -233,22 +258,23 @@ def render(bpm=None, seed=None, sections=None, sr=SR):
         if b_in_sec == 0 and sec["drums"]:
             add(wide[0], t0, cym, 0.30)
             add(wide[1], t0, cym, 0.26)
-        if last and plan[(bi // SECTION_BARS + 1) % len(plan)]["drums"]:
-            for i, e in enumerate(range(8, 16, 2)):   # tom fill into the next section
+        if last and plan[(si + 1) % len(plan)]["drums"]:
+            for i, e in enumerate(range(grid // 2, grid, 2)):   # tom fill into the next section
                 add(mid, t0 + e * step, toms[i % len(toms)], 0.55)
                 add(mid, t0 + (e + 1) * step, snr, 0.22)
             add(mid, t0 + bar - 2.0, _riser(int(2.0 * sr), sr), 0.22)
 
     # --- mix ---------------------------------------------------------------
-    dly = int(round(step * 3 * sr))                   # 3/16, the classic ping-pong
+    dly = int(round(step * G["delay"] * sr))          # 3/16, the classic ping-pong (2/12 in triplets)
     wide[0] = _delay(wide[0], dly, 0.30)
     wide[1] = _delay(wide[1], dly + int(0.004 * sr), 0.34)
     length = bars * bar
     cut = int(length * sr)
-    tail = 1.2                                        # what rings past the loop comes back at the top
-    ring = int(tail * sr)
-    for buf in (mid, wide[0], wide[1]):
-        buf[:ring] += buf[cut : cut + ring]
+    if loop:
+        tail = 1.2                                    # what rings past the loop comes back at the top
+        ring = int(tail * sr)
+        for buf in (mid, wide[0], wide[1]):
+            buf[:ring] += buf[cut : cut + ring]
     left = (mid + wide[0])[:cut]
     right = (mid + wide[1])[:cut]
     peak = max(np.max(np.abs(left)), np.max(np.abs(right))) or 1.0
@@ -272,6 +298,35 @@ def render(bpm=None, seed=None, sections=None, sr=SR):
     return dict(pcm=pcm, sr=sr, bpm=bpm, bars=bars, length=length, fps=fps,
                 low=low, high=high, beat=60.0 / bpm,
                 key=NAMES[key_root % 12] + ("m" if prog[0][1].startswith("m") else ""))
+
+
+LEVEL_SECTIONS = PLAN[2:]                            # main, lift, break, drop, bridge, outro, and round again
+
+
+def render_level(bpm, seed, lead_in_s, total_s, sr=SR):
+    """The tune as a level's backing: stereo int16 from -lead_in_s to past total_s, the
+    level's bar 0 at lead_in_s. Twice the level's tempo on the triplet grid (a 60 bpm
+    sextuplet level is the tune at 120 in triplets); the count-in is the intro section,
+    the level starts on "main" and the sections go round from there."""
+    kbpm = 2.0 * bpm
+    kbar = 240.0 / kbpm
+    intro = int(round(lead_in_s / kbar))
+    need = int(np.ceil((lead_in_s + total_s) / kbar)) + 1 - intro
+    plan = [dict(PLAN[0], bars=intro)] if intro else []
+    i = 0
+    while need > 0:
+        sec = LEVEL_SECTIONS[i % len(LEVEL_SECTIONS)]
+        plan.append(dict(sec, bars=min(SECTION_BARS, need)))
+        need -= SECTION_BARS
+        i += 1
+    tr = render(bpm=kbpm, seed=seed, sr=sr, grid=12, plan=plan, loop=False)
+    head = int(round(intro * kbar * sr)) - int(round(lead_in_s * sr))   # 0 unless the count-in is not whole bars
+    pcm = tr["pcm"]
+    if head > 0:
+        pcm = pcm[head:]
+    elif head < 0:
+        pcm = np.concatenate([np.zeros((-head, 2), np.int16), pcm])
+    return pcm
 
 
 def main(argv=None):
