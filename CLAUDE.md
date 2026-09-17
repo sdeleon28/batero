@@ -200,8 +200,9 @@ each other (`ChartNote.hand`; notes without a hand are skipped over, a longer ru
 exercise and gets nothing), and `Renderer.doubles` draws a bracket hugging the notes on the
 side of the hand that plays them, `]` to the right of an R R, `[` to the left of an L L, in
 the hand's colour from the sticking strip (`HAND_COLORS`: R red, L cyan). It follows the taps'
-narrower boxes, stays until the last note is played, fades with a missed one, is not drawn
-over a skipped note after a jump, and comes down again with the loop's head at the wrap.
+narrower boxes, goes the moment the first stroke of the double is played or missed (left
+over the second note it distracted), is not drawn over a skipped note after a jump, and
+comes down again with the loop's head at the wrap.
 
 ## The transport: phrases, loop, practice (play screen)
 

@@ -190,8 +190,9 @@ class Renderer:
         """A bracket beside every double (Chart.doubles) on the side of the hand that plays
         it, in that hand's colour from the sticking strip: ] to the right of an R R, [ to
         the left of an L L, so which hand doubles is read at a glance. The bracket hugs the
-        notes and stays until the last of them is played; a jump that lands inside a double
-        leaves no bracket over the skipped note. within / shift: the loop's head, drawn a lap
+        notes and goes with the first stroke of the double (a bracket left over the second
+        note distracted, 2026-09-16); a jump that lands inside a double leaves no bracket over
+        the skipped note. within / shift: the loop's head, drawn a lap
         early with the coming notes."""
         g, S = self.game, self.s
         if self.double_runs is None:
@@ -210,11 +211,8 @@ class Renderer:
             colour = HAND_COLORS.get(last.hand)
             if colour is None:
                 continue
-            if within is None:
-                if last.state == "hit":
-                    continue
-                if last.state == "miss":
-                    colour = lerp(colour, BG, min(1.0, (now - t1) / MISS_FADE_S))
+            if within is None and any(n.state != "pending" for n in notes):
+                continue                       # the first stroke played (or missed): the bracket has done its job
             boxes = [self.note_box(n) for n in notes]
             x = min(b[0] for b in boxes)
             right = max(b[0] + b[1] for b in boxes)
