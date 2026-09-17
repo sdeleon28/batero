@@ -36,6 +36,8 @@ JUDGE_COLORS = {
 DYN_COLORS = {"ACCENT": (255, 255, 255), "TAP": (150, 200, 160), "SOFT": (240, 140, 60), "LOUD": (240, 140, 60)}
 DYN_LABELS = {"ACCENT": "ACCENT", "TAP": "tap", "SOFT": "no accent!", "LOUD": "too loud!"}
 ACCENT_NOTE_SCALE = 1.7   # accented notes are this much taller
+HAND_COLORS = {"R": (245, 90, 90), "L": (80, 200, 230)}   # the sticking strip's hands, and the doubles' brackets
+DOUBLE_TICK = 14          # the bracket's ticks reach this far over the notes (px at scale 1)
 
 
 def lerp(a, b, k):
@@ -150,6 +152,7 @@ class Renderer:
         self.ghosts = ghosts
         self.game = game
         self.note_times = None                # chart note times, built on first use by the sticking strip
+        self.double_runs = None               # chart.doubles(), built on first use
         self.w, self.h = size
         self.f = fonts
         self.judge_surfs = {k: fonts.big.render(k, True, c) for k, c in JUDGE_COLORS.items()}
@@ -171,6 +174,61 @@ class Renderer:
     def y_for(self, note_t, now):
         return self.line_y - (note_t - now) * self.pps * self.game.speed
 
+    def note_box(self, n):
+        """A note's rectangle: (x, width, height, accent). Accents are taller; in a dynamics
+        chart the taps are narrower."""
+        g, S = self.game, self.s
+        x = int(self.lane_x[n.lane] + 6 * S)
+        w = int(self.lane_w - 14 * S)
+        accent = n.accent or (not g.chart.dynamics and n.velocity >= 100)
+        nh = int(self.note_h * ACCENT_NOTE_SCALE) if accent else self.note_h
+        if g.chart.dynamics and not accent:
+            x, w = x + int(w * 0.15), int(w * 0.7)
+        return x, w, nh, accent
+
+    def doubles(self, surf, now, top, shift=0.0, within=None):
+        """A bracket beside every double (Chart.doubles) on the side of the hand that plays
+        it, in that hand's colour from the sticking strip: ] to the right of an R R, [ to
+        the left of an L L, so which hand doubles is read at a glance. The bracket hugs the
+        notes and stays until the last of them is played; a jump that lands inside a double
+        leaves no bracket over the skipped note. within / shift: the loop's head, drawn a lap
+        early with the coming notes."""
+        g, S = self.game, self.s
+        if self.double_runs is None:
+            self.double_runs = g.chart.doubles()
+        tick, wd = DOUBLE_TICK * S, max(2, int(3 * S))
+        for i, j in self.double_runs:
+            notes = [n for n in g.notes[i:j + 1] if n.state != "skip"]
+            if len(notes) < 2:
+                continue
+            first, last = notes[0], notes[-1]
+            if within is not None and not (within[0] <= first.t and last.t <= within[1]):
+                continue
+            t0, t1 = first.t + shift, last.t + shift
+            if t0 > top or t1 < now - MISS_FADE_S:
+                continue
+            colour = HAND_COLORS.get(last.hand)
+            if colour is None:
+                continue
+            if within is None:
+                if last.state == "hit":
+                    continue
+                if last.state == "miss":
+                    colour = lerp(colour, BG, min(1.0, (now - t1) / MISS_FADE_S))
+            boxes = [self.note_box(n) for n in notes]
+            x = min(b[0] for b in boxes)
+            right = max(b[0] + b[1] for b in boxes)
+            y0 = int(self.y_for(t1, now) - boxes[-1][2] / 2 - 3 * S)      # the later note is higher up
+            y1 = int(self.y_for(t0, now) + boxes[0][2] / 2 + 3 * S)
+            if last.hand == "R":
+                xb, reach = int(right + 2 * S), -tick
+            else:
+                xb, reach = int(x - 2 * S - wd), tick
+            pygame.draw.rect(surf, colour, (xb, y0, wd, y1 - y0 + wd))
+            xt = int(min(xb, xb + reach))
+            pygame.draw.rect(surf, colour, (xt, y0, int(abs(reach) + wd), wd))
+            pygame.draw.rect(surf, colour, (xt, y1, int(abs(reach) + wd), wd))
+
     def note(self, surf, n, t_draw, now, coming=False):
         """One chart note at chart time t_draw (the loop's head is drawn a lap early, and
         then always as pending). Skipped notes (before a jump) are not drawn at all."""
@@ -180,8 +238,7 @@ class Renderer:
         y = self.y_for(t_draw, now)
         if y > self.h + self.note_h:
             return
-        x = int(self.lane_x[n.lane] + 6 * S)
-        w = int(self.lane_w - 14 * S)
+        x, w, nh, accent = self.note_box(n)
         color = g.lanes[n.lane].color
         missed = n.state == "miss" and not coming
         if missed:
@@ -189,12 +246,8 @@ class Renderer:
             if age > 1:
                 return
             color = lerp(JUDGE_COLORS["MISS"], BG, age)
-        accent = n.accent or (not g.chart.dynamics and n.velocity >= 100)
-        nh = int(self.note_h * ACCENT_NOTE_SCALE) if accent else self.note_h
-        if g.chart.dynamics and not accent:
-            x, w = x + int(w * 0.15), int(w * 0.7)        # taps: narrower and dimmer
-            if not missed:
-                color = lerp(color, LANE_BG, 0.35)
+        elif g.chart.dynamics and not accent:
+            color = lerp(color, LANE_BG, 0.35)            # taps: dimmer
         rect = (x, int(y - nh / 2), w, nh)
         pygame.draw.rect(surf, color, rect, border_radius=int(6 * S))
         if accent:
@@ -249,6 +302,7 @@ class Renderer:
             if n.t > top:
                 break
             self.note(surf, n, n.t, now)
+        self.doubles(surf, now, top)
         if loop is not None:
             # the loop's head, drawn above the line during the tail of the lap, so the notes
             # of the first bar come down instead of appearing on the line at the wrap
@@ -261,6 +315,7 @@ class Renderer:
                     if n.t > a + ahead:
                         break
                     self.note(surf, n, n.t + (b - a), now, coming=True)
+                self.doubles(surf, now, top, shift=b - a, within=(a, a + ahead))
         self.marker_names(surf)
 
         # flashes: ring at the line + error number, drawn the frame after the hit arrives
@@ -636,7 +691,7 @@ class Renderer:
                     pygame.draw.circle(surf, (70, 70, 80), (int(cx), int(yr + 2 * S)), int(2.5 * S))
                     continue
                 hot = i == idx
-                color = (255, 255, 255) if hot else ((245, 90, 90) if hand == "R" else (80, 200, 230))
+                color = (255, 255, 255) if hot else HAND_COLORS[hand]
                 if hot:
                     pygame.draw.circle(surf, lerp(LANE_BG, color, 0.5), (int(cx), int(yr)), int(12 * S))
                 if i in accents:

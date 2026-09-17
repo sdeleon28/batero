@@ -194,6 +194,15 @@ the hub counts both. Old level names map to current keys in `kit.PROGRESS_MIGRAT
 applied when progress loads. Levels with hands on different drums, feet patterns and hi-hat
 lessons have no lead (one version).
 
+**Doubles are bracketed on the highway** (asked for 2026-09-16): `Chart.doubles()` finds runs
+of two or three consecutive strokes of one hand (or foot) on one instrument within a beat of
+each other (`ChartNote.hand`; notes without a hand are skipped over, a longer run is a one-hand
+exercise and gets nothing), and `Renderer.doubles` draws a bracket hugging the notes on the
+side of the hand that plays them, `]` to the right of an R R, `[` to the left of an L L, in
+the hand's colour from the sticking strip (`HAND_COLORS`: R red, L cyan). It follows the taps'
+narrower boxes, stays until the last note is played, fades with a missed one, is not drawn
+over a skipped note after a jump, and comes down again with the loop's head at the wrap.
+
 ## The transport: phrases, loop, practice (play screen)
 
 Navigating a level like a DAW, asked for 2026-09-15. `Chart.phrase_bounds()` cuts the level

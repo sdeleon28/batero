@@ -213,6 +213,30 @@ class Chart:
     def length(self):
         return self.notes[-1].t if self.notes else 0.0
 
+    def doubles(self):
+        """The doubles: runs of two or three consecutive strokes of one hand (or foot) on one
+        instrument, each within a beat of the last, as (first index, last index) into notes.
+        The highway brackets them on the hand's side. Notes without a hand are not strokes and
+        are skipped over; a longer run is a one-hand exercise, not a double, and gets nothing."""
+        out, run = [], []
+        beat = 60 / self.bpm
+
+        def flush():
+            if 2 <= len(run) <= 3:
+                out.append((run[0], run[-1]))
+
+        for i, n in enumerate(self.notes):
+            if not n.hand:
+                continue
+            if run:
+                p = self.notes[run[-1]]
+                if p.hand != n.hand or p.key != n.key or n.t - p.t > beat * 1.01:
+                    flush()
+                    run = []
+            run.append(i)
+        flush()
+        return out
+
     @property
     def beat(self):
         return 60 / self.bpm
