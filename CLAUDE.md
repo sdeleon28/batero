@@ -123,6 +123,15 @@ prints the received audio's level, so silence is caught) and
   (2.6..3.7 s under load). The user has two USB Ethernet adapters; a wired link is the fix
   if the stream drops frames. Ingest TCP round trip 47..51 ms.
 
+## Skills (`.claude/skills/`)
+
+- **`/twitch-clips [instructions]`**: the latest finished VOD of the channel, found through the
+  Chrome extension on the Video Producer, downloaded with yt-dlp into `~/Movies/drumhero/vods/`,
+  cut into clips (16:9 and 9:16) in `~/Movies/drumhero/clips/<date> <label>/`. The moments come
+  from the run logs and the takes on the VOD's clock (`moments.py` in the skill folder; VOD time =
+  wall - the VOD's `timestamp`). Instructions can name the stream, the parts or the style. It
+  never starts or stops the stream and never posts anything.
+
 ## Waiting screen (`cortina`)
 
 `drumhero/agi.py`, a separate terminal program, for the moments the user leaves
