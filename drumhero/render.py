@@ -400,7 +400,6 @@ class Renderer:
             a, tp = dyn_band(None, g.night, g.dyn_scale)
             right.append(f"accent >= {a}  tap <= {tp}  ({g.dyn_scale:.0%}{', night' if g.night else ''})")
         tr = self.transport
-        right.append("1-0 keyboard hits (K)" if tr.get("keys") else "1-0 phrase jump (K)")
         if tr.get("practice"):
             right.append("practice (P): nothing saved")
         elif g.seeked:
@@ -492,7 +491,7 @@ class Renderer:
         tr = self.transport
         pending, rng = tr.get("pending"), tr.get("range")
         y = 126 * S                                   # under the metronome's beat squares
-        if pending is not None or (rng is not None and not tr.get("keys")):
+        if pending is not None or rng is not None:
             back = pygame.Surface((int(300 * S), int(48 * S)))
             back.fill(BG)
             back.set_alpha(215)
@@ -501,7 +500,7 @@ class Renderer:
             what = "type the last phrase" if pending else "type the first and last phrase"
             f.center(surf, f"loop  l{pending}_", f.mid, ACCENT, y)
             f.center(surf, what, f.small, ACCENT, y + 24 * S)
-        elif rng is not None and not tr.get("keys"):
+        elif rng is not None:
             n = len(self.game.chart.phrase_bounds()) - 1
             a, b = (rng[0] + 1) % 10, (min(rng[1], n - 1) + 1) % 10
             if loop is not None:
@@ -520,12 +519,11 @@ class Renderer:
         playhead parked at its start): otherwise pressing 3 lights slot 2 for a bar."""
         g, f, S = self.game, self.f, self.s
         tr = self.transport
-        keys = tr.get("keys")                       # 1..0 hit the lanes instead of jumping
         bounds = g.chart.phrase_bounds()
         n = len(bounds) - 1
         landing = count_in_end is not None and now < count_in_end
         pos = count_in_end if landing else now
-        cur = None if keys else g.chart.phrase_at(max(pos, 0.0))
+        cur = g.chart.phrase_at(max(pos, 0.0))
         rng = tr.get("range")
         pending = tr.get("pending")
         typed = set() if pending is None else {(int(d) - 1) % 10 for d in pending}
@@ -567,10 +565,10 @@ class Renderer:
             frame = pygame.Rect(int(X(bounds[a]) - 2 * S), int(y - 3 * S),
                                 int(X(bounds[b + 1]) - X(bounds[a]) + 4 * S), int(H + 6 * S))
             pygame.draw.rect(surf, self.loop_colour(loop), frame, max(1, int(2 * S)), border_radius=int(4 * S))
-        if not keys:                                   # the playhead, over everything, dark-edged so it reads on any cell
-            px = int(X(max(bounds[0], min(pos, bounds[-1]))))
-            pygame.draw.line(surf, BG, (px, int(y - 6 * S)), (px, int(y + H + 6 * S)), max(3, int(6 * S)))
-            pygame.draw.line(surf, TEXT, (px, int(y - 5 * S)), (px, int(y + H + 5 * S)), max(1, int(2 * S)))
+        # the playhead, over everything, dark-edged so it reads on any cell
+        px = int(X(max(bounds[0], min(pos, bounds[-1]))))
+        pygame.draw.line(surf, BG, (px, int(y - 6 * S)), (px, int(y + H + 6 * S)), max(3, int(6 * S)))
+        pygame.draw.line(surf, TEXT, (px, int(y - 5 * S)), (px, int(y + H + 5 * S)), max(1, int(2 * S)))
         f.center(surf, "phrase", f.tiny, DIM, y + H / 2, x0 - 24 * S)
         if landing or now >= 0:
             ts = f.text(f"{g.chart.place(pos)} of {g.chart.bars}", f.tiny, ACCENT if landing else DIM)
@@ -578,10 +576,8 @@ class Renderer:
         if pending is not None:
             what = "type the last phrase" if pending else "type the first and last phrase"
             hint, col = f"loop: l{pending}_  ·  {what}", ACCENT
-        elif keys:
-            hint, col = "1-0 hit the lanes  ·  K back to the transport", DIM
         else:
-            hint, col = "1-0 jump to a phrase  ·  l35 loop 3-5  ·  \\ loop on/off  ·  K keyboard hits", DIM
+            hint, col = "1-0 jump to a phrase  ·  l35 loop 3-5  ·  \\ loop on/off", DIM
         f.center(surf, hint, f.small, col, y + H + 14 * S)
 
     def dynamics_meter(self, surf, dyn, x, y):

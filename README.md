@@ -24,9 +24,6 @@ python3 -m venv .venv
 .venv/bin/python -m drumhero --log hits.csv       # dump every judged hit of the last run
 ```
 
-Without a MIDI input you can play with the keyboard: `K` in a level gives the
-keys `1`..`9`, `0` the lanes 1..10 (they drive the transport otherwise).
-
 ## Navigating with the drums
 
 The hub shows four colored sections, one per drum. Strike the drum to open it:
@@ -464,10 +461,9 @@ timing errors; the mean is your latency, the deviation is you.
 | ; / '         | accent sensitivity -/+ 5 % (saved), any screen: scales the accent and tap thresholds, 50..130 % |
 | `             | debug pane on / off, any screen: the last 48 hits' velocities as bars against the accent / tap thresholds in force (green accent, blue tap, grey between, red outline a filtered ghost), the last hit big, the last four as text with note, instrument and outcome, and the pedal CC |
 | S / C (hub)   | progress / coach                   |
-| 1..9, 0       | jump to phrase 1..10 of the level (transport; `K` gives them to the lanes) |
+| 1..9, 0       | jump to phrase 1..10 of the level (transport) |
 | l + 2 digits  | loop from one phrase to another: `l35` loops phrases 3 to 5, `l33` just phrase 3 |
 | \             | the marked loop on / off           |
-| K             | 1..0 jump to a phrase / hit the lanes from the keyboard (exclusive) |
 | P             | practice: the run saves no progress |
 
 ### Transport

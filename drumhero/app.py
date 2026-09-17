@@ -57,7 +57,8 @@ NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 def note_name(note):
     """MIDI note -> name in the Bitwig / Kontakt convention (60 = C3): 42 -> C#1."""
     return f"{NOTE_NAMES[note % 12]}{note // 12 - 2}"
-KEY_LANES = {pygame.K_1: 0, pygame.K_2: 1, pygame.K_3: 2, pygame.K_4: 3, pygame.K_5: 4,
+KEY_LANES = {pygame.K_1: 0,   # 1..9, 0 -> 0..9: the transport's phrases, the wizard's pads
+             pygame.K_2: 1, pygame.K_3: 2, pygame.K_4: 3, pygame.K_5: 4,
              pygame.K_6: 5, pygame.K_7: 6, pygame.K_8: 7, pygame.K_9: 8, pygame.K_0: 9}
 MODULE_HINTS = ("td-", "td1", "td2", "td5", "alesis", "nitro", "strike", "dtx", "roland", "drum")
 
@@ -112,7 +113,6 @@ class App:
         self.lead = "R"              # the hand leading the exercises that have a lead (Chart.lead); toms swap it
         # the transport (play screen): 1..0 jump to a phrase, l35 marks a loop, \ switches it,
         # K gives the numbers back to the lanes (the two are exclusive), P stops saving progress
-        self.keys_hit = False        # K: 1..0 hit the lanes from the keyboard instead of jumping
         self.practice = False        # P: the run writes no progress
         self.loop_range = None       # (first phrase, last phrase), kept across a retry (tempo change)
         self.loop_on = False
@@ -2317,19 +2317,11 @@ class PlayScreen(Screen):
             else:
                 prog = None if self.cat == "hihat" else self.index + (0 if self.cat == "kick" else 2)
                 g.set_track("metronome", self.app.tracks_for(self.chart, prog)["metronome"], True)
-        elif key == pygame.K_k:
-            self.app.keys_hit = not self.app.keys_hit
-            self.loop_digits = None
-            self.app.toasts.add("keyboard hits: 1-0 play the lanes" if self.app.keys_hit else
-                                "transport: 1-0 jump to a phrase", ACCENT, key="keymode")
         elif key == pygame.K_p:
             self.app.practice = not self.app.practice
             self.app.toasts.add("practice: this run saves no progress" if self.app.practice else
                                 ("practice off · this run already jumped, R starts a clean one" if g.seeked
                                  else "practice off: this run counts"), ACCENT, key="practice")
-        elif self.app.keys_hit:
-            if key in KEY_LANES and KEY_LANES[key] < len(self.lanes) and not g.finished:
-                g.hit_lane(KEY_LANES[key], 100)
         elif g.finished:
             pass                                          # the results screen is no place for the transport
         elif key == pygame.K_l:
@@ -2481,7 +2473,7 @@ class PlayScreen(Screen):
 
     def draw(self, surf, fps):
         self.renderer.top_inset = self.app.badge_height()
-        self.renderer.transport = {"keys": self.app.keys_hit, "practice": self.app.practice,
+        self.renderer.transport = {"practice": self.app.practice,
                                    "range": self.app.loop_range,
                                    "pending": None if self.loop_digits is None else
                                    "".join(str((i + 1) % 10) for i in self.loop_digits)}

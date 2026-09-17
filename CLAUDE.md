@@ -253,9 +253,10 @@ never clamp. `Chart.phrase_at` is None past the end; `Chart.place(t)` says "bar 
   number (drawn under the notes, the labels after them so a single lane does not hide them);
   the loop's start and end are lines in the loop's colour, and while the loop runs the start
   is drawn again at the end ("loop 3 again"), because that is where the notes come back to.
-- **`K`** swaps the number keys between the transport and the old keyboard lane hits
-  (`KEY_LANES`, for playing without the module); they are mutually exclusive and the ruler
-  under the lanes says which is on. **`P`** is practice: no progress written.
+- The number keys are the transport only: playing the lanes from the keyboard (and the `K`
+  toggle that swapped them) was removed on 2026-09-16, the game is played on the module.
+  `KEY_LANES` stays as the digit map (the transport, the kit wizard's stand-in for a pad).
+  **`P`** is practice: no progress written.
 - **A rehearsal saves nothing**: `PlayScreen.record` returns early when `app.practice` or
   `game.seeked`, because notes played out of order or several times would make the stars a
   lie. The results screen says "practice run · progress not saved".
