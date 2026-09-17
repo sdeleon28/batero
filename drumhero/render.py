@@ -169,7 +169,7 @@ class Renderer:
         self.pps = (self.line_y - 60 * self.s) / LOOKAHEAD_S     # pixels per second at speed 1.0
         self.finished_at = None                                  # set by the play screen for the star animation
         self.marker_labels = []
-        self.transport = {}      # set by the play screen: keys mode, practice, the pending l gesture
+        self.transport = {}      # set by the play screen: practice, the loop range, the pending l gesture
 
     def y_for(self, note_t, now):
         return self.line_y - (note_t - now) * self.pps * self.game.speed
@@ -557,9 +557,9 @@ class Renderer:
             pygame.draw.rect(surf, fill, box)
             if i > 0:
                 pygame.draw.line(surf, LANE_EDGE if i != cur else TEXT, (int(xa), int(y)), (int(xa), int(y + H)))
-            color = (20, 20, 24) if i == cur else ((70, 70, 80) if keys else TEXT)
+            color = (20, 20, 24) if i == cur else TEXT
             f.center(surf, str((i + 1) % 10), f.small, color, y + H / 2, (xa + xb) / 2)
-        pygame.draw.rect(surf, DIM if not keys else lerp(LANE_BG, DIM, 0.3), pygame.Rect(int(x0), int(y), int(n * slot), int(H)), 1)
+        pygame.draw.rect(surf, DIM, pygame.Rect(int(x0), int(y), int(n * slot), int(H)), 1)
         if rng is not None and rng[0] < n:            # the loop's frame around its band
             a, b = rng[0], min(rng[1], n - 1)
             frame = pygame.Rect(int(X(bounds[a]) - 2 * S), int(y - 3 * S),
