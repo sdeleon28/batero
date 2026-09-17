@@ -7,9 +7,13 @@
 --file is the recording the user handed over (a Twitch VOD download, a screen recording, an
 export). Its duration comes from ffprobe; when the video started (epoch seconds of its first frame)
 is --start, or else guessed and printed: a YYYYmmdd-HHMMSS stamp in the file name (local time),
-else the container's creation_time tag, else the file's mtime minus its duration. Video time of
-anything = wall - start - offset (offset: a correction measured on the picture or against the AAC
-copy in ~/Movies/drumhero/streams, 0 by default).
+else the AAC copy of a stream in ~/Movies/drumhero/streams whose length matches the video's (a
+Twitch VOD is the stream, start = the copy's stamp + 6 s), else the container's creation_time
+tag, else the file's mtime minus its duration (a download's mtime is when it was downloaded).
+--align measures the start instead of guessing: 90 s of the video's sound against the matching
+AAC copy, mono 8 kHz, cross-correlated with numpy (the copy starts at the daemon's stamp; on
+2026-09-16 the VOD's first frame came 6.02 s after it, correlation 0.89). Video time of anything
+= wall - start - offset (offset: a further correction measured on the picture, 0 by default).
 
 Prints, on the video's clock: every level played (from the run logs in ~/Library/Logs/drumhero/runs:
 name, bpm, grade, stars, max combo, misses, longest streak of PERFECT/GOOD with its time) and every
@@ -108,14 +112,104 @@ def probe(path):
     return float(fmt["duration"]), created
 
 
+STREAMS_DIR = os.path.expanduser("~/Movies/drumhero/streams")
+VOD_DELAY = 6.0     # s from the daemon's start (the AAC copy's stamp) to a Twitch VOD's first frame, measured 2026-09-16
+
+
+STREAM_LOG = os.path.expanduser("~/Library/Logs/drumhero/stream.log")
+
+
+def stream_lengths():
+    """{AAC copy path: seconds the stream ran}, from the daemon's log ("audio copy X" then
+    "stopped after mm:ss"). ffprobe's duration of a raw ADTS file is a guess from the bitrate
+    (it said 48 min for a 23 min stream), so the log is the source."""
+    out, current = {}, None
+    try:
+        with open(STREAM_LOG) as f:
+            for line in f:
+                m = re.search(r"audio copy (.+\.aac)\s*$", line)
+                if m:
+                    current = m.group(1).strip()
+                    continue
+                m = re.search(r"stopped after (\d+):(\d\d)(?::(\d\d))?", line)
+                if m and current:
+                    h, mi, se = (m.group(1), m.group(2), m.group(3)) if m.group(3) else ("0", m.group(1), m.group(2))
+                    out[current] = int(h) * 3600 + int(mi) * 60 + int(se)
+                    current = None
+    except OSError:
+        pass
+    return out
+
+
+def stream_copies():
+    """[(epoch of the stamp, duration s, path)] of the AAC copies of the streams, newest first."""
+    lengths = stream_lengths()
+    out = []
+    for path in glob.glob(os.path.join(STREAMS_DIR, "*.aac")):
+        m = re.search(r"(20\d{6})-(\d{6})", os.path.basename(path))
+        if not m:
+            continue
+        stamp = time.mktime(time.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S"))
+        dur = lengths.get(path)
+        if dur is None:
+            r = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                               capture_output=True, text=True)
+            try:
+                dur = float(r.stdout.strip())
+            except ValueError:
+                continue
+        out.append((stamp, dur, path))
+    return sorted(out, reverse=True)
+
+
+def matching_copy(duration, tolerance=20.0):
+    """The AAC copy whose length is the video's (a VOD is the whole stream), or None."""
+    near = [c for c in stream_copies() if abs(c[1] - duration) <= tolerance]
+    return min(near, key=lambda c: abs(c[1] - duration)) if near else None
+
+
 def guess_start(path, duration, created):
     """(epoch of the first frame, how it was guessed)."""
     m = re.search(r"(20\d{6})-(\d{6})", os.path.basename(path)) or re.search(r"(20\d{6})-(\d{6})", os.path.basename(os.path.dirname(os.path.abspath(path))))
     if m:
         return time.mktime(time.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")), "the stamp in the file's (or its folder's) name, local time"
+    copy = matching_copy(duration)
+    if copy:
+        return copy[0] + VOD_DELAY, (f"the stream whose AAC copy is as long ({os.path.basename(copy[2])}, {hms(copy[1])}) plus "
+                                     f"{VOD_DELAY:.0f} s (a VOD's usual delay; --align measures it, or check it on a frame)")
     if created:
         return created, "the container's creation_time tag"
-    return os.path.getmtime(path) - duration, "the file's mtime minus its duration (weak: check it on a frame)"
+    return os.path.getmtime(path) - duration, "the file's mtime minus its duration (weak: a download's mtime is the download; check it on a frame)"
+
+
+def align_start(path, duration):
+    """The video's start measured against the matching AAC copy: (epoch, how), or None.
+
+    90 s of each, mono 8 kHz, from the same point (a third of the way in, so both have sound),
+    cross-correlated in numpy. video time = aac time - lag, so start = stamp + lag."""
+    import numpy as np
+    copy = matching_copy(duration)
+    if not copy:
+        return None
+    stamp, cdur, cpath = copy
+    at, span = max(0.0, min(duration, cdur) / 3 - 45), 90
+    def pcm(src, ss):
+        r = subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{ss:.3f}", "-t", str(span), "-i", src, "-vn", "-ac", "1", "-ar", "8000", "-f", "f32le", "-"],
+                           capture_output=True)
+        return np.frombuffer(r.stdout, np.float32)
+    a, b = pcm(path, at), pcm(cpath, at)
+    n = min(len(a), len(b))
+    if n < 8000 * 10:
+        return None
+    a, b = a[:n] - a[:n].mean(), b[:n] - b[:n].mean()
+    size = 1 << int(np.ceil(np.log2(2 * n)))
+    c = np.fft.irfft(np.fft.rfft(a, size) * np.conj(np.fft.rfft(b, size)), size)
+    lag = int(np.argmax(c))
+    if lag > size // 2:
+        lag -= size
+    peak = float(c.max() / np.sqrt((a ** 2).sum() * (b ** 2).sum()))
+    lag_s = -lag / 8000.0      # video = aac + lag_s ... video runs lag_s later than the copy
+    return stamp + lag_s, f"the sound cross-correlated with {os.path.basename(cpath)}: video = copy {lag_s:+.3f} s (peak {peak:.2f}; under 0.5 is no match)"
 
 
 def layout(size):
@@ -137,6 +231,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--file", help="the recording (mp4/mkv/mov): duration from ffprobe, start guessed unless --start")
     ap.add_argument("--start", type=float, help="epoch seconds of the video's first frame")
+    ap.add_argument("--align", action="store_true", help="measure the start against the stream's AAC copy (sound cross-correlation)")
     ap.add_argument("--duration", type=float, help="video length in seconds (without --file)")
     ap.add_argument("--offset", type=float, default=0.0, help="seconds to subtract from wall - start (measured alignment)")
     ap.add_argument("--layout", help="print the crop rects for a VOD frame of this size, e.g. 1920x1080")
@@ -151,8 +246,16 @@ def main():
             start, how = a.start, "--start"
         else:
             start, how = guess_start(a.file, duration, created)
+            if a.align:
+                measured = align_start(a.file, duration)
+                if measured:
+                    start, how = measured
+                else:
+                    how += " (--align: no AAC copy of a stream as long as this video)"
         print(f"{os.path.basename(a.file)}: {hms(duration)}, first frame at "
               f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start))} local, from {how}")
+        if a.json:
+            print(f"start {start:.3f}")
     elif a.start and a.duration:
         start, duration = a.start, a.duration
     else:
