@@ -2356,7 +2356,7 @@ class PlayScreen(Screen):
     def phrase_jump(self, i, count_in=True):
         """Jump to phrase i (0-based), preceded by one silent bar of count-in so the notes
         have time to come down. The chart is silent during it; the metronome keeps counting.
-        Only a level too short for ten distinct tenths has keys that do nothing; they say so."""
+        A key past the level's last phrase (a short level has fewer than ten) does nothing but say so."""
         bounds = self.phrases()
         n = len(bounds) - 1
         if i >= n:
@@ -2370,7 +2370,9 @@ class PlayScreen(Screen):
         return i
 
     def no_phrase(self, i, n):
-        return f"no phrase {(i + 1) % 10}: this level is too short, it has {n}"
+        bars = self.chart.bars
+        each = "one bar each" if n == bars else (f"{bars // n} bars each" if bars % n == 0 else f"{bars} bars")
+        return f"no phrase {(i + 1) % 10}: this level has {n} phrases, {each}"
 
     def apply_loop(self):
         """Hand the marked range to the game, clamped to the phrases this chart has."""

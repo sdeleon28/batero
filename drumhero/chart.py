@@ -153,7 +153,7 @@ GRIDS = [1, 2, 3, 4]            # subdivisions per beat we recognise, coarsest f
 GRID_TOLERANCE = 0.12           # of a grid step
 GRID_COVERAGE = 0.95            # fraction of onsets that must sit on the grid
 PHRASE_BARS = 4                 # subdivision is decided per phrase of this many bars
-PHRASE_KEYS = 10                # transport: the number keys 1..9 and 0 address the level's ten tenths
+PHRASE_KEYS = 10                # transport: the number keys 1..9 and 0, one phrase each
 
 
 @dataclass
@@ -253,21 +253,23 @@ class Chart:
         return b[k] + (i - k) * (b[k + 1] - b[k])
 
     def phrase_bounds(self, count=PHRASE_KEYS):
-        """The transport's markers: the level cut into `count` tenths, one per number key,
-        plus the end, so phrase i (0-based) is [out[i], out[i + 1]). Every level fills the
-        ten keys: 1 is the start, 6 the middle, 0 the last tenth. Each tenth starts on the
-        coarsest grid that keeps the ten distinct: a bar when the level has ten bars or more,
-        half a bar in an 8-bar exercise, a beat in a 4-bar one."""
+        """The transport's markers: the level cut into at most `count` phrases of whole bars,
+        plus the end, so phrase i (0-based) is [out[i], out[i + 1]) and there are
+        len(out) - 1 of them, one per number key from 1. Phrases are equal whenever the
+        level allows it: a level of up to ten bars has one bar per key (8 bars, keys 1..8),
+        a longer one takes the largest count in 10..5 that divides it exactly (16 bars are 8
+        of 2, 12 are 6 of 2, 120 are 10 of 12), and only a length nothing divides (83 bars)
+        gets ten of nearly equal size. Keys past the last phrase do nothing."""
         cached = getattr(self, "_phrase_cache", None)
         if cached is not None and cached[0] == count:
             return cached[1]
-        beats = self.bars * 4
-        for unit in (4, 2, 1):
-            if beats / unit >= count:
-                break
-        units = beats / unit
-        marks = sorted({round(i * units / count) for i in range(count)})     # distinct unless the level is tiny
-        out = [self.beat_time(m * unit) for m in marks] + [self.beat_time(beats)]
+        bars = max(1, self.bars)
+        if bars <= count:
+            n = bars
+        else:
+            n = next((k for k in range(count, 4, -1) if bars % k == 0), count)
+        marks = sorted({round(i * bars / n) for i in range(n)})
+        out = [self.beat_time(b * 4) for b in marks] + [self.beat_time(bars * 4)]
         self._phrase_cache = (count, out)
         return out
 

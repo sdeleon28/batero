@@ -464,7 +464,7 @@ timing errors; the mean is your latency, the deviation is you.
 | ; / '         | accent sensitivity -/+ 5 % (saved), any screen: scales the accent and tap thresholds, 50..130 % |
 | `             | debug pane on / off, any screen: the last 48 hits' velocities as bars against the accent / tap thresholds in force (green accent, blue tap, grey between, red outline a filtered ghost), the last hit big, the last four as text with note, instrument and outcome, and the pedal CC |
 | S / C (hub)   | progress / coach                   |
-| 1..9, 0       | jump to a tenth of the level: 1 the start, 6 the middle, 0 the last tenth (transport; `K` gives them to the lanes) |
+| 1..9, 0       | jump to phrase 1..10 of the level (transport; `K` gives them to the lanes) |
 | l + 2 digits  | loop from one phrase to another: `l35` loops phrases 3 to 5, `l33` just phrase 3 |
 | \             | the marked loop on / off           |
 | K             | 1..0 jump to a phrase / hit the lanes from the keyboard (exclusive) |
@@ -472,16 +472,16 @@ timing errors; the mean is your latency, the deviation is you.
 
 ### Transport
 
-The ten number keys are the level's timeline: `1` is the start, `6` the middle,
-`0` the last tenth, whatever the level's length. The ruler under the lanes is
-that timeline, the whole level as one bar in ten cells numbered like the keys,
-each as wide as the tenth it stands for; the playhead sweeps across it, the
-cell being played is lit, and beside it is where you are ("bar 6 beat 3 of
-16"). Each tenth starts on the coarsest grid that keeps the ten distinct: a bar
-when the level has ten bars or more, half a bar in an 8-bar exercise, a beat
-in a 4-bar one. On the lanes every tenth's start comes down as a line with its
-key's number, like a DAW's section markers, so what you see scroll past is what
-you press.
+A level is cut into phrases of whole bars, equal whenever the level allows it:
+up to ten bars, one bar per key (an 8-bar exercise has phrases 1..8); longer,
+the largest count in 10..5 that divides it exactly (16 bars are 8 phrases of 2,
+120 are 10 of 12), and only a length nothing divides gets ten of nearly equal
+size. The ruler under the lanes has ten slots of one width, one per key, the
+level's phrases in the first ones and the rest empty; the playhead sweeps it,
+the phrase being played is lit, and beside it is where you are ("bar 6 of 16").
+On the lanes every phrase's start comes down as a line with its key's number,
+like a DAW's section markers, so what you see scroll past is what you press. A
+key past the last phrase does nothing but say so.
 
 `1`..`0` jump to a phrase, with one bar of run-up so the notes have time to come
 down: during it the chart is silent and nothing is judged, the metronome counts

@@ -311,9 +311,14 @@ class Game:
             if self.loop is not None and t >= self.loop[1]:
                 self._seek(self.loop[0])        # straight back, no run-up: the loop keeps the pulse
                 t = self.song_time()
+            # a note is missed once a hit could no longer reach it: the hits are dated
+            # song_time - offset (hit_lane), so the deadline moves by the offset too. Until
+            # 2026-09-16 it did not: with +45 ms the note died at +100 raw = +55 compensated,
+            # and a stroke 55..100 ms late (an OK) found it gone and became a STRAY, twice
+            # penalised. 112 of the day's 403 strays were that.
             for i in range(self.cursor, len(self.notes)):
                 n = self.notes[i]
-                if n.t > t - OK_MS / 1000:
+                if n.t > t - self.offset_ms / 1000 - OK_MS / 1000:
                     break
                 if n.state == "pending":
                     n.state, n.judge = "miss", "MISS"

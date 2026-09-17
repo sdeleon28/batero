@@ -196,18 +196,20 @@ lessons have no lead (one version).
 
 ## The transport: phrases, loop, practice (play screen)
 
-Navigating a level like a DAW, asked for 2026-09-15. **The number keys are the level's
-timeline**: `Chart.phrase_bounds()` cuts every level into ten tenths (`PHRASE_KEYS`), so 1
-is the start, 6 the middle, 0 the last tenth, in an 8-bar rudiment and in a 120-bar song
-alike; it returns the ten starts plus the end, phrase i is `[out[i], out[i+1])`. Each tenth
-starts on the coarsest grid that keeps the ten distinct (a bar from ten bars up, half a bar
-in an 8-bar level, a beat in a 4-bar one), so the cells are of slightly unequal width and
-the ruler draws them proportional. Two designs were thrown away on 2026-09-15: "as many
-equal bar-snapped parts as fit" left keys dead and the user could not tell key from cell,
-and "fixed 8-bar phrases" gave an 8-bar exercise a single phrase, the ruler wasted. The
-rule now is that the ten keys and the ten cells always mean the same thing and every
-level uses all of them. `Chart.place(t)` says "bar 3" / "bar 3 beat 3" for toasts and the
-ruler.
+Navigating a level like a DAW, asked for 2026-09-15. `Chart.phrase_bounds()` cuts the level
+into at most ten phrases (`PHRASE_KEYS`) of whole bars, one per number key from 1, and
+returns their starts plus the end, so phrase i is `[out[i], out[i+1])`. **Phrases are
+equal whenever the level allows it**: up to ten bars, one bar per key (8 bars, keys 1..8);
+longer, the largest count in 10..5 dividing the level exactly (16 bars are 8 of 2, 12 are
+6 of 2, 120 are 10 of 12); only a length nothing divides (83 bars) gets ten of nearly equal
+size. Three rules were tried on 2026-09-15/16 and this is where they landed: "fixed 8-bar
+phrases" gave an 8-bar exercise a single phrase and wasted the ruler; "ten tenths in every
+level" (a bar, half a bar or a beat as the grid) made the ruler's cells visibly unequal,
+which read as arbitrary. The first version's confusion (pressing 3 and seeing 2) was not
+the phrase rule but the run-up display, fixed separately (below). A key past the last phrase
+toasts "no phrase 9: this level has 8 phrases, one bar each" (`PlayScreen.no_phrase`);
+never clamp. `Chart.phrase_at` is None past the end; `Chart.place(t)` says "bar 3" /
+"bar 3 beat 3" for the toasts and the ruler.
 
 - **`Game.seek(t, count_in)`** is the whole mechanism: notes before t become state `"skip"`
   (never judged, never sounded by the guide, never drawn), notes from t on are re-armed to
@@ -231,10 +233,11 @@ ruler.
   line (`Renderer.note(..., coming=True)`), so the scroll is continuous. A level never
   finishes while a loop runs.
 - **What the screen shows** (`Renderer.transport_bar`, `markers`, `marker_names`,
-  `loop_badge`): the ruler is one continuous bar, the whole level, in ten proportional
-  cells numbered like the keys; the playhead sweeps it (white with a dark edge, so it reads
-  on the lit cell and on the loop band), the current cell is lit, the digits typed after l
-  light their cells, `bar n [beat m] of total` beside it, the loop a framed band there and
+  `loop_badge`): the ruler is ten slots of one width, one per key, the level's phrases in
+  the first ones and the rest drawn empty (the keys the level has not got stay visible, in
+  their place); the playhead sweeps the level's part, piecewise per slot (white with a dark
+  edge, so it reads on the lit slot and on the loop band), the current slot is lit, the
+  digits typed after l light their slots, `bar n [beat m] of total` beside it, the loop a framed band there and
   named under the metronome's beat squares ("LOOP 3-5" bright, "loop 3-5 off" dim, on a
   backing since it sits over the highway). On the lanes every phrase start scrolls down as a line with its key's
   number (drawn under the notes, the labels after them so a single lane does not hide them);
@@ -246,6 +249,14 @@ ruler.
 - **A rehearsal saves nothing**: `PlayScreen.record` returns early when `app.practice` or
   `game.seeked`, because notes played out of order or several times would make the stars a
   lie. The results screen says "practice run · progress not saved".
+
+## Judging: the miss deadline follows the latency offset
+
+`Game.hit_lane` dates a stroke `song_time - offset` (the +45 ms of the user's chain), but
+until 2026-09-16 `Game.update` declared a note missed at raw `t + OK_MS`, which is +55 ms
+compensated: a stroke 55..100 ms late, an OK, found its note gone and became a STRAY on top
+of the MISS. 112 of that day's 403 strays were this ("strays between the accents that I
+never played"). The deadline is now `t - offset - OK_MS`; keep the two in step.
 
 ## Testing
 

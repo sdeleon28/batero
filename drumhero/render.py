@@ -459,31 +459,42 @@ class Renderer:
                 f.center(surf, "\\ starts it again", f.small, DIM, y + 24 * S)
 
     def transport_bar(self, surf, now, loop, count_in_end=None):
-        """The timeline under the lanes: the whole level as one bar in ten cells, one per
-        number key, each as wide as the tenth it stands for; the playhead sweeps the whole
-        bar, the cell being played is lit, the marked loop is a framed band, the digits
-        typed after l light their cells, and a line says what 1..0 do. During the run-up to
-        a jump the ruler already shows where it lands (the key's cell lit, the playhead
-        parked at its start): otherwise pressing 3 lights cell 2 for a bar."""
+        """The ruler under the lanes: ten slots of one width, one per number key, the
+        level's phrases in the first ones and the rest empty; the playhead sweeps the
+        level's part, the phrase being played is lit, the marked loop is a framed band, the
+        digits typed after l light their slots, and a line says what 1..0 do. During the
+        run-up to a jump the ruler already shows where it lands (the key's slot lit, the
+        playhead parked at its start): otherwise pressing 3 lights slot 2 for a bar."""
         g, f, S = self.game, self.f, self.s
         tr = self.transport
         keys = tr.get("keys")                       # 1..0 hit the lanes instead of jumping
         bounds = g.chart.phrase_bounds()
         n = len(bounds) - 1
-        span = max(1e-6, bounds[-1] - bounds[0])
         landing = count_in_end is not None and now < count_in_end
         pos = count_in_end if landing else now
         cur = None if keys else g.chart.phrase_at(max(pos, 0.0))
         rng = tr.get("range")
         pending = tr.get("pending")
         typed = set() if pending is None else {(int(d) - 1) % 10 for d in pending}
-        W = min(self.w - 240 * S, 720 * S)          # the level's whole length, lanes or not
+        W = min(self.w - 240 * S, 720 * S)
+        slot = W / PHRASE_KEYS
         x0, H = self.w / 2 - W / 2, 26 * S
         y = self.line_y + 60 * S      # under the lane labels, over the hint and the session line
-        X = lambda t: x0 + (t - bounds[0]) / span * W
-        for i in range(n):
-            xa, xb = X(bounds[i]), X(bounds[i + 1])
+
+        def X(t):                                   # slot i is phrase i, whatever its length
+            t = max(bounds[0], min(t, bounds[-1]))
+            i = g.chart.phrase_at(t)
+            if i is None:
+                return x0 + n * slot
+            return x0 + (i + (t - bounds[i]) / max(1e-6, bounds[i + 1] - bounds[i])) * slot
+
+        for i in range(PHRASE_KEYS):
+            xa, xb = x0 + i * slot, x0 + (i + 1) * slot
             box = pygame.Rect(int(xa), int(y), int(xb) - int(xa), int(H))
+            if i >= n:                              # past the level: the key does nothing here
+                pygame.draw.rect(surf, lerp(LANE_BG, DIM, 0.25), box, 1)
+                f.center(surf, str((i + 1) % 10), f.small, lerp(BG, DIM, 0.4), y + H / 2, (xa + xb) / 2)
+                continue
             inside = rng is not None and rng[0] <= i <= rng[1]
             fill = LANE_BG
             if inside:
@@ -497,7 +508,7 @@ class Renderer:
                 pygame.draw.line(surf, LANE_EDGE if i != cur else TEXT, (int(xa), int(y)), (int(xa), int(y + H)))
             color = (20, 20, 24) if i == cur else ((70, 70, 80) if keys else TEXT)
             f.center(surf, str((i + 1) % 10), f.small, color, y + H / 2, (xa + xb) / 2)
-        pygame.draw.rect(surf, DIM if not keys else lerp(LANE_BG, DIM, 0.3), pygame.Rect(int(x0), int(y), int(W), int(H)), 1)
+        pygame.draw.rect(surf, DIM if not keys else lerp(LANE_BG, DIM, 0.3), pygame.Rect(int(x0), int(y), int(n * slot), int(H)), 1)
         if rng is not None and rng[0] < n:            # the loop's frame around its band
             a, b = rng[0], min(rng[1], n - 1)
             frame = pygame.Rect(int(X(bounds[a]) - 2 * S), int(y - 3 * S),
@@ -517,7 +528,7 @@ class Renderer:
         elif keys:
             hint, col = "1-0 hit the lanes  ·  K back to the transport", DIM
         else:
-            hint, col = "1-0 jump to a tenth of the level  ·  l35 loop 3-5  ·  \\ loop on/off  ·  K keyboard hits", DIM
+            hint, col = "1-0 jump to a phrase  ·  l35 loop 3-5  ·  \\ loop on/off  ·  K keyboard hits", DIM
         f.center(surf, hint, f.small, col, y + H + 14 * S)
 
     def dynamics_meter(self, surf, dyn, x, y):
