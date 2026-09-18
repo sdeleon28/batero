@@ -151,6 +151,21 @@ class Fonts:
 STRIP_ROW = 24                  # strokes per row of the sticking strip
 
 
+def wrap(font, text, width):
+    """The words of `text` in rows no wider than `width` pixels."""
+    rows, row = [], ""
+    for word in text.split():
+        cand = f"{row} {word}".strip()
+        if row and font.size(cand)[0] > width:
+            rows.append(row)
+            row = word
+        else:
+            row = cand
+    if row:
+        rows.append(row)
+    return rows
+
+
 class Renderer:
     def __init__(self, game: Game, size, fonts: Fonts, ghosts=None):
         self.ghosts = ghosts
@@ -174,6 +189,7 @@ class Renderer:
         self.finished_at = None                                  # set by the play screen for the star animation
         self.marker_labels = []
         self.transport = {}      # set by the play screen: practice, the loop range, the pending l gesture
+        self.hints = None        # (attempts, [lines]) from the play screen: what to work on, every third try short of five stars
 
     def y_for(self, note_t, now):
         return self.line_y - (note_t - now) * self.pps * self.game.speed
@@ -738,13 +754,24 @@ class Renderer:
         rehearsal = self.transport.get("practice") or g.seeked
         if rehearsal:
             lines.append(("practice run · progress not saved", self.f.small, JUDGE_COLORS["OK"]))
+        hint_rows = 0
+        bw = 600
+        if self.hints and self.hints[1]:
+            tries, texts = self.hints
+            bw = 760
+            lines.append((f"after {tries} tries · work on this", self.f.small, DIM))
+            for text in texts:
+                for row in wrap(self.f.small, text, (bw - 40) * S):
+                    lines.append((row, self.f.small, JUDGE_COLORS["OK"]))
+                    hint_rows += 1
+            hint_rows += 1
         lines.append(("Enter next · R retry · Esc back", self.f.small, DIM))
-        bh = 370 + (40 if g.chart.dynamics else 0) + (40 if g.chart.expression else 0) + (28 if rehearsal else 0)
-        box = pygame.Surface((int(600 * S), int(bh * S)))
+        bh = 370 + (40 if g.chart.dynamics else 0) + (40 if g.chart.expression else 0) + (28 if rehearsal else 0) + 28 * hint_rows
+        box = pygame.Surface((int(bw * S), int(bh * S)))
         box.fill((10, 10, 14))
         box.set_alpha(250)
         cy = self.h * 0.42
-        surf.blit(box, (self.w / 2 - 300 * S, cy - bh / 2 * S))
+        surf.blit(box, (self.w / 2 - bw / 2 * S, cy - bh / 2 * S))
         y = cy - (bh / 2 - 35) * S
         pop = None if self.finished_at is None else time.perf_counter() - self.finished_at
         for s, font, color in lines:

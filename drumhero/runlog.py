@@ -31,9 +31,9 @@ class RunLog:
             "started": time.time(),
             "chart": {
                 "name": chart.key, "lead": chart.lead, "bpm": chart.bpm, "rate": chart.rate, "desc": chart.desc,
-                "dynamics": chart.dynamics, "sticking": chart.sticking,
+                "dynamics": chart.dynamics, "expression": chart.expression, "sticking": chart.sticking,
                 "accents": sorted(chart.accents) if chart.accents else None,
-                "notes": [{"t": round(n.t, 5), "key": n.key, "vel": n.velocity, "accent": n.accent, "hand": n.hand}
+                "notes": [{"t": round(n.t, 5), "key": n.key, "vel": n.velocity, "accent": n.accent, "hand": n.hand, "art": n.art}
                           for n in chart.notes],
             },
             "lanes": [{"index": l.index, "key": l.key, "label": l.label, "notes": sorted(l.notes)} for l in lanes],

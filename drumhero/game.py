@@ -294,6 +294,7 @@ class Game:
                              song_t=round(t, 4), chart_t=round(best.t, 4) if best else None,
                              error_ms=round(err_ms, 2) if err_ms is not None else None,
                              accent=best.accent if best else None, hand=best.hand if best else None, dyn=dyn,
+                             art=best.art if best else None, played=art, art_ok=best.art_ok if best else None,
                              combo=self.combo, score=self.score)
             return judge
 

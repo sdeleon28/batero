@@ -30,6 +30,7 @@ from . import edit as E
 from . import stats as ST
 from . import profiles as PR
 from .coach import Coach
+from . import hints as HI
 from . import coach as CO
 from .devices import DeviceWatcher, Toasts, TOAST_S
 from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, draw_hihat_state, draw_stars, lerp
@@ -98,6 +99,7 @@ class App:
         self.profiles = PR.load_profiles()   # who can play; empty = no login, one shared progress
         self.profile = None                  # the profile playing now (LoginScreen), None = nobody / no profiles
         self.results = load_progress(PR.progress_path(None))   # chart key -> best stats so far (stars, grade...), saved per profile
+        self.tries = {k: v.get("tries", 0) for k, v in self.results.items()}   # attempts under five stars in a row, per level
         self.midi_name = None
         self.midi_in = None
         self.screen_obj = None
@@ -655,6 +657,7 @@ class App:
         and the coach read its runs from here on."""
         self.profile = profile
         self.results = load_progress(PR.progress_path(profile))
+        self.tries = {k: v.get("tries", 0) for k, v in self.results.items()}   # attempts under five stars in a row, per level
         self._summary_at = 0
         # the coach's report is about one player's runs: the owner keeps the old folder
         self.coach.dir = CO.COACH_DIR if profile is None or profile["id"] == PR.MAIN else os.path.join(CO.COACH_DIR, profile["id"])
@@ -2672,6 +2675,7 @@ class PlayScreen(Screen):
         self.renderer = Renderer(self.game, app.size, app.fonts, app.ghosts)
         self.recorded = False
         self.finished_at = None
+        self.hints = []               # what went wrong, for the results box (attempt())
         self.loop_digits = None       # the phrases typed after l, or None when no gesture is pending
         self.loop_at = 0.0
         self.game.reset()
@@ -2880,14 +2884,35 @@ class PlayScreen(Screen):
             keep = {k: st[k] for k in ("stars", "grade", "accuracy", "mean_ms", "std_ms", "hit", "notes")}
             keep["when"] = time.time()
             self.app.results[self.chart.key] = keep
-            self.app.save_results()
+        self.app.results[self.chart.key]["tries"] = self.app.tries.get(self.chart.key, 0)
+        self.app.save_results()
         self.recorded = True
+
+    def attempt(self):
+        """The level just ended: count it as an attempt at five stars (a rehearsal is not one), and
+        every third attempt in a row that falls short work out what went wrong (hints.analyse)
+        for the results box. Five stars reset the count."""
+        st = self.game.stats()
+        if self.game.seeked:
+            return
+        key = self.chart.key
+        if st["stars"] >= 5:
+            self.app.tries[key] = 0
+            return
+        self.app.tries[key] = self.app.tries.get(key, 0) + 1
+        if self.app.tries[key] % HI.EVERY == 0:
+            notes, strays = HI.from_game(self.game)
+            self.hints = HI.hint_for(notes, strays, self.app.settings.get("coach_language", "es"),
+                                     self.chart.dynamics, self.chart.expression)
+            self.renderer.hints = (self.app.tries[key], self.hints)
 
     def update(self):
         if self.loop_digits is not None and time.perf_counter() - self.loop_at > LOOP_GESTURE_S:
             self.loop_digits = None
         self.game.update()
         if self.game.finished:
+            if self.finished_at is None:
+                self.attempt()
             self.record()
             if self.finished_at is None:
                 self.finished_at = time.perf_counter()

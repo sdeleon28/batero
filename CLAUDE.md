@@ -194,6 +194,24 @@ h, f. `--title`, `--note`, `--scene`, `--seconds`, `--fps`, `--no-card`.
   as .txt) with SDL_VIDEODRIVER=dummy: that is how the look was checked without
   a terminal, and how to check it after touching a scene.
 
+## Hints on the results screen (every third attempt short of five stars)
+
+`drumhero/hints.py`, asked for 2026-09-18: deterministic, no LLM. `App.tries` counts, per level
+key, the finished runs in a row under five stars (a rehearsal with the transport is not an
+attempt, a practice run with P is; five stars reset it; kept as `tries` in the level's progress
+entry). Every `hints.EVERY` (3) attempts `PlayScreen.attempt` runs `hints.analyse` on the
+judged notes (`from_game`) and the results box shows the two costliest faults, in
+`coach_language`, under "after N tries · work on this". The rules are thresholds on plain
+statistics, each hint ordered by the grade points it costs: misses (which body, which beat
+position), strays (soft ones are pedal or stick touches), then one timing hint, the largest of:
+one body against the rest of the kit (>= 15 ms), the left hand against the right, the &s
+against the beats (eighth grid only), a drift between the halves of the run, the whole kit's
+bias (>= 15 ms), or the spread alone (std >= 25 ms) when nothing explains it; then soft accents
+or loud taps (with the hand when it is one hand), and the hi-hat openness confused most.
+`python -m drumhero.hints [PATH.jsonl ...] [--all] [--lang en]` prints them for a run log
+(`from_runlog`; the run logs carry `expression` and every hit's `art` / `played` / `art_ok`
+since this date), which is how to check a new rule against the past runs before shipping it.
+
 ## Profiles (who is playing)
 
 `drumhero/profiles.py`, asked for 2026-09-17 so a friend's stars stay apart from the user's. A
