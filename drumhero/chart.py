@@ -954,11 +954,11 @@ HIHAT_LESSONS = [
         {"hh": "m.m.m.m.m.m.m.m.", **_KS},
         {"hh": "m.m.m.m.m.m.m.m.", "kk": "x.....x.x.......", "sn": _S24},
     ]),
-    _groove("Openness ladder", "Two bars tight, two bars mid, two bars open, then back down to tight. Every step is a pedal position.", 84, [
-        {"hh": "t.t.t.t.t.t.t.t.", **_KS}, {"hh": "t.t.t.t.t.t.t.t.", **_KS},
-        {"hh": "m.m.m.m.m.m.m.m.", **_KS}, {"hh": "m.m.m.m.m.m.m.m.", **_KS},
-        {"hh": "a.a.a.a.a.a.a.a.", **_KS}, {"hh": "a.a.a.a.a.a.a.a.", **_KS},
-        {"hh": "m.m.m.m.m.m.m.m.", **_KS}, {"hh": "t.t.t.t.t.t.t.t.", **_KS},
+    _groove("Openness ladder", "Two bars tight, two bars mid, two bars open, then back down to tight, edge on the beats and bow on the &s. Every step is a pedal position.", 84, [
+        {"hh": "T.t.T.t.T.t.T.t.", **_KS}, {"hh": "T.t.T.t.T.t.T.t.", **_KS},
+        {"hh": "M.m.M.m.M.m.M.m.", **_KS}, {"hh": "M.m.M.m.M.m.M.m.", **_KS},
+        {"hh": "A.a.A.a.A.a.A.a.", **_KS}, {"hh": "A.a.A.a.A.a.A.a.", **_KS},
+        {"hh": "M.m.M.m.M.m.M.m.", **_KS}, {"hh": "T.t.T.t.T.t.T.t.", **_KS},
     ]),
     _groove("Open on the &", "Tight eighths, the hat opens on the & of 4 and the foot closes it on the next 1: the disco hat.", 88, [
         {"hh": "t.t.t.t.t.t.t.a.", "pd": "x...............", **_KS},

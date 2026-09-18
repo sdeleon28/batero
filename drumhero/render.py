@@ -45,7 +45,11 @@ def lerp(a, b, k):
     return tuple(int(a[i] + (b[i] - a[i]) * k) for i in range(3))
 
 
-OPENNESS_COLORS = {"tight": (245, 90, 90), "mid": (250, 200, 60), "open": (110, 220, 110)}
+# The pedal positions' colours: the pedal widget's label and, since 2026-09-17, the hi-hat
+# notes that ask for one. Tight is a crimson pink, not the kick's salmon red (the kick is two
+# lanes away and the first version made a bar of tight hats look like a bar of kicks); mid a
+# gold clear of the snare's orange; open the green of "pedal up".
+OPENNESS_COLORS = {"tight": (240, 70, 140), "mid": (250, 215, 70), "open": (110, 220, 110)}
 
 
 STAR = (250, 200, 60)
@@ -246,6 +250,11 @@ class Renderer:
             color = lerp(JUDGE_COLORS["MISS"], BG, age)
         elif g.chart.dynamics and not accent:
             color = lerp(color, LANE_BG, 0.35)            # taps: dimmer
+        elif n.art and n.art.split()[0] in OPENNESS_COLORS:
+            # A hi-hat note asking for a pedal position wears the position's colour (the same
+            # the pedal widget shows: tight crimson, mid gold, open green), so a run of tight
+            # hats and the bars where they open read as groups from across the room.
+            color = OPENNESS_COLORS[n.art.split()[0]]
         rect = (x, int(y - nh / 2), w, nh)
         pygame.draw.rect(surf, color, rect, border_radius=int(6 * S))
         if accent:
@@ -383,7 +392,12 @@ class Renderer:
             a = g.art_counts
             surf.blit(f.text(f"hat articulations {a['ok']}/{a['ok'] + a['wrong']}",
                              f.small, TEXT if a["wrong"] == 0 else JUDGE_COLORS["OK"]), (12 * S, 96 * S))
-            surf.blit(f.text("+ tight   / mid   o open   > edge   ^ foot", f.small, DIM), (12 * S, 116 * S))
+            x = 12 * S
+            for word, col in (("+ tight", OPENNESS_COLORS["tight"]), ("/ mid", OPENNESS_COLORS["mid"]),
+                              ("o open", OPENNESS_COLORS["open"]), ("> edge", DIM), ("^ foot", DIM)):
+                ts = f.text(word, f.small, col)
+                surf.blit(ts, (x, 116 * S))
+                x += ts.get_width() + 24 * S
         surf.blit(f.text(g.chart.title, f.mid, ACCENT), (12 * S, 8 * S))
         surf.blit(f.text(f"score {score}   combo {combo}", f.mid, TEXT), (12 * S, 38 * S))
         line = f"P {counts['PERFECT']}  G {counts['GOOD']}  O {counts['OK']}  M {counts['MISS']}  S {counts['STRAY']}"
