@@ -1,13 +1,8 @@
-"""Charts: the notes to play, built-in levels, MIDI file loading, and lane layout."""
-import json
-import os
+"""Charts: the notes to play, the built-in levels and courses, and the lane layout."""
 import re
-import statistics
-import sys
 import dataclasses
 from dataclasses import dataclass, field
 
-import mido
 
 # --- the kit -------------------------------------------------------------------------
 # A zone is one strikeable part of the TD-17 (snare head, snare rim, ride bell, ...).
@@ -176,9 +171,7 @@ class Chart:
     desc: str = ""
     segments: list = None       # [(start_bar, subdivision), ...] sorted; inferred when None.
                                 # start_bar may be fractional (0.5 = beat 3) for mixed rudiments
-    beats: list = None          # beat times in chart seconds when the tempo is not constant (songs)
-    audio: str = None           # audio file played along (songs)
-    audio_offset: float = 0.0   # audio time of chart time 0 (the first charted downbeat)
+    beats: list = None          # beat times in chart seconds when the tempo is not constant; None = bpm
     sticking: list = None       # ["R", "L", ...] pattern shown as a strip (rudiments)
     accents: set = None         # indices within the sticking pattern that are accented
     sticking_groups: list = None  # indices where a new cell of the pattern starts (strip separators)
@@ -217,8 +210,7 @@ class Chart:
             return self
         notes = [dataclasses.replace(n, t=n.t / rate) for n in self.notes]
         ch = dataclasses.replace(self, notes=notes, bpm=self.bpm * rate, rate=rate,
-                                 beats=[b / rate for b in self.beats] if self.beats else None,
-                                 audio_offset=self.audio_offset / rate)
+                                 beats=[b / rate for b in self.beats] if self.beats else None)
         return ch
 
     @property
@@ -381,68 +373,6 @@ def infer_segments(notes, bpm, phrase_bars=PHRASE_BARS, beat_pos=None):
             segments.append((i * phrase_bars, sub))
             current = sub
     return segments
-
-
-def key_for_note(num: int) -> str:
-    return GM_TO_INSTRUMENT.get(num, f"n{num}")
-
-
-def load_midi_chart(path: str, channel: int = None, name: str = None, align="first_note") -> Chart:
-    """Chart from a MIDI file. Honors tempo changes. The beat grid comes from the tempo
-    map, so songs with a tracked tempo keep their real beats. align: "first_note" puts
-    chart time 0 on the first note; "zero" keeps the file's own time 0 (songs)."""
-    mid = mido.MidiFile(path)
-    tpb = mid.ticks_per_beat
-    # absolute tick -> seconds through the tempo map (merged tracks)
-    tempo_map = []           # (tick, tempo)
-    merged = mido.merge_tracks(mid.tracks)
-    tick = 0
-    for msg in merged:
-        tick += msg.time
-        if msg.type == "set_tempo":
-            tempo_map.append((tick, msg.tempo))
-    if not tempo_map or tempo_map[0][0] > 0:
-        tempo_map.insert(0, (0, 500000))
-
-    def tick_to_s(x):
-        s_acc, last_tick, tempo = 0.0, 0, tempo_map[0][1]
-        for tk, tp in tempo_map:
-            if tk >= x:
-                break
-            s_acc += (tk - last_tick) * tempo / 1e6 / tpb
-            last_tick, tempo = tk, tp
-        return s_acc + (x - last_tick) * tempo / 1e6 / tpb
-
-    notes, tick, end_tick = [], 0, 0
-    for msg in merged:
-        tick += msg.time
-        end_tick = tick
-        if msg.type == "note_on" and msg.velocity > 0 and (channel is None or msg.channel == channel):
-            notes.append(ChartNote(tick_to_s(tick), key_for_note(msg.note), msg.velocity))
-    if not notes:
-        sys.exit(f"No note_on events found in {path}" + (f" on channel {channel + 1}" if channel is not None else ""))
-    origin = notes[0].t if align == "first_note" else 0.0
-    for n in notes:
-        n.t -= origin
-    beats = [tick_to_s(b * tpb) - origin for b in range(end_tick // tpb + 2)]
-    constant = len(tempo_map) == 1
-    bpm = mido.tempo2bpm(tempo_map[0][1]) if constant else 60.0 / statistics.median(
-        [beats[i + 1] - beats[i] for i in range(len(beats) - 1)] or [0.5])
-    return Chart(name or path.rsplit("/", 1)[-1], notes, bpm, "MIDI file", beats=None if constant else beats)
-
-
-def load_song_folder(folder: str) -> Chart:
-    """A song is a folder with song.json (title, audio, offset) and chart.mid, made by ingest."""
-    meta = json.load(open(os.path.join(folder, "song.json")))
-    chart = load_midi_chart(os.path.join(folder, "chart.mid"), 9, meta.get("title") or os.path.basename(folder), align="zero")
-    chart.desc = meta.get("artist", "song")
-    audio = meta.get("audio")
-    if audio:
-        chart.audio = os.path.join(folder, audio)
-        chart.audio_offset = float(meta.get("offset", 0.0))
-    if meta.get("bpm"):
-        chart.bpm = float(meta["bpm"])
-    return chart
 
 
 # ---------------------------------------------------------------------------
@@ -1070,8 +1000,181 @@ KICK_OSTINATOS = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Courses: one genre at a time, its idiomatic grooves and fills in levels that build on each
+# other (asked 2026-09-17, replacing the Songs section: the copyright made songs a dead end).
+# A course is a list of _groove levels with a backing style of its own (sounds.STYLES).
+# ---------------------------------------------------------------------------
+@dataclass
+class Course:
+    key: str        # the app's category key; progress stays keyed by the level names
+    name: str
+    desc: str
+    levels: list
+
+
+# --- Pop punk: fast eighths, the push on the & of 2 and 4, the crash wash, snare on the &, the
+# stabs, the build, half-time verses, kick doubles. Written tempos climb from 140 to 168 (the
+# style lives at 160..190: the rate keys take it there once the hands are in).
+_PP_V = "x.....x.x......."            # kick on 1, the & of 2 and 3
+_PP_P = "x.....x.x.....x."            # the same with the push on the & of 4
+_H8C = "..x.x.x.x.x.x.x."             # hats on the eighths under a crash on the 1
+_CR1 = "x..............."             # a crash on the 1
+_CR8 = "x.x.x.x.x.x.x.x."             # the crash wash: right hand on the crash, every eighth
+_SK = "..X...X...X...X."              # the skank: snare on every &
+_K4 = "x...x...x...x..."              # kick on every beat
+_KD = "x.xx....x.xx...."              # kick doubles: 1 & a, 3 & a
+_KDP = "x.xx....x.xx..x."             # the doubles with the push
+_HT_K = "x.....x........."            # half time: kick on 1 and the & of 2
+_HT_S = "........X......."            # half time: snare on 3
+# the fills, on the last bar of a phrase (hats stop where the fill starts)
+_F_SN8 = {"hh": "x.x.x.x.x.x.....", "sn": "....X.......x.x."}                                      # two snares on the eighths of 4
+_F_SN16 = {"hh": "x.x.x.x.x.x.....", "sn": "....X.......xxxx"}                                     # four snares on 4
+_F_SNT = {"hh": "x.x.x.x.x.x.....", "sn": "....X.......xx..", "t1": "..............xx"}            # snare, rack
+_F_WALK = {"hh": "x.x.x.x.........", "sn": "....X...xxxx....", "t1": "............xx..", "ft": "..............xx"}   # the walk down
+_F_KIT = {"hh": "x.x.............", "sn": "....xxxx........", "t1": "........xxxx....", "ft": "............xxxx"}    # the whole kit from the 2
+_F_TOMS8 = {"hh": "x.x.x.x.........", "sn": "....X...x.x.....", "t1": "............x...", "ft": "..............x."}  # eighths down the kit
+_F_RUN = {"sn": "............xxxx"}                                                                # the run out of a stab bar
+_STAB = {"cl": "x.....x.........", "cr": "x.....x.........", "kk": "x.....x........."}             # hits on 1 and the & of 2
+
+
+def _pp(bar, **over):
+    """A pop punk bar: the dict `bar` with `over` on top (a fill, a crash, another kick)."""
+    return {**bar, **over}
+
+
+_PPV = {"hh": _H8, "kk": _PP_V, "sn": _S24}                                # the verse bar
+_PPP = {"hh": _H8, "kk": _PP_P, "sn": _S24}                                # the verse bar with the push
+_PPV1 = {"cl": _CR1, "hh": _H8C, "kk": _PP_V, "sn": _S24}                   # the verse bar opening on the crash
+_PPC = {"cl": _CR8, "kk": _PP_V, "sn": _S24}                               # the chorus bar: the wash
+_PPCP = {"cl": _CR8, "kk": _PP_P, "sn": _S24}                              # the wash with the push
+_PPC_AND = {"cl": "x.x.x.x.x.x.x...", "cr": "..............x.", "kk": _PP_P, "sn": _S24}   # the wash, right crash on the & of 4
+_PPV_AND = {"hh": "x.x.x.x.x.x.x...", "cr": "..............x.", "kk": _PP_P, "sn": _S24}   # hats, right crash on the & of 4
+_SKANK = {"hh": _H8, "kk": _K4, "sn": _SK}
+_SKANK1 = {"cl": _CR1, "hh": _H8C, "kk": _K4, "sn": _SK}
+_HT = {"hh": _H8, "kk": _HT_K, "sn": _HT_S}
+_HT1 = {"cl": _CR1, "hh": _H8C, "kk": _HT_K, "sn": _HT_S}
+_BUILD = [{"kk": _K4, "sn": "o.o.o.o.o.o.o.o."}, {"kk": _K4, "sn": "x.x.x.x.x.x.x.x."},
+          {"kk": _K4, "sn": "X.x.X.x.X.x.X.x."}, {"kk": _K4, "sn": "xxxxxxxxXXXXXXXX"}]
+_KDV = {"hh": _H8, "kk": _KD, "sn": _S24}
+_KDV1 = {"cl": _CR1, "hh": _H8C, "kk": _KD, "sn": _S24}
+_KDP_B = {"hh": _H8, "kk": _KDP, "sn": _S24}
+_RIDE = {"rd": _H8, "kk": _KD, "sn": _S24}
+_RIDE_T = {"rd": "x.x.x.x.x.x.x...", "kk": _KD, "sn": _S24, "t1": "..............x."}
+_RIDE1 = {"cr": _CR1, "rd": _H8C, "kk": _KD, "sn": _S24}
+
+POP_PUNK = [
+    _groove("1 · Driving eighths", "The pop punk pulse: hats on every eighth, kick on 1 and 3, snare on 2 and 4, a crash opening every four bars. Fast and even.", 140, [
+        {"cl": _CR1, "hh": _H8C, "kk": "x.......x.......", "sn": _S24},
+        {"hh": _H8, "kk": "x.......x.......", "sn": _S24},
+        {"hh": _H8, "kk": "x.......x.......", "sn": _S24},
+        {"hh": _H8, "kk": "x.......x.......", "sn": _S24},
+    ], backing="punk"),
+    _groove("2 · Four on the floor", "The kick moves to every beat under the same hats and backbeat: the punk stomp.", 144, [
+        {"cl": _CR1, "hh": _H8C, "kk": _K4, "sn": _S24},
+        {"hh": _H8, "kk": _K4, "sn": _S24},
+        {"hh": _H8, "kk": _K4, "sn": _S24},
+        {"hh": _H8, "kk": _K4, "sn": _S24},
+    ], backing="punk"),
+    _groove("3 · The push", "Kick on 1, the & of 2 and 3; every second bar adds the & of 4, pushing into the next bar. The pop punk kick.", 148, [
+        _PPV1, _PPP, _PPV, _PPP,
+    ], backing="punk"),
+    _groove("4 · Tight and open", "Four bars of verse with the hats tight, four of chorus with them open, the foot off the pedal; a crash on the change, the pushes stay.", 148, [
+        {"cl": _CR1, "hh": "..t.t.t.t.t.t.t.", "kk": _PP_V, "sn": _S24},
+        {"hh": "t.t.t.t.t.t.t.t.", "kk": _PP_P, "sn": _S24},
+        {"hh": "t.t.t.t.t.t.t.t.", "kk": _PP_V, "sn": _S24},
+        {"hh": "t.t.t.t.t.t.t.t.", "kk": _PP_P, "sn": _S24},
+        {"cl": _CR1, "hh": "..a.a.a.a.a.a.a.", "kk": _PP_V, "sn": _S24},
+        {"hh": "a.a.a.a.a.a.a.a.", "kk": _PP_P, "sn": _S24},
+        {"hh": "a.a.a.a.a.a.a.a.", "kk": _PP_V, "sn": _S24},
+        {"hh": "a.a.a.a.a.a.a.a.", "kk": _PP_P, "sn": _S24},
+    ], backing="punk"),
+    _groove("5 · Washing the crash", "The chorus rides the left crash on every eighth instead of the hats; the right crash marks the way back to the verse.", 152, [
+        _PPV1, _PPP, _PPV, _PPP,
+        _PPC, _PPCP, _PPC, _PPCP,
+        {"cr": _CR1, "hh": _H8C, "kk": _PP_V, "sn": _S24}, _PPP, _PPV, _PPP,
+        _PPC, _PPCP, _PPC, _PPCP,
+    ], bars=16, backing="punk"),
+    _groove("6 · Snare on the &", "The skank: kick on every beat, snare on every &, hats along. The verse skanks, the chorus washes the crash with the pushes.", 152, [
+        _SKANK1, _SKANK, _SKANK, _SKANK,
+        _PPC, _PPCP, _PPC, _PPCP,
+        _SKANK1, _SKANK, _SKANK, _SKANK,
+        _PPC, _PPCP, _PPC, _PPCP,
+    ], bars=16, backing="punk"),
+    _groove("7 · Eighth-note fills", "Every fourth bar ends in a fill on the eighths: two snares on 4; snare, rack and floor down the kit over 3 and 4; the crash lands on the 1 after it.", 152, [
+        _PPV1, _PPP, _PPV, _pp(_PPP, **_F_SN8),
+        _PPV1, _PPP, _PPV, _pp(_PPP, **_F_TOMS8),
+        _PPV1, _PPP, _PPV, _pp(_PPP, **_F_SN8),
+        _PPV1, _PPP, _PPV, _pp(_PPP, **_F_TOMS8),
+    ], bars=16, backing="punk"),
+    _groove("8 · Sixteenth fills", "The fills go to sixteenths: four snares on 4; snare and rack in pairs; the walk down snare, rack, floor over 3 and 4; the whole kit from the 2.", 148, [
+        _PPV1, _PPP, _PPV, _pp(_PPP, **_F_SN16),
+        _PPV1, _PPP, _PPV, _pp(_PPP, **_F_SNT),
+        _PPV1, _PPP, _PPV, _pp(_PPP, **_F_WALK),
+        _PPV1, _PPP, _PPV, _pp(_PPP, **_F_KIT),
+    ], bars=16, backing="punk"),
+    _groove("9 · Crash on the &", "The right crash lands with the kick on the & of 4 of bars 2 and 4, ahead of the bar line; the left crash answers on the 1. Fills stay.", 156, [
+        _PPV1, _PPV_AND, _PPV1, _pp(_PPV_AND, **_F_SNT),
+        _PPV1, _PPV_AND, _PPV1, _pp(_PPV_AND, **_F_WALK),
+    ], backing="punk"),
+    _groove("10 · Stabs", "Stop time: the band hits on 1 and the & of 2 and the drums hit with it, kick and both crashes together, nothing between; a snare run on 4 brings the groove back.", 156, [
+        _PPV1, _PPP, _PPV, {**_STAB, **_F_RUN},
+        _PPV1, _PPV_AND, _PPV1, {**_STAB, "sn": "..........xxxxxx"},
+        _PPC, _PPCP, _PPC, {**_STAB, **_F_RUN},
+        _PPC, _PPC_AND, _PPC, {**_STAB, "sn": "..........xxxxxx"},
+    ], bars=16, backing="punk"),
+    _groove("11 · Half-time verse", "The verse sits in half time, snare on 3 and kick on 1 and the & of 2; the chorus doubles back to the backbeat on the crash, the right crash on the & of 4.", 160, [
+        _HT1, _HT, _HT, _pp(_HT, **{"hh": "x.x.x.x.x.x.....", "sn": "........X...xxxx"}),
+        _PPC, _PPC_AND, _PPC, _pp(_PPC_AND, **{"cl": "x.x.x.x.x.x.x...", "sn": "....X.......xx.."}),
+        _HT1, _HT, _HT, _pp(_HT, **{"hh": "x.x.x.x.x.x.....", "sn": "........X...xxxx"}),
+        _PPC, _PPC_AND, _PPC, _pp(_PPC_AND, **{"cl": "x.x.x.x.x.x.x...", "sn": "....X.......xx.."}),
+    ], bars=16, backing="punk"),
+    _groove("12 · The build", "Half-time verse, then the pre-chorus: snare eighths growing from ghosts to accents over the kick on the beats, sixteenths in the last bar; the chorus lands on the crash.", 160, [
+        _HT1, _HT, _HT, _pp(_HT, **{"hh": "x.x.x.x.x.x.....", "sn": "........X...xxxx"}),
+        *_BUILD,
+        _PPC, _PPCP, _PPC, _PPC_AND,
+        _PPC, _PPCP, _PPC, _pp(_PPCP, **{"cl": "x.x.x.x.x.x.....", "sn": "....X.......xxxx"}),
+    ], bars=16, backing="punk"),
+    _groove("13 · Kick doubles", "Two kicks in a row on the sixteenths, the & a of 1 and of 3, single pedal, under the hats; the pushes and the sixteenth fills return.", 150, [
+        _KDV1, _KDP_B, _KDV, _pp(_KDP_B, **_F_SN16),
+        _KDV1, _KDP_B, _KDV, _pp(_KDP_B, **_F_WALK),
+        _KDV1, _KDP_B, _KDV, _pp(_KDP_B, **_F_SNT),
+        _KDV1, _KDP_B, _KDV, _pp(_KDP_B, **_F_KIT),
+    ], bars=16, backing="punk"),
+    _groove("14 · Ride bridge", "The bridge moves the right hand to the ride over the kick doubles, a rack tom on the & of 4 every other bar; the chorus comes back on the crash.", 160, [
+        _RIDE1, _RIDE_T, _RIDE, _RIDE_T,
+        _RIDE1, _RIDE_T, _RIDE, _pp(_RIDE, **{"rd": "x.x.x.x.........", "sn": "....X...xxxx....", "t1": "............xx..", "ft": "..............xx"}),
+        _PPC, _PPCP, _PPC, _PPC_AND,
+        _PPC, _PPCP, _PPC, _pp(_PPCP, **{"cl": "x.x.............", "sn": "....xxxx........", "t1": "........xxxx....", "ft": "............xxxx"}),
+    ], bars=16, backing="punk"),
+    _groove("15 · Around the kit", "Whole-bar fills every fourth bar: sixteenth singles snare, rack, floor, floor; toms on the eighths with snare pairs between; kick and snare in pairs; both crashes on the 4 to close.", 150, [
+        _KDV1, _KDP_B, _KDV, {"kk": "x...............", "sn": "xxxx............", "t1": "....xxxx........", "ft": "........xxxxxxxx"},
+        _KDV1, _KDP_B, _KDV, {"kk": "x...x...x...x...", "sn": ".xx..xx..xx..xx.", "t1": "x...x...........", "ft": "........x...x..."},
+        _KDV1, _KDP_B, _KDV, {"kk": "xx..xx..xx..xx..", "sn": "..xx..xx..xx..xx"},
+        _KDV1, _KDP_B, _KDV, {"kk": "x...........x...", "sn": "xxxx............", "t1": "....xxxx........", "ft": "........xxxx....", "cl": "............x...", "cr": "............x..."},
+    ], bars=16, backing="punk"),
+    _groove("16 · Pop punk anthem", "Thirty-two bars with everything: a skank intro with stabs, a verse on the pushes with fills, the build, a chorus washing the crash with the & crashes, a half-time bridge on the ride, the last chorus, both crashes to close.", 168, [
+        _SKANK1, _SKANK, _SKANK, {**_STAB, **_F_RUN},                                         # intro
+        _PPV1, _PPP, _PPV, _pp(_PPP, **_F_SN16),                                             # verse
+        _PPV1, _PPP, _PPV, _pp(_PPP, **_F_WALK),
+        *_BUILD,                                                                             # pre-chorus
+        _PPC, _PPCP, _PPC, _PPC_AND,                                                         # chorus
+        _PPC, _PPCP, _PPC, _pp(_PPCP, **{"cl": "x.x.x.x.x.x.....", "sn": "....X.......xxxx"}),
+        {"cr": _CR1, "rd": _H8C, "kk": _HT_K, "sn": _HT_S}, {"rd": _H8, "kk": _HT_K, "sn": _HT_S},   # bridge, half time on the ride
+        {"rd": _H8, "kk": _HT_K, "sn": _HT_S}, {"rd": "x.x.x.x.........", "kk": _HT_K, "sn": "........X...xxxx", "t1": "............xx..", "ft": "..............xx"},
+        _PPC, _PPC_AND, _PPC, {"kk": "x...........x...", "sn": "xxxx............", "t1": "....xxxx........", "ft": "........xxxx....", "cl": "............x...", "cr": "............x..."},
+    ], bars=32, backing="punk"),
+]
+
+COURSES = [
+    Course("course:pop-punk", "Pop punk", "the driving eighths, the push, the crash wash, the skank, stabs, the build, half time, kick doubles; fills from eighths to the whole kit",
+           POP_PUNK),
+]
+COURSE = {c.key: c for c in COURSES}
+
 EXERCISES = EXERCISES + RUDIMENTS + KICK_OSTINATOS + HIHAT_LESSONS
-LEVELS = EXERCISES + BEATS
+LEVELS = EXERCISES + BEATS + [ch for c in COURSES for ch in c.levels]
+assert len({ch.name for ch in LEVELS}) == len(LEVELS), "level names must be unique: progress and the coach's playlists are keyed by them"
 
 
 # ---------------------------------------------------------------------------

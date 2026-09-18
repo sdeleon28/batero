@@ -227,6 +227,24 @@ list lives in `~/.config/drumhero/profiles.json`.
 - The hub shows the icon, the name and the star total top left. A rehearsal (transport or P)
   still saves nothing, whoever is in.
 
+## Courses (the hi-hat pad, since 2026-09-17)
+
+The Songs section is gone (copyright: no recordings, no MIDI import, no ingest pipeline;
+`load_midi_chart`, `load_song_folder`, `load_audio_track`, `ingest.py`, `songs/` and librosa
+went with it). In its place, **courses by genre**: `chart.Course` (key `course:<slug>`, name,
+desc, levels), `COURSES` / `COURSE` in `chart.py`, each level a `_groove(..., backing=<style>)`
+with the genre's arrangement style from `sounds.STYLES` (`style_for` returns a feel that names
+a style). The hub's hi-hat card opens `CoursesScreen` (one row per course with its stars),
+which opens a `ListScreen` on the course's key; `App.categories()` is `kick`, `snare` and the
+course keys, `App.items_for(key)` its levels, `App.prog_for` the backing seed (each course its
+own hundred). Level names are unique across the game (asserted at import): progress, the run
+logs and the coach's playlists are keyed by them. The first course is **Pop punk**
+(`POP_PUNK`, 16 levels, 140..168 bpm written, the style at 160..190 with `]`), each level
+keeping what the previous taught: eighths, four on the floor, the push, tight/open hats, the
+crash wash, the skank, fills from eighths to the whole kit, the & crash, stabs, half time, the
+build, kick doubles, the ride bridge, around the kit, a 32-bar anthem. Adding a genre: a list
+of levels plus one `Course(...)` in `COURSES`; nothing else.
+
 ## Open items
 
 `ROADMAP.md` lists the loose ends with their full context (hi-hat filter eating fast

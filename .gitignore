@@ -1,11 +1,6 @@
 .venv/
 __pycache__/
 *.csv
-songs/*/audio.*
-songs/**/*.mp3
-songs/**/*.wav
-songs/**/*.m4a
-songs/**/*.flac
 
 # the project skills are versioned (the global ~/.gitignore hides .claude)
 !.claude/

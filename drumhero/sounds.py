@@ -478,6 +478,8 @@ SCALES = {"natural": {"M": [0, 2, 4, 5, 7, 9, 11], "m": [0, 2, 3, 5, 7, 8, 10]},
 def style_for(prog_index, feel="straight"):
     if feel == "cumbia":
         return "cumbia"
+    if feel in STYLES:                  # a course names its style (Chart.backing == "punk")
+        return feel
     return "shuffle" if feel in ("triplet", "sextuplet") else STYLE_ORDER[prog_index % len(STYLE_ORDER)]
 
 
@@ -527,7 +529,8 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, 
     """Mono float32 of (intro_bars + bars) bars at bpm: intro (thin) then the arrangement,
     bar 0 of the level at intro_bars * bar seconds. Deterministic per prog_index.
     feel: "straight" (sixteenth grid, style by prog_index) or "triplet" (twelfth grid,
-    the shuffle style) for levels whose subdivision is 3; "cumbia" for the cumbia levels."""
+    the shuffle style) for levels whose subdivision is 3; "cumbia" for the cumbia levels;
+    a STYLES name ("punk") for the courses, which choose their music."""
     rng = np.random.default_rng(prog_index if seed is None else seed)
     triplet = feel in ("triplet", "sextuplet")
     style_name = style_for(prog_index, feel)
@@ -952,29 +955,3 @@ def menu_music_sound():
     return snd
 
 
-MUSIC_GAIN = 0.85
-
-
-def load_audio_track(path, t0, gain=MUSIC_GAIN, rate=1.0):
-    """Decode an audio file (mp3/ogg/wav/flac via SDL_mixer) into a Track on the chart
-    timeline: audio time 0 happens at chart time t0. Needs the mixer initialised.
-    rate != 1 time-stretches the recording (rate 0.5 = half speed, pitch kept) with
-    librosa's phase vocoder; a few seconds of work for a full song."""
-    if rate != 1.0:
-        import librosa
-        y, _ = librosa.load(path, sr=SR, mono=False)
-        if y.ndim == 1:
-            y = np.stack([y, y])
-        import warnings
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", FutureWarning)         # librosa 1.0 deprecation chatter
-            y = librosa.effects.time_stretch(y, rate=rate)
-        pcm = (np.clip(y, -1, 1) * 32767).astype(np.int16).T
-        return Track(np.ascontiguousarray(pcm), t0, gain)
-    snd = pygame.mixer.Sound(path)
-    arr = pygame.sndarray.array(snd)
-    if arr.ndim == 1:
-        arr = np.column_stack([arr, arr])
-    if arr.dtype != np.int16:
-        arr = (np.clip(arr.astype(np.float32) / max(1.0, float(np.max(np.abs(arr)))), -1, 1) * 32767).astype(np.int16)
-    return Track(arr, t0, gain)

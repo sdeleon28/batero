@@ -33,7 +33,6 @@ class RunLog:
                 "name": chart.key, "lead": chart.lead, "bpm": chart.bpm, "rate": chart.rate, "desc": chart.desc,
                 "dynamics": chart.dynamics, "sticking": chart.sticking,
                 "accents": sorted(chart.accents) if chart.accents else None,
-                "audio": chart.audio, "audio_offset": chart.audio_offset,
                 "notes": [{"t": round(n.t, 5), "key": n.key, "vel": n.velocity, "accent": n.accent, "hand": n.hand}
                           for n in chart.notes],
             },

@@ -5,7 +5,6 @@ inside a section the hi-hat moves down, the crash moves up, the snare accepts
 and the kick goes back. The keyboard always works too.
 """
 import argparse
-import glob
 import os
 import sys
 import threading
@@ -17,7 +16,7 @@ import mido
 import pygame
 
 from . import chart as C
-from .chart import BEATS, EXERCISES, build_lanes, load_midi_chart, load_song_folder
+from .chart import BEATS, COURSES, EXERCISES, build_lanes
 from . import game as GM
 from .game import Game
 from .kit import (default_kit, describe, describe_pads, load_kit, load_progress, load_settings, save_kit,
@@ -38,7 +37,7 @@ from .game import TAIL_S, lead_in_for
 from . import ghost as GH
 from . import keygen
 from .ghost import GhostFilter
-from .sounds import (BACKING_GAIN, METRONOME_GAIN, PROGRESSIONS, SoundBank, Track, load_audio_track,
+from .sounds import (BACKING_GAIN, METRONOME_GAIN, PROGRESSIONS, SoundBank, Track,
                      menu_music_sound, output_devices, render_backing_track, render_metronome, MENU_CHANNEL)
 from . import sounds as SND
 
@@ -73,10 +72,9 @@ HAND_COLORS = {"R": (245, 90, 90), "L": (80, 200, 230)}     # as on the sticking
 CATEGORIES = [
     ("kick", "Exercises", "one drum at a time, slow"),
     ("snare", "Beats", "full grooves"),
-    ("hihat", "Songs", "MIDI files from the songs folder"),
+    ("hihat", "Courses", "a genre's grooves and fills, in order"),
     ("crash", "Setup", "kit, sounds, quit"),
 ]
-SONGS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "songs")
 
 
 class App:
@@ -100,7 +98,6 @@ class App:
         self.profiles = PR.load_profiles()   # who can play; empty = no login, one shared progress
         self.profile = None                  # the profile playing now (LoginScreen), None = nobody / no profiles
         self.results = load_progress(PR.progress_path(None))   # chart key -> best stats so far (stars, grade...), saved per profile
-        self.songs = None          # loaded lazily
         self.midi_name = None
         self.midi_in = None
         self.screen_obj = None
@@ -388,35 +385,27 @@ class App:
     def has_drum(self, inst):
         return bool(self.midi_in) and bool(C.kit_notes(self.kit, inst))
 
-    def load_songs(self):
-        if self.songs is None:
-            self.songs = []
-            paths = list(self.args.midi or [])
-            d = self.args.songs or SONGS_DIR
-            paths += sorted(glob.glob(os.path.join(d, "*", "song.json")))          # ingested songs
-            paths += sorted(glob.glob(os.path.join(d, "*.mid")) + glob.glob(os.path.join(d, "*.midi")))
-            seen = set()
-            for p in paths:
-                if p in seen:
-                    continue
-                seen.add(p)
-                try:
-                    if p.endswith("song.json"):
-                        folder = os.path.dirname(p)
-                        if not os.path.exists(os.path.join(folder, "chart.mid")):
-                            print(f"{folder}: no chart.mid yet, run: python -m drumhero.ingest {folder}")
-                            continue
-                        ch = load_song_folder(folder)
-                    else:
-                        ch = load_midi_chart(p, None if self.args.channel is None else self.args.channel - 1)
-                except (SystemExit, OSError, ValueError) as e:
-                    print(f"{p}: {e}")
-                    continue
-                self.songs.append(ch)
-        return self.songs
+    def categories(self):
+        """Every category that holds levels: the two lists and one key per course
+        ("course:pop-punk"); "hihat" itself is the course chooser and holds none."""
+        return ["kick", "snare"] + [c.key for c in COURSES]
 
     def items_for(self, cat):
-        return {"kick": EXERCISES, "snare": BEATS, "hihat": self.load_songs()}.get(cat, [])
+        if cat in C.COURSE:
+            return C.COURSE[cat].levels
+        return {"kick": EXERCISES, "snare": BEATS}.get(cat, [])
+
+    def prog_for(self, cat, index):
+        """The backing's progression seed for a level: the exercises, the beats and every course
+        get their own range, so two levels with the same index do not share a tune."""
+        if cat in C.COURSE:
+            return 100 * (1 + list(C.COURSE).index(cat)) + index
+        return index + (0 if cat == "kick" else 2)
+
+    def course_stars(self, course):
+        """(stars got, stars possible) over a course's levels for the profile playing."""
+        keys = [ch.key for ch in course.levels]
+        return sum(self.results.get(k, {}).get("stars", 0) for k in keys), 5 * len(keys)
 
     def tracks_for(self, chart, prog_index):
         """Pre-rendered backing (built-in levels only, prog_index None = none) and metronome
@@ -445,16 +434,6 @@ class App:
                 self.track_cache[key] = Track(render_metronome(chart, lead_in, total, self.metronome_mode), -lead_in, METRONOME_GAIN)
             self.track_cache[key].gain = METRONOME_GAIN * self.metro_volume
             out["metronome"] = self.track_cache[key]
-        if chart.audio:
-            key = ("music", chart.audio, round(chart.rate, 3))
-            if key not in self.track_cache:
-                try:
-                    self.track_cache[key] = load_audio_track(chart.audio, -chart.audio_offset, rate=chart.rate)
-                except (pygame.error, OSError) as e:
-                    print(f"{chart.audio}: {e}")
-                    self.track_cache[key] = None
-            if self.track_cache[key] is not None:
-                out["music"] = self.track_cache[key]
         return out
 
     # --- menu music ------------------------------------------------------------------
@@ -636,7 +615,7 @@ class App:
 
     def level_by_name(self, name):
         """(category, index, lead) for a level name or a left-hand-lead key ("Paradiddle (L)")."""
-        for cat in ("kick", "snare", "hihat"):
+        for cat in self.categories():
             for i, ch in enumerate(self.items_for(cat)):
                 if ch.name == name:
                     return cat, i, "R"
@@ -650,7 +629,7 @@ class App:
         return ch.mirrored() if ch.lead and self.lead == "L" else ch
 
     def level_names(self):
-        return {ch.name for cat in ("kick", "snare", "hihat") for ch in self.items_for(cat)}
+        return {ch.name for cat in self.categories() for ch in self.items_for(cat)}
 
     def stats_summary(self):
         """Cached for a second: the hub draws it every frame."""
@@ -661,8 +640,10 @@ class App:
         return self._summary
 
     def coach_report(self):
-        return ST.report({"exercises": self.items_for("kick"), "beats": self.items_for("snare"), "songs": self.items_for("hihat")},
-                         profile=self.profile_id)
+        levels = {"exercises": self.items_for("kick"), "beats": self.items_for("snare")}
+        for c in COURSES:
+            levels[f"course: {c.name}"] = c.levels
+        return ST.report(levels, profile=self.profile_id)
 
     # --- profiles ------------------------------------------------------------------
     @property
@@ -1214,7 +1195,7 @@ class HubScreen(Screen):
     def open(self, i):
         cat = CATEGORIES[i][0]
         self.flash = (time.perf_counter(), i)
-        self.app.go(ListScreen(self.app, cat))
+        self.app.go(CoursesScreen(self.app) if cat == "hihat" else ListScreen(self.app, cat))
 
     def on_drum(self, inst):
         for i, (cat, _, _) in enumerate(CATEGORIES):
@@ -1279,8 +1260,8 @@ class HubScreen(Screen):
                 got = sum(self.app.results.get(k, {}).get("stars", 0) for k in keys)
                 self.f.center(surf, f"{len(items)} levels  ·  ★ {got} / {5 * len(keys)}", self.f.small, color, y + ph - 26 * S, x + pw / 2)
             elif cat == "hihat":
-                n = len(self.app.songs) if self.app.songs is not None else None
-                self.f.center(surf, f"{n} songs" if n is not None else "songs/ folder", self.f.small, color, y + ph - 26 * S, x + pw / 2)
+                got, total = (sum(v) for v in zip(*(self.app.course_stars(c) for c in COURSES)))
+                self.f.center(surf, f"{len(COURSES)} course{'s' if len(COURSES) != 1 else ''}  ·  ★ {got} / {total}", self.f.small, color, y + ph - 26 * S, x + pw / 2)
             else:
                 self.f.center(surf, describe(self.app.kit), self.f.small, color, y + ph - 26 * S, x + pw / 2)
             if not self.app.has_drum(cat) and self.app.midi_in:
@@ -1304,8 +1285,14 @@ class ListScreen(Screen):
     def __init__(self, app, cat, sel=0):
         super().__init__(app)
         self.cat = cat
-        self.title, self.sub = next((t, s) for c, t, s in CATEGORIES if c == cat)
-        self.color = C.COLORS[cat]
+        self.course = C.COURSE.get(cat)
+        if self.course:
+            got, total = app.course_stars(self.course)
+            self.title, self.sub = self.course.name, f"{len(self.course.levels)} levels  ·  ★ {got} / {total}"
+            self.color = C.COLORS["hihat"]
+        else:
+            self.title, self.sub = next((t, s) for c, t, s in CATEGORIES if c == cat)
+            self.color = C.COLORS[cat]
         self.sel = sel
 
     def items(self):
@@ -1341,7 +1328,7 @@ class ListScreen(Screen):
                     ("Progress (S)", "streak, minutes, trends, records"),
                     ("Coach (C)", "Claude reads your stats: strengths, weaknesses, focus, playlists"),
                     ("Quit", "")]
-        return [(ch.name, f"{ch.bpm:.0f} bpm · {len(ch.notes):3d} notes · {ch.desc}" + ("  ♪ audio" if ch.audio else "")) for ch in self.app.items_for(self.cat)]
+        return [(ch.name, f"{ch.bpm:.0f} bpm · {len(ch.notes):3d} notes · {ch.desc}") for ch in self.app.items_for(self.cat)]
 
     def fit(self, text, max_w):
         """text clipped with an ellipsis to max_w pixels in the small font."""
@@ -1410,7 +1397,10 @@ class ListScreen(Screen):
         return True
 
     def back(self):
-        self.app.go(HubScreen(self.app, CATEGORIES.index(next(c for c in CATEGORIES if c[0] == self.cat))))
+        if self.course:
+            self.app.go(CoursesScreen(self.app, COURSES.index(self.course)))
+        else:
+            self.app.go(HubScreen(self.app, CATEGORIES.index(next(c for c in CATEGORIES if c[0] == self.cat))))
 
     def on_drum(self, inst):
         action = NAV.get(inst)
@@ -1478,12 +1468,8 @@ class ListScreen(Screen):
         surf.blit(ts, (self.w * 0.88 - ts.get_width(), 60 * S))
         items = self.items()
         y = 140 * S
-        if not items:
-            self.f.center(surf, "No songs yet.", self.f.mid, TEXT, self.h * 0.42)
-            self.f.center(surf, f"Drop .mid files into {self.app.args.songs or SONGS_DIR}", self.f.small, DIM, self.h * 0.42 + 36 * S)
-            self.f.center(surf, "or pass them on the command line. Drums on MIDI channel 10 work best.", self.f.small, DIM, self.h * 0.42 + 58 * S)
         row_h = 44 * S
-        max_rows = int((self.h - 230 * S) / row_h)
+        max_rows = int((self.h - 250 * S) / row_h)          # leaves two lines for the selected description
         first = max(0, min(self.sel - max_rows // 2, len(items) - max_rows))
         for i in range(first, min(len(items), first + max_rows)):
             name, sub = items[i]
@@ -1496,7 +1482,8 @@ class ListScreen(Screen):
             surf.blit(self.f.text(shown, self.f.mid, self.color if selected else TEXT), (x, y))
             best = self.app.results.get(name)
             right = self.w * 0.88
-            ch = self.app.items_for(self.cat)[i] if self.cat != "crash" else None
+            charts = self.app.items_for(self.cat)
+            ch = charts[i] if i < len(charts) else None
             if ch is not None and ch.lead:
                 right = self.draw_lead_rows(surf, ch, right, y, selected)
             elif best:
@@ -1506,8 +1493,10 @@ class ListScreen(Screen):
                 right -= draw_stars(surf, self.f, best.get("stars", 0), right, y + 2 * S, S, size="small") + 16 * S
             surf.blit(self.f.text(self.fit(sub, right - (x + 500 * S)), self.f.small, DIM), (x + 500 * S, y + 4 * S))
             y += row_h
-        if items:
-            self.f.center(surf, items[self.sel][1], self.f.small, TEXT, self.h - 84 * S)   # the selected one in full
+        if items:                                             # the selected one in full, two lines if it needs them
+            lines = wrap(self.f, items[self.sel][1], self.f.small, self.w - 80 * S)[:2]
+            for k, line in enumerate(lines):
+                self.f.center(surf, line, self.f.small, TEXT, self.h - (84 + 22 * (len(lines) - 1 - k)) * S)
         if self.has_leads():
             lead = self.app.lead
             ls = self.f.text(f"lead hand  {'right' if lead == 'R' else 'left'}", self.f.small, HAND_COLORS[lead])
@@ -1517,6 +1506,24 @@ class ListScreen(Screen):
         else:
             self.legend(surf, [("hihat", "down"), ("crash", "up"), ("snare", "select"), ("kick", "back")],
                         keys="arrows or j k · Enter or l · Esc or h")
+
+
+class CoursesScreen(ListScreen):
+    """The courses, one row each with its stars; select opens the course's levels."""
+
+    def __init__(self, app, sel=0):
+        super().__init__(app, "hihat", sel)
+
+    def items(self):
+        out = []
+        for c in COURSES:
+            got, total = self.app.course_stars(c)
+            out.append((c.name, f"{len(c.levels)} levels · ★ {got} / {total} · {c.desc}"))
+        return out
+
+    def accept(self):
+        self.app.go(ListScreen(self.app, COURSES[self.sel].key))
+        return True
 
 
 def wrap(fonts, text, font, max_w):
@@ -2646,7 +2653,7 @@ class PlayScreen(Screen):
         self.lanes, self.by_note = build_lanes(self.chart, app.kit)
         # scroll speed follows the tempo so a beat is always the same distance on screen
         self.game = Game(self.chart, self.lanes, self.by_note, offset_ms=app.offset_ms, speed=app.rate,
-                         sounds=app.sounds, guide=app.guide and not self.chart.audio,   # the record has its own drums
+                         sounds=app.sounds, guide=app.guide,
                          log=app.runlog, dyn_scales=app.dyn_scales)
         self.game.metronome_mode = app.metronome_mode
         self.game.metro_volume = app.metro_volume
@@ -2660,8 +2667,7 @@ class PlayScreen(Screen):
                              "pedal_settle_ms": GH.PEDAL_SETTLE_MS, "pedal_settle_velocity_max": GH.PEDAL_SETTLE_VELOCITY_MAX,
                              "zone_crosstalk": GH.ZONE_CROSSTALK, "any_min_velocity": GH.ANY_MIN_VELOCITY},
         })
-        prog = None if cat == "hihat" else index + (0 if cat == "kick" else 2)   # songs bring their own music
-        for name, track in app.tracks_for(self.chart, prog).items():
+        for name, track in app.tracks_for(self.chart, app.prog_for(cat, index)).items():
             self.game.set_track(name, track, enabled=(app.backing_on if name == "backing" else True))
         self.renderer = Renderer(self.game, app.size, app.fonts, app.ghosts)
         self.recorded = False
@@ -2734,8 +2740,7 @@ class PlayScreen(Screen):
             if self.app.metronome_mode == "off":
                 g.enable_track("metronome", False)
             else:
-                prog = None if self.cat == "hihat" else self.index + (0 if self.cat == "kick" else 2)
-                g.set_track("metronome", self.app.tracks_for(self.chart, prog)["metronome"], True)
+                g.set_track("metronome", self.app.tracks_for(self.chart, self.app.prog_for(self.cat, self.index))["metronome"], True)
         elif key == pygame.K_p:
             self.app.practice = not self.app.practice
             self.app.toasts.add("practice: this run saves no progress" if self.app.practice else
@@ -2913,9 +2918,6 @@ class PlayScreen(Screen):
 # ---------------------------------------------------------------------------
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="drumhero", description="Guitar Hero style drum trainer driven by MIDI.")
-    ap.add_argument("midi", nargs="*", help="MIDI files to add to the Songs section")
-    ap.add_argument("--songs", help=f"folder scanned for .mid songs (default: {SONGS_DIR})")
-    ap.add_argument("--channel", type=int, help="only use chart notes on this MIDI channel (1-16)")
     ap.add_argument("--port", help="MIDI input port (substring). Default: first port that looks like a drum module")
     ap.add_argument("--kit", help="kit file to load/save instead of ~/.config/drumhero/kit.json")
     ap.add_argument("--offset", type=float, default=0.0,

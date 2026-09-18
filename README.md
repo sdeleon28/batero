@@ -19,8 +19,6 @@ python3 -m venv .venv
 ```
 .venv/bin/python -m drumhero                      # auto-picks a port that looks like a drum module
 .venv/bin/python -m drumhero --port TD-17         # pick the MIDI input explicitly
-.venv/bin/python -m drumhero song.mid             # add MIDI files to the Songs section
-.venv/bin/python -m drumhero --songs ~/mids       # scan another folder (default: ./songs)
 .venv/bin/python -m drumhero --log hits.csv       # dump every judged hit of the last run
 ```
 
@@ -32,7 +30,7 @@ The hub shows four colored sections, one per drum. Strike the drum to open it:
 |--------|-----------|----------------------------------------|
 | kick   | Exercises | one drum at a time, slow               |
 | snare  | Beats     | full grooves                           |
-| hi-hat | Songs     | MIDI files from `songs/` or the CLI    |
+| hi-hat | Courses   | a genre's grooves and fills, in order  |
 | crash  | Setup     | kit wizard, soundcheck, sounds, quit   |
 
 Inside a section the drums are buttons, and the legend at the bottom of every
@@ -82,8 +80,7 @@ and velocity of each hit; the list on the left shows what every zone got.
 
 Lessons so far only use kick, snare, hi-hat and crash; a chart's hi-hat notes
 are satisfied by any hi-hat zone, crash notes by either crash. The other zones
-are stored now so later lessons (rimshots, ride bell, toms) can use them, and
-MIDI files that carry toms or ride get lanes bound to those pads.
+are stored now so later lessons (rimshots, ride bell, toms) can use them.
 
 ## Soundcheck
 
@@ -165,40 +162,30 @@ divided by median tap velocity over the last strokes, with the target (1.4x)
 marked on the bar. The results screen repeats the tallies and contrast for the
 whole run, and the `--log` CSV carries every hit's velocity and dynamic.
 
-Songs are folders in `songs/` made by the ingest pipeline (see below), or plain
-MIDI files dropped in `songs/` or given on the command line. General MIDI drum
-numbers fold into the four instruments (36 kick, 38 snare, 42/44/46 hi-hat,
-49/57 crash); any other note number gets a lane of its own, matched by raw
-number. A song with audio plays the recording along with the chart, on the
-recording's own beat grid, with the guide sounds off since the record already
-has drums.
+## Courses
 
-## Adding a song: the sourcing pipeline
+A course is one genre: its idiomatic grooves and fills as levels that build on
+each other, each keeping what the ones before taught. The Courses section (the
+hi-hat pad) lists the courses with their stars; select one for its levels. They
+replaced the Songs section on 2026-09-17 (songs were a copyright dead end; the
+MIDI import and the ingest pipeline went with them). A course names its backing
+style (`backing="punk"` on every level, one of the arrangement styles below), so
+the music sounds like the genre. Level names must be unique across the whole
+game: progress and the coach's playlists are keyed by them.
 
-1. Make `songs/<name>/` and drop the recording there as `audio.mp3` (or wav,
-   ogg, flac). Recordings are yours; they are git-ignored.
-2. Write `songs/<name>/song.json`: title, artist, a bpm hint, and the form as a
-   list of sections with a bar count and a drum pattern each (`rest`, `hats`,
-   `kick_snare`, `rock`, `rock_pickup`, `rock_quarters`, `halftime`,
-   `eighth_kick`), plus `crash` and `fill` flags. This is the step to do with
-   Claude: describe the song and let it draft the form.
-3. Run the ingest:
-
-   ```
-   .venv/bin/python -m drumhero.ingest songs/<name>
-   ```
-
-   It tracks the beats with librosa, takes the beat nearest the first strong
-   onset as the first downbeat (set `offset_hint` in song.json, in seconds, if
-   the song starts with a pickup), lays the sections on that grid and writes
-   `chart.mid` with a tempo change on every beat, so the chart follows the
-   recording even where it drifts. It also writes `beats.json` and fills in
-   `offset` in song.json.
-4. Play it from Songs. If a section is a bar too long or short, fix the number
-   in song.json and run the ingest again.
-
-`songs/i-wont-back-down/` has the form for Tom Petty's song written from
-memory as a starting point; add the recording and ingest it.
+**Pop punk** (16 levels, written tempos 140 to 168, the style lives at 160 to
+190: use `]` once the hands are in): driving eighths; four on the floor; the
+push (kick on the & of 2, then the & of 4 into the next bar); tight and open
+hats (verse and chorus, judged on the pedal); washing the crash (the chorus
+rides the left crash, the right one marks the way back); snare on the & (the
+skank); eighth-note fills; sixteenth fills (four snares, snare and rack pairs,
+the walk down, the whole kit from the 2); the right crash on the & of 4 ahead
+of the bar line; stabs (kick and both crashes on 1 and the & of 2, a snare run
+back in); the half-time verse; the build (snare eighths from ghosts to accents,
+sixteenths in the last bar); kick doubles on a single pedal; the ride bridge;
+whole-bar fills around the kit; and a 32-bar anthem with everything: skank
+intro with stabs, verse with fills, build, chorus with the & crashes, half-time
+bridge on the ride, last chorus, both crashes to close.
 
 Each level starts with a one-bar count-in with clicks. The level select shows
 your best accuracy and mean timing for the session.
@@ -417,9 +404,7 @@ in settings.
 
 `[` and `]` slow the level down or speed it up in steps of 10 % (0.3x to 2x)
 and restart it at the new tempo. Everything follows: the notes, the metronome,
-the backing loop, and for songs the recording itself, time-stretched with
-librosa's phase vocoder (pitch kept; a few seconds of work the first time for
-each tempo). The notes scroll slower too, so a beat is always the same distance
+the backing loop. The notes scroll slower too, so a beat is always the same distance
 on screen. The HUD shows the multiplier and the effective bpm. `--speed 0.5`
 starts every level at half tempo.
 
@@ -505,11 +490,10 @@ a visual counter and a sound that sits inside the mix.
 
 **The convention.** A chart's subdivision is the coarsest grid that covers its
 note onsets: quarter notes, eighths, triplets or sixteenths. It is decided per
-four-bar phrase, so a song can move from eighths in the verse to sixteenths in
-a fill section and the metronome follows. Built-in levels infer it from their
-notes the same way; a level can force it with `subdivision=` in `_build`. MIDI
-songs get it automatically, no tagging needed. Humanized files are fine: an
-onset counts as on the grid within 12% of a step, and 95% of onsets must fit.
+four-bar phrase, so a level can move from eighths in the verse to sixteenths in
+a fill section and the metronome follows. Levels infer it from their notes; a
+level can force it with `subdivision=` in `_build`. An onset counts as on the
+grid within 12% of a step, and 95% of onsets must fit.
 
 **The counter.** Four squares at the top, one per beat, each split into the
 subdivision with the counting syllables: `1 e & a` for sixteenths, `1 &` for
@@ -528,7 +512,7 @@ change it in Setup; `--no-metronome` starts off.
 **Its level.** `-` and `=` lower and raise the metronome alone by 10 %, anywhere,
 0 to 160 % of its gain in the mix (over that it would clip against the mixer's
 ceiling); saved as `metronome_volume` and applied to the level being played. It
-is there because the congas get lost under a backing or a song. The HUD shows
+is there because the congas get lost under a backing. The HUD shows
 the percentage next to the mode when it is not 100 %, and Setup's Metronome row
 shows it too.
 
@@ -559,9 +543,9 @@ neighbouring levels sound different:
 Every four bars the section changes along the style's own plan (parts come and
 go, bass patterns switch, a breakdown, a build), the key is transposed per
 level, and the riff or phrase is generated per level. The count-in gets a thin
-intro. Songs from MIDI files get no backing, since a made-up progression would
-clash with the tune. Toggle it with B during play or from Setup, or start with
-`--no-backing`.
+intro. A course's levels name their style (`Chart.backing`, "punk" for pop
+punk) instead of taking the one their index gives. Toggle it with B during play
+or from Setup, or start with `--no-backing`.
 
 ## Waiting screen for the stream (`cortina`)
 

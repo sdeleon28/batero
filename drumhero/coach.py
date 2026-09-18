@@ -18,7 +18,8 @@ CLAUDE_BIN = shutil.which("claude") or next((c for c in (os.path.expanduser("~/.
 
 PROMPT = """You are a drum teacher. report.json in this directory describes a student's practice in a
 drum-training game: the catalogue of levels (exercises: single drums, rudiments and accent control on
-a practice pad; beats: a curriculum of grooves that add one idea each; songs), every level they have
+a practice pad; beats: a curriculum of grooves that add one idea each; courses: one genre each, its
+grooves and fills in order, e.g. pop punk), every level they have
 played with best and mean results, the last runs in detail, and their practice habit.
 
 Metrics: grade 0..100 (stars at 30/50/70/85/94), accuracy = notes hit, mean_ms = timing bias
