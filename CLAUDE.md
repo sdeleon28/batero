@@ -312,6 +312,17 @@ never clamp. `Chart.phrase_at` is None past the end; `Chart.place(t)` says "bar 
   `game.seeked`, because notes played out of order or several times would make the stars a
   lie. The results screen says "practice run · progress not saved".
 
+## Accent sensitivity: one threshold per body (; and ')
+
+`dyn_scales` in settings (instrument -> scale, since 2026-09-17; the old single `dyn_scale`
+seeds it): the accent / tap band of every instrument is `game.dyn_band(inst)`, its measured
+thresholds times its own scale, the night factor on top. **With the ` velocity viewer open,
+`;` and `'` move only the body of the last stroke heard** (`App.dyn_target`, ghosts do not
+count; the pane names it, draws its thresholds and dims the other bodies' bars); closed, they
+move every body a step from where it stands. A pad's zones share the body's scale (hi-hat bow
+and edge, snare head and rim): never a threshold per zone. The Setup row's select sets every
+body to the same value.
+
 ## Judging: the miss deadline follows the latency offset
 
 `Game.hit_lane` dates a stroke `song_time - offset` (the +45 ms of the user's chain), but

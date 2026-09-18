@@ -26,7 +26,11 @@ DYN_THRESHOLDS = {"hihat": (116, 104)}     # instrument -> (accent min, tap max)
 NIGHT_START, NIGHT_END = 22, 8     # night is from 22:00 to 08:00 local time
 NIGHT_DYN_SCALE = 0.8
 # On top of that the user scales the band with ; and ' (accent sensitivity, saved in the
-# settings): 1.0 = the measured thresholds, lower = softer accents count.
+# settings): 1.0 = the measured thresholds, lower = softer accents count. One scale per
+# instrument since 2026-09-17 (`dyn_scales`, instrument -> scale): with the velocity viewer
+# open the keys move the instrument of the last stroke heard, closed they move all of them.
+# The zones of a pad share the instrument's scale (the hi-hat's bow and edge, a snare's head
+# and rim): a threshold is per body, never per zone.
 DYN_SCALE_STEP = 0.05
 DYN_SCALE_MIN, DYN_SCALE_MAX = 0.5, 1.3
 CONTRAST_TARGET = 1.4    # median accent velocity / median tap velocity to aim for
@@ -96,10 +100,10 @@ class Game:
     metro_volume = 1.0          # the metronome's level relative to the mix (= and -)
 
     def __init__(self, chart, lanes, by_note, offset_ms=0.0, speed=1.0, sounds=None, guide=True, log=None,
-                 night=None, dyn_scale=1.0):
+                 night=None, dyn_scales=None):
         self.log = log                      # RunLog or None; append-only, never blocks
         self.night = is_night() if night is None else night     # softer dynamics band after NIGHT_START
-        self.dyn_scale = dyn_scale          # accent sensitivity (; and '); may change mid-level
+        self.dyn_scales = dict(dyn_scales or {})   # accent sensitivity per instrument (; and '); may change mid-level
         self.tracks = {}                    # name -> (Track, enabled); pre-rendered audio on the chart timeline
         self.chart = chart
         self.notes = chart.notes
@@ -150,9 +154,17 @@ class Game:
     def paused(self):
         return self.paused_at is not None
 
+    def dyn_scale(self, instrument):
+        return self.dyn_scales.get(instrument, 1.0)
+
+    def dyn_band(self, instrument):
+        """(accent min, tap max) in force for an instrument: its own scale, the night on top."""
+        return dyn_band(instrument, self.night, self.dyn_scale(instrument))
+
     def dyn_thresholds(self):
-        return {"default": list(dyn_band(None, self.night, self.dyn_scale)), "night": self.night, "scale": self.dyn_scale,
-                **{k: list(dyn_band(k, self.night, self.dyn_scale)) for k in DYN_THRESHOLDS}}
+        insts = sorted(set(DYN_THRESHOLDS) | set(self.dyn_scales) | {l.key for l in self.lanes})
+        return {"default": list(dyn_band(None, self.night, 1.0)), "night": self.night, "scales": dict(self.dyn_scales),
+                **{k: list(self.dyn_band(k)) for k in insts}}
 
     # --- transport ---------------------------------------------------------
     def seek(self, t, count_in=0.0):
@@ -269,7 +281,7 @@ class Game:
                 best.state, best.judge, best.error_ms = "hit", judge, err_ms
                 best.hit_velocity = velocity
                 if self.chart.dynamics:
-                    dyn = best.dyn = dynamic_for(best.accent, velocity, best.key, self.night, self.dyn_scale)
+                    dyn = best.dyn = dynamic_for(best.accent, velocity, best.key, self.night, self.dyn_scale(best.key))
                 if self.chart.expression and best.art:
                     best.played = art
                     best.art_ok = art_matches(best.art, art)      # the pedal position, not the zone

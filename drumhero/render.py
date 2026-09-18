@@ -6,7 +6,7 @@ import time
 import pygame
 
 from .chart import COUNT_LABELS, HH_GLYPH, PHRASE_KEYS
-from .game import CONTRAST_TARGET, Game, dyn_band
+from .game import CONTRAST_TARGET, Game
 from .ghost import PEDAL_CLOSED_CC, openness_label
 
 LOOKAHEAD_S = 2.0        # seconds of chart visible above the line at speed 1.0
@@ -411,8 +411,9 @@ class Renderer:
                  f"backing {'on' if g.track_enabled('backing') else 'off'}" if 'backing' in g.tracks else "no backing",
                  f"metronome {g.metronome_mode}" + ("" if g.metronome_mode == "off" or g.metro_volume == 1.0 else f" {g.metro_volume:.0%}")]
         if g.chart.dynamics:
-            a, tp = dyn_band(None, g.night, g.dyn_scale)
-            right.append(f"accent >= {a}  tap <= {tp}  ({g.dyn_scale:.0%}{', night' if g.night else ''})")
+            for inst in dict.fromkeys(n.key for n in g.chart.notes):        # one line per body the level plays
+                a, tp = g.dyn_band(inst)
+                right.append(f"{inst}: accent >= {a}  tap <= {tp}  ({g.dyn_scale(inst):.0%}{', night' if g.night else ''})")
         tr = self.transport
         if tr.get("practice"):
             right.append("practice (P): nothing saved")

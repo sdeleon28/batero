@@ -272,23 +272,66 @@ class App:
         self.set_metro_volume(self.metro_volume + d * METRO_VOLUME_STEP)
 
     @property
-    def dyn_scale(self):
-        return self.settings.get("dyn_scale", 1.0)
+    def dyn_scales(self):
+        """Accent sensitivity per instrument (instrument -> scale, every instrument present).
+        Settings before 2026-09-17 had one number, `dyn_scale`: it seeds every instrument."""
+        sc = self.settings.get("dyn_scales")
+        if not isinstance(sc, dict):
+            sc = self.settings["dyn_scales"] = {inst: self.settings.get("dyn_scale", 1.0) for inst in C.INSTRUMENTS}
+        for inst in C.INSTRUMENTS:
+            sc.setdefault(inst, self.settings.get("dyn_scale", 1.0))
+        return sc
 
-    def set_dyn_scale(self, v):
-        """Accent sensitivity (; and '): scales the accent / tap thresholds of every level,
-        100 % = the measured ones. Applies to the level being played; saved."""
+    def dyn_scale_label(self):
+        """For the Setup row: one number when every body agrees, else the ones that differ."""
+        sc = self.dyn_scales
+        vals = set(sc.values())
+        if len(vals) == 1:
+            return f"{vals.pop():.0%}"
+        common = max(vals, key=lambda v: list(sc.values()).count(v))
+        return f"{common:.0%} · " + " · ".join(f"{i} {v:.0%}" for i, v in sc.items() if v != common)
+
+    def dyn_target(self):
+        """The instrument ; and ' move while the velocity viewer is open: the last stroke
+        heard that was not a ghost (None before the first)."""
+        for _, note, vel, inst, res, ghost in reversed(self.debug_hits):
+            if not ghost and inst:
+                return inst
+        return None
+
+    def set_dyn_scale(self, v, instrument=None):
+        """Accent sensitivity (; and '): scales the accent / tap thresholds of one instrument
+        (its zones share it) or, with None, of every one to the same value, 100 % = the
+        measured ones. Applies to the level being played; saved."""
         v = round(max(GM.DYN_SCALE_MIN, min(GM.DYN_SCALE_MAX, float(v))), 2)
-        self.settings["dyn_scale"] = v
+        sc = self.dyn_scales
+        for inst in ([instrument] if instrument else list(sc)):
+            sc[inst] = v
         save_settings(self.settings)
         if isinstance(self.screen_obj, PlayScreen):
-            self.screen_obj.game.dyn_scale = v
+            self.screen_obj.game.dyn_scales = dict(sc)
             if self.runlog is not None:
                 self.runlog.add("dyn_scale", thresholds=self.screen_obj.game.dyn_thresholds())
-        self.toasts.add(f"accent sensitivity {v:.0%}", ACCENT, key="dyn_scale")
+        self.toasts.add(f"{C.LABELS.get(instrument, instrument) + ' ' if instrument else ''}accent sensitivity {v:.0%}",
+                        ACCENT, key="dyn_scale")
 
     def nudge_dyn_scale(self, d):
-        self.set_dyn_scale(self.dyn_scale + d * GM.DYN_SCALE_STEP)
+        """With the velocity viewer open: the last body heard, on its own (asked 2026-09-17,
+        the hi-hat reads hotter than the snare and the toms softer). Closed: every body,
+        each from where it stands, so their offsets are kept."""
+        target = self.dyn_target() if self.debug_on else None
+        if target:
+            self.set_dyn_scale(self.dyn_scales[target] + d * GM.DYN_SCALE_STEP, target)
+            return
+        sc = self.dyn_scales
+        for inst in list(sc):
+            sc[inst] = round(max(GM.DYN_SCALE_MIN, min(GM.DYN_SCALE_MAX, sc[inst] + d * GM.DYN_SCALE_STEP)), 2)
+        save_settings(self.settings)
+        if isinstance(self.screen_obj, PlayScreen):
+            self.screen_obj.game.dyn_scales = dict(sc)
+            if self.runlog is not None:
+                self.runlog.add("dyn_scale", thresholds=self.screen_obj.game.dyn_thresholds())
+        self.toasts.add(f"accent sensitivity {self.dyn_scale_label()}", ACCENT, key="dyn_scale")
 
     def cycle_audio_device(self):
         names = [None] + output_devices()
@@ -708,8 +751,10 @@ class App:
         S, f = self.scale, self.fonts
         game = self.screen_obj.game if isinstance(self.screen_obj, PlayScreen) else None
         night = game.night if game is not None else GM.is_night()
-        scale = game.dyn_scale if game is not None else self.dyn_scale
+        scales = self.dyn_scales
+        band_of = lambda inst: GM.dyn_band(inst, night, scales.get(inst, 1.0))
         hits = list(self.debug_hits)
+        target = self.dyn_target()              # the body ; and ' move: its bars lit, the others dim
         now = time.perf_counter()
         w, h = 470 * S, 232 * S
         x0, y0 = 16 * S, self.size[1] - h - 16 * S
@@ -717,8 +762,10 @@ class App:
         pane.fill((*LANE_BG, 225))
         self.surface.blit(pane, (x0, y0))
         pygame.draw.rect(self.surface, DIM, (x0, y0, w, h), 1)
-        a_min, t_max = GM.dyn_band(None, night, scale)
-        head = f"velocity   pedal cc {self.ghosts.pedal_cc}   thresholds {a_min}/{t_max}" + ("  night" if night else "")
+        a_min, t_max = band_of(target)
+        head = f"velocity  cc {self.ghosts.pedal_cc}  " + (
+            f"; ' {target} {scales.get(target, 1.0):.0%}: {a_min}/{t_max}" if target else f"thresholds {a_min}/{t_max}"
+        ) + ("  night" if night else "")
         self.surface.blit(f.text(head, f.small, DIM), (x0 + 12 * S, y0 + 8 * S))
         # bars: the last DEBUG_BARS hits, newest at the right, 0..127 tall; ghosts hollow
         gx, gy, gw, gh = x0 + 12 * S, y0 + 34 * S, w - 130 * S, 96 * S     # room for the big number at the right
@@ -731,8 +778,10 @@ class App:
         for i, (t, note, vel, inst, res, ghost) in enumerate(bars):
             bh = gh * vel / 127
             bx = gx + gw - (len(bars) - i) * bw
-            band = GM.dyn_band(inst, night, scale)
+            band = band_of(inst)
             col = JUDGE_COLORS["MISS"] if ghost else JUDGE_COLORS["PERFECT"] if vel >= band[0] else ACCENT if vel <= band[1] else DIM
+            if target and inst != target and not ghost:
+                col = lerp(col, BG, 0.6)                # another body: dim, so the target's strokes stand out
             rect = (bx + 1, gy + gh - bh, max(1, bw - 2), bh)
             pygame.draw.rect(self.surface, col, rect, 1 if ghost else 0)
         # the last hit, big, and the last few as text
@@ -1276,8 +1325,9 @@ class ListScreen(Screen):
                     (f"Menu music: {'on' if self.app.menu_music_on else 'off'}", "ambient texture outside the game"),
                     (f"Audio output: {self.app.sounds.device or 'system default'}", "select cycles through the outputs, saved"),
                     (f"Volume: {self.app.volume:.0%}", "{ and } lower / raise the game's own level anywhere, saved; select raises, wraps to 5 %"),
-                    (f"Accent sensitivity: {self.app.dyn_scale:.0%}", "; and ' lower / raise the accent and tap thresholds anywhere, saved; "
-                                                                      f"night (22:00-08:00) lowers them another 20 %; select raises, wraps"),
+                    (f"Accent sensitivity: {self.app.dyn_scale_label()}", "; and ' lower / raise the accent and tap thresholds anywhere, saved; "
+                                                                           f"with the ` viewer open only the last body played; "
+                                                                           f"night (22:00-08:00) lowers them another 20 %; select sets every body, wraps"),
                     (f"Start fullscreen: {'on' if self.app.settings.get('fullscreen', True) else 'off'}", "F11 or Cmd+F toggles any time, saved"),
                     ("Recording (V)", f"audio {self.app.recorder.settings['capture_audio_device']} ch {self.app.recorder.settings['capture_audio_channels']}"
                                       f" · camera '{self.app.recorder.settings['capture_camera']}' · ~/Movies/drumhero"),
@@ -1336,7 +1386,8 @@ class ListScreen(Screen):
             elif self.sel == 9:
                 self.app.set_volume(VOLUME_STEP if self.app.volume >= 1.0 else self.app.volume + VOLUME_STEP)
             elif self.sel == 10:
-                self.app.set_dyn_scale(GM.DYN_SCALE_MIN if self.app.dyn_scale >= GM.DYN_SCALE_MAX else self.app.dyn_scale + GM.DYN_SCALE_STEP)
+                top = max(self.app.dyn_scales.values())
+                self.app.set_dyn_scale(GM.DYN_SCALE_MIN if top >= GM.DYN_SCALE_MAX else top + GM.DYN_SCALE_STEP)
             elif self.sel == 11:
                 self.app.settings["fullscreen"] = not self.app.settings.get("fullscreen", True)
                 save_settings(self.app.settings)
@@ -2596,7 +2647,7 @@ class PlayScreen(Screen):
         # scroll speed follows the tempo so a beat is always the same distance on screen
         self.game = Game(self.chart, self.lanes, self.by_note, offset_ms=app.offset_ms, speed=app.rate,
                          sounds=app.sounds, guide=app.guide and not self.chart.audio,   # the record has its own drums
-                         log=app.runlog, dyn_scale=app.dyn_scale)
+                         log=app.runlog, dyn_scales=app.dyn_scales)
         self.game.metronome_mode = app.metronome_mode
         self.game.metro_volume = app.metro_volume
         app.runlog.start(self.chart, self.lanes, app.kit, app.settings, {
