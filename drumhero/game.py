@@ -7,6 +7,8 @@ import time
 from collections import deque
 from dataclasses import dataclass
 
+from .chart import art_matches
+
 PERFECT_MS = 25          # |error| <= this -> PERFECT
 GOOD_MS = 60             # |error| <= this -> GOOD
 OK_MS = 100              # |error| <= this -> OK; beyond -> the hit is stray / the note is missed
@@ -270,7 +272,7 @@ class Game:
                     dyn = best.dyn = dynamic_for(best.accent, velocity, best.key, self.night, self.dyn_scale)
                 if self.chart.expression and best.art:
                     best.played = art
-                    best.art_ok = (art == best.art)
+                    best.art_ok = art_matches(best.art, art)      # the pedal position, not the zone
                     self.art_counts["ok" if best.art_ok else "wrong"] += 1
                     if best.art_ok:
                         self.score += ART_BONUS

@@ -72,6 +72,18 @@ COLORS = {
 HH_ARTS = ["tight body", "tight edge", "mid body", "mid edge", "open body", "open edge", "pedal chick"]
 HH_GLYPH = {"tight body": "+", "tight edge": ">+", "mid body": "/", "mid edge": ">/", "open body": "o", "open edge": ">o",
             "pedal chick": "^"}
+
+
+def art_matches(want: str, played: str) -> bool:
+    """Whether a played hi-hat articulation satisfies the chart's. The pedal position is what
+    is judged (tight / mid / open, or the chick): the zone is the chart's suggestion, a stroke
+    on the bow where the edge was written, or the other way round, is still right (asked
+    2026-09-17: the ladder writes edge on the beats and bow on the &s, and either is fine)."""
+    if not want or not played:
+        return False
+    return want == played or (want.split()[0] == played.split()[0] and "pedal" not in want)
+
+
 # Charts that use one crash accept either crash pad; only charts with both lanes tell them apart.
 CRASH_PAIR = {"crash": "crash2", "crash2": "crash"}
 INSTRUMENT_ZONES = {inst: [z.key for z in ZONES if z.instrument == inst] for inst in INSTRUMENTS}
