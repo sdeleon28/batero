@@ -194,6 +194,39 @@ h, f. `--title`, `--note`, `--scene`, `--seconds`, `--fps`, `--no-card`.
   as .txt) with SDL_VIDEODRIVER=dummy: that is how the look was checked without
   a terminal, and how to check it after touching a scene.
 
+## Profiles (who is playing)
+
+`drumhero/profiles.py`, asked for 2026-09-17 so a friend's stars stay apart from the user's. A
+profile is a name and a pad: the pad's icon (nine flat glyphs drawn in `draw_icon`, one per pad
+in `ICON_PADS` order, keys 1..9: flame, star, bolt, skull, heart, gem, moon, sun, note; no font,
+no emoji) is the profile's icon, and **hitting that pad on the login screen is the login**. The
+list lives in `~/.config/drumhero/profiles.json`.
+
+- **Progress per profile**: `App.results` is loaded by `App.set_profile` from
+  `PR.progress_path(profile)`, saved by `App.save_results`. The first profile ever created is
+  the owner (id `main`): it keeps the old `progress.json` and, in the stats, the run logs written
+  before runs carried a `profile` field (`runs_match`); every later profile gets
+  `progress-<id>.json` and only its own runs. The run log header carries `profile`;
+  `stats.summary` / `report` / `per_level` take `profile=`; the coach's folder is
+  `coach/<id>/` for everyone but the owner. **With no profiles the game is as before**: no
+  login, one shared progress.
+- **Screens**: `LoginScreen` (`App.home()`, the screen the game opens on whenever profiles
+  exist and nobody is in; cards with the icon, "hit the Snare", the key; a pad nobody owns
+  toasts; N new profile; Esc quits). `ProfilesScreen` (Setup's first row "Profile: Santi"):
+  Log out, New profile, then one row per profile (select switches to it; the tom, or
+  Backspace, deletes it after a second tom within 3 s, its progress file with it, except the
+  owner's `progress.json`). `NewProfileScreen`: the name from the keyboard (`Screen.typing`:
+  while it is True the main loop routes every key to `on_text` / `on_key` and the global
+  shortcuts V T { } ` ! - = ; ' sleep, so a name can contain them), then **a pad picks its
+  icon and the same pad again creates the profile** and logs it in (Enter also creates; a pad
+  another profile owns is dimmed with the owner's name and refused). The keyboard is only for
+  the name, as asked.
+- The login and new-profile screens take the pads raw (`App.nav_hit(..., raw=True)`: the right
+  crash stays crash2, it is its own icon), every other screen still folds both crashes into
+  "up". Login is not remembered between launches: the game always asks who is playing.
+- The hub shows the icon, the name and the star total top left. A rehearsal (transport or P)
+  still saves nothing, whoever is in.
+
 ## Open items
 
 `ROADMAP.md` lists the loose ends with their full context (hi-hat filter eating fast

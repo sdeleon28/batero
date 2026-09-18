@@ -12,12 +12,14 @@ import time
 from collections import defaultdict
 
 from .runlog import RUNS_DIR
+from .profiles import runs_match
 
 _cache = {}     # path -> (mtime, header)
 
 
-def load_runs(runs_dir=None):
-    """Headers of every run, oldest first: dicts with started, ended, chart, stats..."""
+def load_runs(runs_dir=None, profile=None):
+    """Headers of every run, oldest first: dicts with started, ended, chart, stats...
+    profile: only that profile's runs (the owner's include the runs from before profiles)."""
     runs_dir = runs_dir or RUNS_DIR
     out = []
     for path in glob.glob(os.path.join(runs_dir, "*.jsonl")):
@@ -29,7 +31,7 @@ def load_runs(runs_dir=None):
                 with open(path) as f:
                     head = json.loads(f.readline())
                 _cache[path] = (m, head)
-            if head.get("kind") == "run" and head.get("stats"):
+            if head.get("kind") == "run" and head.get("stats") and runs_match(profile, head):
                 head["path"] = path
                 out.append(head)
         except (OSError, ValueError):
@@ -56,8 +58,8 @@ def _streaks(days, today):
     return current, best
 
 
-def summary(runs=None, now=None):
-    runs = load_runs() if runs is None else runs
+def summary(runs=None, now=None, profile=None):
+    runs = load_runs(profile=profile) if runs is None else runs
     now = time.time() if now is None else now
     today = _day(now)
     by_day = defaultdict(lambda: {"seconds": 0.0, "runs": 0, "notes": 0, "grades": []})
@@ -101,9 +103,9 @@ def summary(runs=None, now=None):
     }
 
 
-def per_level(runs=None):
+def per_level(runs=None, profile=None):
     """chart name -> attempts, best stats, last played, mean timing per instrument (from stats)."""
-    runs = load_runs() if runs is None else runs
+    runs = load_runs(profile=profile) if runs is None else runs
     out = {}
     for r in runs:
         name = r["chart"]["name"]
@@ -127,10 +129,10 @@ def per_level(runs=None):
     return out
 
 
-def report(levels, runs=None, now=None):
+def report(levels, runs=None, now=None, profile=None):
     """Compact JSON-able dict for the coach: catalogue of levels, what was played and how,
-    the trends, the streak. `levels`: {category: [Chart]}."""
-    runs = load_runs() if runs is None else runs
+    the trends, the streak. `levels`: {category: [Chart]}; profile: whose runs."""
+    runs = load_runs(profile=profile) if runs is None else runs
     s = summary(runs, now)
     catalogue = []
     for cat, charts in levels.items():

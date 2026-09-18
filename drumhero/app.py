@@ -29,7 +29,9 @@ from . import twitch as TW
 from . import capture as CP
 from . import edit as E
 from . import stats as ST
+from . import profiles as PR
 from .coach import Coach
+from . import coach as CO
 from .devices import DeviceWatcher, Toasts, TOAST_S
 from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, draw_hihat_state, draw_stars, lerp
 from .game import TAIL_S, lead_in_for
@@ -95,7 +97,9 @@ class App:
         self.track_cache = {}
         self.offset_ms = args.offset if args.offset else float(self.settings.get("offset_ms") or 0.0)
         self.rate = args.speed          # tempo multiplier for levels, 1.0 = as written
-        self.results = load_progress()   # chart name -> best stats so far (stars, grade...), saved
+        self.profiles = PR.load_profiles()   # who can play; empty = no login, one shared progress
+        self.profile = None                  # the profile playing now (LoginScreen), None = nobody / no profiles
+        self.results = load_progress(PR.progress_path(None))   # chart key -> best stats so far (stars, grade...), saved per profile
         self.songs = None          # loaded lazily
         self.midi_name = None
         self.midi_in = None
@@ -473,17 +477,18 @@ class App:
                                       f"{(time.perf_counter() - t_cb) * 1e6:.0f}\n")
                 self.midi_trace.flush()
 
-    def nav_hit(self, note, velocity):
+    def nav_hit(self, note, velocity, raw=False):
         """A drum hit used as a button. Every hit is sounded; every hit above the gate is
         one action, immediately (no debounce: the game must feel instant, and MIDI hits
-        never bounce), queued for the main thread."""
+        never bounce), queued for the main thread. raw: the right crash stays crash2 (the
+        profile screens tell the pads apart)."""
         inst = self.instrument_for(note)
         if inst is None or velocity < NAV_SOUND_MIN_VELOCITY:
             return
         self.sounds.play(inst, velocity, 0.8)
         if velocity < NAV_MIN_VELOCITY:
             return
-        if inst == "crash2":
+        if inst == "crash2" and not raw:
             inst = "crash"                     # either crash is the "up" / Setup button
         self.legend_flash[inst] = time.perf_counter()
         self.drum_queue.append(inst)
@@ -608,12 +613,39 @@ class App:
         """Cached for a second: the hub draws it every frame."""
         now = time.perf_counter()
         if getattr(self, "_summary_at", 0) < now - 1.0:
-            self._summary = ST.summary()
+            self._summary = ST.summary(profile=self.profile_id)
             self._summary_at = now
         return self._summary
 
     def coach_report(self):
-        return ST.report({"exercises": self.items_for("kick"), "beats": self.items_for("snare"), "songs": self.items_for("hihat")})
+        return ST.report({"exercises": self.items_for("kick"), "beats": self.items_for("snare"), "songs": self.items_for("hihat")},
+                         profile=self.profile_id)
+
+    # --- profiles ------------------------------------------------------------------
+    @property
+    def profile_id(self):
+        return self.profile["id"] if self.profile else None
+
+    def set_profile(self, profile):
+        """Log a profile in (None: out): its best results replace the loaded ones, the stats
+        and the coach read its runs from here on."""
+        self.profile = profile
+        self.results = load_progress(PR.progress_path(profile))
+        self._summary_at = 0
+        # the coach's report is about one player's runs: the owner keeps the old folder
+        self.coach.dir = CO.COACH_DIR if profile is None or profile["id"] == PR.MAIN else os.path.join(CO.COACH_DIR, profile["id"])
+        self.coach.result = CO.load_coach(os.path.join(self.coach.dir, "coach.json"))
+        self.session = None
+
+    def save_results(self):
+        save_progress(self.results, PR.progress_path(self.profile))
+
+    def save_profiles(self):
+        PR.save_profiles(self.profiles)
+
+    def home(self, sel=0):
+        """The screen the game opens on: the login when there are profiles and nobody is in."""
+        return LoginScreen(self) if self.profiles and self.profile is None else HubScreen(self, sel)
 
     def start_session(self, playlist):
         items = []
@@ -961,7 +993,7 @@ class App:
         self.update_menu_music()
 
     def run(self):
-        self.go(SetupScreen(self, first_run=True) if self.first_run and self.midi_in else HubScreen(self))
+        self.go(SetupScreen(self, first_run=True) if self.first_run and self.midi_in else self.home())
         clock = pygame.time.Clock()
         running = True
         self.frame_at = time.perf_counter()
@@ -976,6 +1008,12 @@ class App:
                 elif ev.type == pygame.KEYDOWN:
                     if ev.key == pygame.K_F11 or (ev.key == pygame.K_f and ev.mod & (pygame.KMOD_META | pygame.KMOD_CTRL)):
                         self.toggle_fullscreen()
+                    elif self.screen_obj.typing:
+                        # a name is being typed: every key is text (or the screen's), none of the shortcuts
+                        if ev.unicode and ev.unicode.isprintable() and not ev.mod & (pygame.KMOD_META | pygame.KMOD_CTRL):
+                            self.screen_obj.on_text(ev.unicode)
+                        elif self.screen_obj.on_key(ev.key) is False:
+                            running = False
                     elif ev.key == pygame.K_v:
                         self.toggle_recording()
                     elif ev.key == pygame.K_t:
@@ -1034,6 +1072,8 @@ class App:
 
 # ---------------------------------------------------------------------------
 class Screen:
+    typing = False       # True: the keyboard types into the screen (on_text) and the global shortcuts sleep
+
     def __init__(self, app: App):
         self.app = app
 
@@ -1072,6 +1112,10 @@ class Screen:
     def on_key(self, key):
         """Return False to quit."""
         return True
+
+    def on_text(self, ch):
+        """A printable character, while `typing`."""
+        pass
 
     def update(self):
         pass
@@ -1154,6 +1198,12 @@ class HubScreen(Screen):
         strip = (f"streak {sm['streak']} day{'s' if sm['streak'] != 1 else ''}  ·  today {sm['today_minutes']:.0f} min"
                  f"  ·  {sm['total_minutes']:.0f} min in {sm['days']} days  ·  S progress  ·  C coach")
         self.f.center(surf, strip, self.f.small, ACCENT if sm["streak"] else DIM, 92 * S)
+        if self.app.profile:                                  # who is playing, top left
+            p = self.app.profile
+            PR.draw_icon(surf, p["pad"], 60 * S, 52 * S, 20 * S, bg=BG)
+            surf.blit(self.f.text(p["name"], self.f.mid, C.COLORS[p["pad"]]), (90 * S, 36 * S))
+            stars = sum(v.get("stars", 0) for v in self.app.results.values())
+            surf.blit(self.f.text(f"★ {stars}  ·  Setup ▸ Profile to log out", self.f.small, DIM), (90 * S, 66 * S))
         gap, top, bottom, side = 18 * S, 118 * S, self.h - 70 * S, 60 * S
         pw = (self.w - 2 * side - gap) / 2
         ph = (bottom - top - gap) / 2
@@ -1211,7 +1261,12 @@ class ListScreen(Screen):
 
     def items(self):
         if self.cat == "crash":
-            return [("Set up kit", describe(self.app.kit)),
+            p = self.app.profile
+            return [((f"Profile: {p['name']}" if p else "Profiles: none"),
+                     ("log out, switch, new profile · each profile logs in by hitting its pad" if self.app.profiles
+                      else "one shared progress until a profile exists · new profile: a name, and the pad whose icon you want; "
+                           "from then on each player logs in by hitting their pad")),
+                    ("Set up kit", describe(self.app.kit)),
                     ("Soundcheck", "hit every pad, see where it lands and hear it"),
                     (f"Drum sounds: {'on' if self.app.sounds.drums else 'off'}", "off: the kit is silent here, the module or Bitwig makes the sound"),
                     (f"Guide sounds: {'on' if self.app.guide else 'off'}", "hear the chart as it crosses the line"),
@@ -1259,41 +1314,43 @@ class ListScreen(Screen):
     def accept(self):
         if self.cat == "crash":
             if self.sel == 0:
-                self.app.go(SetupScreen(self.app))
+                self.app.go(ProfilesScreen(self.app))
             elif self.sel == 1:
-                self.app.go(SoundcheckScreen(self.app))
+                self.app.go(SetupScreen(self.app))
             elif self.sel == 2:
-                self.app.set_drum_sounds(not self.app.sounds.drums)
+                self.app.go(SoundcheckScreen(self.app))
             elif self.sel == 3:
-                self.app.guide = not self.app.guide
+                self.app.set_drum_sounds(not self.app.sounds.drums)
             elif self.sel == 4:
-                self.app.backing_on = not self.app.backing_on
+                self.app.guide = not self.app.guide
             elif self.sel == 5:
+                self.app.backing_on = not self.app.backing_on
+            elif self.sel == 6:
                 modes = ["full", "beats", "off"]
                 self.app.metronome_mode = modes[(modes.index(self.app.metronome_mode) + 1) % 3]
-            elif self.sel == 6:
+            elif self.sel == 7:
                 self.app.menu_music_on = not self.app.menu_music_on
                 self.app.update_menu_music()
-            elif self.sel == 7:
-                self.app.cycle_audio_device()
             elif self.sel == 8:
-                self.app.set_volume(VOLUME_STEP if self.app.volume >= 1.0 else self.app.volume + VOLUME_STEP)
+                self.app.cycle_audio_device()
             elif self.sel == 9:
-                self.app.set_dyn_scale(GM.DYN_SCALE_MIN if self.app.dyn_scale >= GM.DYN_SCALE_MAX else self.app.dyn_scale + GM.DYN_SCALE_STEP)
+                self.app.set_volume(VOLUME_STEP if self.app.volume >= 1.0 else self.app.volume + VOLUME_STEP)
             elif self.sel == 10:
+                self.app.set_dyn_scale(GM.DYN_SCALE_MIN if self.app.dyn_scale >= GM.DYN_SCALE_MAX else self.app.dyn_scale + GM.DYN_SCALE_STEP)
+            elif self.sel == 11:
                 self.app.settings["fullscreen"] = not self.app.settings.get("fullscreen", True)
                 save_settings(self.app.settings)
-            elif self.sel == 11:
-                self.app.toggle_recording()
             elif self.sel == 12:
-                self.app.toggle_stream()
+                self.app.toggle_recording()
             elif self.sel == 13:
-                self.app.go(CameraCheckScreen(self.app, self.app.surface))
+                self.app.toggle_stream()
             elif self.sel == 14:
-                self.app.go(EditScreen(self.app))
+                self.app.go(CameraCheckScreen(self.app, self.app.surface))
             elif self.sel == 15:
-                self.app.go(StatsScreen(self.app))
+                self.app.go(EditScreen(self.app))
             elif self.sel == 16:
+                self.app.go(StatsScreen(self.app))
+            elif self.sel == 17:
                 self.app.go(CoachScreen(self.app))
             else:
                 return False
@@ -1436,6 +1493,311 @@ def sparkline(surf, values, x, y, w, h, color, lo=None, hi=None, S=1.0):
     pts = [(x + i * w / (len(values) - 1), y + h - (v - lo) / span * h) for i, v in enumerate(values)]
     pygame.draw.lines(surf, color, False, pts, max(1, int(2 * S)))
     pygame.draw.circle(surf, color, (int(pts[-1][0]), int(pts[-1][1])), int(4 * S))
+
+
+# ---------------------------------------------------------------------------
+class LoginScreen(Screen):
+    """Who's playing: one card per profile, hit its pad (or its number) to log in."""
+
+    def __init__(self, app):
+        super().__init__(app)
+        self.flash = None       # (wall t, pad) the last hit on a pad nobody owns
+
+    def on_note(self, note, velocity):
+        self.app.nav_hit(note, velocity, raw=True)
+
+    def on_drum(self, inst):
+        self.login(inst)
+        return True
+
+    def login(self, pad):
+        p = PR.by_pad(self.app.profiles, pad)
+        if p is None:
+            self.flash = (time.perf_counter(), pad)
+            self.app.toasts.add(f"nobody on the {C.LABELS[pad]} · N makes a profile", DIM, key="login")
+            return
+        self.app.set_profile(p)
+        self.app.toasts.add(f"playing as {p['name']}", C.COLORS[p["pad"]], key="login")
+        self.app.go(HubScreen(self.app))
+
+    def on_key(self, key):
+        if key in (pygame.K_ESCAPE, pygame.K_q):
+            return False
+        if key in KEY_LANES and KEY_LANES[key] < len(PR.ICON_PADS):
+            self.login(PR.ICON_PADS[KEY_LANES[key]])
+        elif key == pygame.K_n:
+            self.app.go(NewProfileScreen(self.app, back=lambda: LoginScreen(self.app)))
+        return True
+
+    def update(self):
+        if not self.app.profiles:
+            self.app.go(HubScreen(self.app))
+
+    def draw(self, surf, fps):
+        surf.fill(BG)
+        S = self.s
+        self.f.center(surf, "Who's playing?", self.f.large, TEXT, 60 * S)
+        self.f.center(surf, "hit your pad", self.f.mid, DIM, 104 * S)
+        ps = self.app.profiles
+        n = max(1, len(ps))
+        cw = min(300 * S, (self.w - 120 * S) / n)
+        ch = min(330 * S, self.h - 280 * S)
+        x0 = self.w / 2 - cw * n / 2
+        cy = 150 * S + ch / 2
+        now = time.perf_counter()
+        for i, p in enumerate(ps):
+            pad = p["pad"]
+            color = C.COLORS[pad]
+            hot = max(0.0, 1 - (now - self.app.legend_flash.get(pad, 0)) / 0.3)
+            cx = x0 + (i + 0.5) * cw
+            rect = pygame.Rect(int(cx - cw / 2 + 10 * S), int(cy - ch / 2), int(cw - 20 * S), int(ch))
+            fill = lerp(lerp(LANE_BG, color, 0.12), color, 0.5 * hot)
+            pygame.draw.rect(surf, fill, rect, border_radius=int(18 * S))
+            pygame.draw.rect(surf, color if hot else lerp(LANE_BG, color, 0.5), rect, 2, border_radius=int(18 * S))
+            PR.draw_icon(surf, pad, cx, cy - 60 * S, min(64 * S, ch * 0.22), bg=fill)
+            self.f.center(surf, p["name"], self.f.big if len(p["name"]) <= 8 else self.f.mid, TEXT, cy + 40 * S, cx)
+            self.f.center(surf, f"hit the {C.LABELS[pad]}", self.f.small, color, cy + 90 * S, cx)
+            self.f.center(surf, f"key {PR.ICON_PADS.index(pad) + 1}", self.f.small, DIM, cy + 112 * S, cx)
+            if self.app.midi_in and not self.app.has_drum(pad):
+                self.f.center(surf, "pad not in the kit", self.f.small, JUDGE_COLORS["MISS"], cy + ch / 2 - 22 * S, cx)
+        if self.flash and now - self.flash[0] < 1.0:
+            pad = self.flash[1]
+            self.f.center(surf, f"nobody on the {C.LABELS[pad]}", self.f.mid, lerp(BG, C.COLORS[pad], 1 - (now - self.flash[0])),
+                          cy + ch / 2 + 34 * S)
+        self.f.center(surf, "N new profile   ·   Esc quit", self.f.small, DIM, self.h - 20 * S)
+
+
+# ---------------------------------------------------------------------------
+class ProfilesScreen(Screen):
+    """Setup ▸ Profile: log out, make a profile, switch to another, delete one."""
+
+    DELETE_S = 3.0      # the second tom hit must come within this
+
+    def __init__(self, app, sel=0):
+        super().__init__(app)
+        self.sel = sel
+        self.arm = None     # (wall t, profile id) a delete waiting for its confirmation
+        self.stars = {p["id"]: sum(v.get("stars", 0) for v in load_progress(PR.progress_path(p)).values())
+                      for p in app.profiles}
+
+    def rows(self):
+        out = []
+        if self.app.profile:
+            out.append(("logout", "Log out", "back to the login screen: the next player hits their pad"))
+        out.append(("new", "New profile", "type a name, hit the pad whose icon you want, hit it again"))
+        for p in self.app.profiles:
+            now = "playing now · " if self.app.profile is p else ""
+            out.append((p, p["name"], f"{now}{C.LABELS[p['pad']]} · ★ {self.stars.get(p['id'], 0)} · select switches to it, tom deletes it"))
+        return out
+
+    def move(self, d):
+        self.sel = (self.sel + d) % len(self.rows())
+
+    def accept(self):
+        what = self.rows()[self.sel][0]
+        if what == "logout":
+            self.app.set_profile(None)
+            self.app.toasts.add("logged out", DIM, key="login")
+            self.app.go(LoginScreen(self.app))
+        elif what == "new":
+            self.app.go(NewProfileScreen(self.app, back=lambda: ProfilesScreen(self.app, self.sel)))
+        else:
+            self.app.set_profile(what)
+            self.app.toasts.add(f"playing as {what['name']}", C.COLORS[what["pad"]], key="login")
+            self.app.go(HubScreen(self.app))
+
+    def delete(self):
+        what = self.rows()[self.sel][0]
+        if not isinstance(what, dict):
+            return
+        now = time.perf_counter()
+        if self.arm and self.arm[1] == what["id"] and now - self.arm[0] < self.DELETE_S:
+            self.arm = None
+            self.app.profiles.remove(what)
+            self.app.save_profiles()
+            path = PR.progress_path(what)
+            if what["id"] != PR.MAIN:                       # the owner's file is the old shared progress.json: kept
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+            if self.app.profile is what:
+                self.app.set_profile(None)
+            self.app.toasts.add(f"{what['name']} deleted", DIM, key="login")
+            self.sel = min(self.sel, len(self.rows()) - 1)
+            if not self.app.profiles:
+                self.app.go(ListScreen(self.app, "crash", 0))
+        else:
+            self.arm = (now, what["id"])
+
+    def on_drum(self, inst):
+        action = NAV.get(inst)
+        if action == "next":
+            self.move(1)
+        elif action == "prev":
+            self.move(-1)
+        elif action == "accept":
+            self.accept()
+        elif action == "back":
+            self.app.go(ListScreen(self.app, "crash", 0))
+        elif action == "lead":
+            self.delete()
+        return True
+
+    def on_key(self, key):
+        if key in (pygame.K_DOWN, pygame.K_j):
+            self.move(1)
+        elif key in (pygame.K_UP, pygame.K_k):
+            self.move(-1)
+        elif key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_l):
+            self.accept()
+        elif key in (pygame.K_ESCAPE, pygame.K_h):
+            self.app.go(ListScreen(self.app, "crash", 0))
+        elif key in (pygame.K_BACKSPACE, pygame.K_DELETE, pygame.K_x):
+            self.delete()
+        return True
+
+    def draw(self, surf, fps):
+        surf.fill(BG)
+        S = self.s
+        color = C.COLORS["crash"]
+        pygame.draw.rect(surf, lerp(LANE_BG, color, 0.14), (0, 0, self.w, 96 * S))
+        pygame.draw.circle(surf, color, (int(self.w * 0.12 - 30 * S), int(48 * S)), int(12 * S))
+        surf.blit(self.f.text("Profiles", self.f.big, TEXT), (self.w * 0.12, 20 * S))
+        ts = self.f.text("each profile has its own stars, streak and coach", self.f.small, DIM)
+        surf.blit(ts, (self.w * 0.88 - ts.get_width(), 60 * S))
+        rows = self.rows()
+        y, row_h = 140 * S, 52 * S
+        now = time.perf_counter()
+        for i, (what, name, sub) in enumerate(rows):
+            selected = i == self.sel
+            x = self.w * 0.12
+            if selected:
+                pygame.draw.rect(surf, lerp(LANE_BG, color, 0.18), (x - 20 * S, y - 8 * S, self.w * 0.76 + 40 * S, row_h - 4 * S), border_radius=int(10 * S))
+                pygame.draw.rect(surf, color, (x - 20 * S, y - 8 * S, 6 * S, row_h - 4 * S), border_radius=int(3 * S))
+            if isinstance(what, dict):
+                PR.draw_icon(surf, what["pad"], x + 16 * S, y + 16 * S, 14 * S, bg=lerp(LANE_BG, color, 0.18) if selected else BG)
+                tx = x + 44 * S
+                col = C.COLORS[what["pad"]] if selected or self.app.profile is what else TEXT
+            else:
+                tx, col = x, (color if selected else TEXT)
+            surf.blit(self.f.text(name, self.f.mid, col), (tx, y))
+            armed = isinstance(what, dict) and self.arm and self.arm[1] == what["id"] and now - self.arm[0] < self.DELETE_S
+            if armed:
+                sub = f"hit the tom again to delete {what['name']} and their stars"
+            surf.blit(self.f.text(sub, self.f.small, JUDGE_COLORS["MISS"] if armed else DIM), (tx + 260 * S, y + 6 * S))
+            y += row_h
+        self.legend(surf, [("hihat", "down"), ("crash", "up"), ("snare", "select"), ("tom1", "delete"), ("kick", "back")],
+                    keys="arrows or j k · Enter · Backspace delete · Esc")
+
+
+# ---------------------------------------------------------------------------
+class NewProfileScreen(Screen):
+    """A name from the keyboard, an icon from the pads: hit a pad to choose its icon, hit it
+    again to create the profile and log in as it."""
+
+    typing = True
+
+    def __init__(self, app, back=None):
+        super().__init__(app)
+        self.name = ""
+        self.pad = None
+        self.back = back or (lambda: ListScreen(app, "crash", 0))
+        self.flash = None       # (wall t, pad, reason) a pad that could not be chosen
+
+    def on_note(self, note, velocity):
+        self.app.nav_hit(note, velocity, raw=True)
+
+    def on_drum(self, inst):
+        self.choose(inst)
+        return True
+
+    def choose(self, pad):
+        owner = PR.by_pad(self.app.profiles, pad)
+        if owner is not None:
+            self.flash = (time.perf_counter(), pad, f"the {C.LABELS[pad]} is {owner['name']}'s")
+            return
+        if self.pad == pad:
+            self.create()
+        else:
+            self.pad = pad
+
+    def create(self):
+        if not self.name.strip():
+            self.flash = (time.perf_counter(), self.pad, "type a name first")
+            return
+        if self.pad is None:
+            self.flash = (time.perf_counter(), None, "hit a pad to choose an icon")
+            return
+        try:
+            p = PR.new_profile(self.app.profiles, self.name, self.pad)
+        except ValueError as e:
+            self.flash = (time.perf_counter(), self.pad, str(e))
+            return
+        self.app.profiles.append(p)
+        self.app.save_profiles()
+        self.app.set_profile(p)
+        self.app.toasts.add(f"welcome, {p['name']} · you log in with the {C.LABELS[p['pad']]}", C.COLORS[p["pad"]], key="login")
+        self.app.go(HubScreen(self.app))
+
+    def on_text(self, ch):
+        if len(self.name) < 16:
+            self.name += ch
+
+    def on_key(self, key):
+        if key == pygame.K_ESCAPE:
+            self.app.go(self.back())
+        elif key == pygame.K_BACKSPACE:
+            self.name = self.name[:-1]
+        elif key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            self.create()
+        elif key in KEY_LANES and KEY_LANES[key] < len(PR.ICON_PADS) and not self.name:
+            self.choose(PR.ICON_PADS[KEY_LANES[key]])       # digits are text once a name has begun
+        return True
+
+    def draw(self, surf, fps):
+        surf.fill(BG)
+        S = self.s
+        now = time.perf_counter()
+        self.f.center(surf, "New profile", self.f.large, TEXT, 50 * S)
+        # the name
+        bw, bh = 420 * S, 56 * S
+        box = pygame.Rect(int(self.w / 2 - bw / 2), int(96 * S), int(bw), int(bh))
+        pygame.draw.rect(surf, LANE_BG, box, border_radius=int(12 * S))
+        pygame.draw.rect(surf, ACCENT if not self.name else DIM, box, 2, border_radius=int(12 * S))
+        caret = "|" if int(now * 2) % 2 == 0 else " "
+        if self.name:
+            self.f.center(surf, self.name + caret, self.f.mid, TEXT, box.centery)
+        else:
+            self.f.center(surf, caret + " type a name", self.f.mid, DIM, box.centery)
+        # the icons
+        n = len(PR.ICON_PADS)
+        cw = min(130 * S, (self.w - 80 * S) / n)
+        x0 = self.w / 2 - cw * n / 2
+        iy = 300 * S
+        self.f.center(surf, "hit a pad to choose your icon" if self.pad is None else
+                      f"hit the {C.LABELS[self.pad]} again to create the profile", self.f.mid,
+                      TEXT if self.pad is None else C.COLORS[self.pad], 196 * S)
+        for i, pad in enumerate(PR.ICON_PADS):
+            cx = x0 + (i + 0.5) * cw
+            owner = PR.by_pad(self.app.profiles, pad)
+            color = C.COLORS[pad]
+            hot = max(0.0, 1 - (now - self.app.legend_flash.get(pad, 0)) / 0.3)
+            chosen = pad == self.pad
+            if chosen:
+                pygame.draw.circle(surf, lerp(LANE_BG, color, 0.25 + 0.4 * hot), (int(cx), int(iy)), int(cw * 0.46))
+                pygame.draw.circle(surf, color, (int(cx), int(iy)), int(cw * 0.46), max(2, int(3 * S)))
+            r = cw * (0.3 if chosen else 0.22) * (1 + 0.15 * hot)
+            PR.draw_icon(surf, pad, cx, iy, r, color=lerp(color, BG, 0.65) if owner else color,
+                         bg=lerp(LANE_BG, color, 0.25 + 0.4 * hot) if chosen else BG)
+            self.f.center(surf, C.LABELS[pad], self.f.small, DIM if owner else TEXT, iy + cw * 0.56, cx)
+            self.f.center(surf, owner["name"] if owner else f"key {i + 1}", self.f.small,
+                          lerp(color, DIM, 0.4) if owner else DIM, iy + cw * 0.56 + 20 * S, cx)
+        if self.flash and now - self.flash[0] < 1.6:
+            k = 1 - (now - self.flash[0]) / 1.6
+            self.f.center(surf, self.flash[2], self.f.mid, lerp(BG, JUDGE_COLORS["MISS"], k), iy + cw * 0.56 + 62 * S)
+        self.f.center(surf, "type the name · a pad picks the icon, the same pad again creates it · Enter also creates · Esc cancel",
+                      self.f.small, DIM, self.h - 20 * S)
 
 
 # ---------------------------------------------------------------------------
@@ -2154,7 +2516,7 @@ class SoundcheckScreen(Screen):
         return True
 
     def done(self):
-        self.app.go(HubScreen(self.app, 0 if self.first_run else 3))
+        self.app.go(self.app.home(0) if self.first_run else HubScreen(self.app, 3))
 
     def draw(self, surf, fps):
         surf.fill(BG)
@@ -2238,7 +2600,7 @@ class PlayScreen(Screen):
         self.game.metronome_mode = app.metronome_mode
         self.game.metro_volume = app.metro_volume
         app.runlog.start(self.chart, self.lanes, app.kit, app.settings, {
-            "offset_ms": app.offset_ms, "guide": self.game.guide, "metronome": app.metronome_mode,
+            "profile": app.profile_id, "offset_ms": app.offset_ms, "guide": self.game.guide, "metronome": app.metronome_mode,
             "backing": app.backing_on, "drum_sounds": app.sounds.drums, "dyn_thresholds": self.game.dyn_thresholds(),
             "ghost_filter": {"hihat_min_velocity": GH.HIHAT_MIN_VELOCITY, "chick_splash_ms": GH.CHICK_SPLASH_MS,
                              "chick_splash_velocity_min": GH.CHICK_SPLASH_VELOCITY_MIN,
@@ -2462,7 +2824,7 @@ class PlayScreen(Screen):
             keep = {k: st[k] for k in ("stars", "grade", "accuracy", "mean_ms", "std_ms", "hit", "notes")}
             keep["when"] = time.time()
             self.app.results[self.chart.key] = keep
-            save_progress(self.app.results)
+            self.app.save_results()
         self.recorded = True
 
     def update(self):
