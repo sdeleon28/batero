@@ -20,6 +20,9 @@ what keeps a 212x58 terminal at 30 fps cheap.
 
 Keys: q/Esc quit, space next scene, 1..6 jump to a scene, p pause, h HUD,
 b the be-right-back card, f fps counter.
+
+The same screen in English is `curtain` (`./curtain`, `--lang en`): one string
+table per language (STRINGS below), one animation.
 """
 import argparse
 import math
@@ -386,13 +389,178 @@ def text_mask(s, w, h, height_px, bold=True, tracking=0, cy=None, fit=0.92):
     return out
 
 
+# ---------------------------------------------------------------- language
+# Everything a viewer reads, once per language. The screen is the same in both:
+# `cortina` is the Spanish one, `curtain` the English one (--lang en). Scene
+# `name`s are identifiers (--scene, the snapshot file names) and stay as they
+# are; only what is drawn is translated. Add a language by adding a dict here.
+STRINGS = {
+    "es": {
+        "scene": {
+            "latent":        ("LATENT SPACE", "12 288 d  ·  proyeccion 2d en vivo"),
+            "attention":     ("SELF-ATTENTION", "softmax(QKᵀ/√d) · capa 42"),
+            "emergence":     ("EMERGENCIA", "reaccion-difusion · sin supervision"),
+            "red":           ("PASADA HACIA ADELANTE", "6 capas · 1.2 B parametros"),
+            "entrenamiento": ("ENTRENAMIENTO", "checkpoint vivo · lr coseno"),
+            "tokens":        ("GENERANDO", "temp 0.83 · top-p 0.95"),
+        },
+        "clusters": ["groove", "fill", "ghost", "tempo", "silencio"],
+        "vocab": ["el", "pulso", "no", "es", "el", "metronomo", ",", "es", "lo",
+                  "que", "el", "cuerpo", "ya", "sabe", "antes", "de"],
+        "mass": "masa  %.3f",
+        "layers": ["entrada", "attn", "mlp", "attn", "mlp", "logits"],
+        "backward": "backward  ←  ∇ propagando",
+        "forward": "forward   →  activaciones",
+        "step": "paso      %s",
+        "weights": "pesos · bloque 12",
+        "unlock": "✦  capacidad emergente: ",
+        "unlocks": [
+            "paradiddle a 180 bpm",
+            "independencia del pie izquierdo",
+            "swing sin pensarlo",
+            "ghost notes por debajo de 30 de velocity",
+            "contar el 1 despues de un fill de 7",
+            "no acelerar en el estribillo",
+            "hi-hat abierto justo antes del bombo",
+            "cumbia villera en los cuerpos",
+            "escuchar al bajo",
+            "tocar mas bajo cuando entra la voz",
+            "el silencio como golpe",
+        ],
+        "thoughts": [
+            "el groove es un problema de prediccion: el cuerpo ya sabe el proximo golpe",
+            "hipotesis: el ghost note es el dropout del baterista",
+            "si escucho diez mil horas de funk, aprendo el pocket o solo la media",
+            "el metronomo mide el tiempo; el bombo lo decide",
+            "cada fill es una rama del arbol que se poda al caer en el uno",
+            "atencion completa sobre el hi-hat: todo lo demas es contexto",
+            "el error mas caro no es fallar el golpe, es dudar despues",
+            "aprendi a tocar fuerte antes que a tocar bajo, ese fue el sesgo",
+            "el silencio tiene la misma probabilidad que cualquier otro token",
+            "quien vuelva a la camara va a tener que justificar este tempo",
+        ],
+        "cands": ["golpe", "tiempo", "pulso", "silencio", "bombo", "redoblante", "aire",
+                  "uno", "cuerpo", "ritmo", "error", "swing", "nota", "manos"],
+        "card_title": "YA VUELVO",
+        "live": "EN VIVO",
+        "afk": "AFK  %d:%02d",
+        "stay": "el stream sigue en vivo, no cierres nada",
+        "excuses": [
+            "fui a mear, vuelvo en un toque",
+            "fui a buscar los lentes",
+            "fui por agua, ya vuelvo",
+            "se me cayo una baqueta atras del tom",
+            "estoy afinando el bombo",
+            "discutiendo con el hi-hat",
+            "el AGI quedo practicando solo",
+            "pausa tecnica, no toquen nada",
+        ],
+        "marquee": [
+            "el stream no se corta",
+            "deja tu tempo favorito en el chat",
+            "seguimos en un minuto",
+            "mientras tanto el modelo sigue entrenando",
+            "pedidos de temas por chat",
+        ],
+        "keys": "q salir   espacio escena   p pausa   m musica   -/+ volumen   b tarjeta   h hud",
+        "no_audio": "sin audio",
+        "no_music": "sin musica",
+    },
+    "en": {
+        "scene": {
+            "latent":        ("LATENT SPACE", "12 288 d  ·  live 2d projection"),
+            "attention":     ("SELF-ATTENTION", "softmax(QKᵀ/√d) · layer 42"),
+            "emergence":     ("EMERGENCE", "reaction-diffusion · unsupervised"),
+            "red":           ("FORWARD PASS", "6 layers · 1.2 B parameters"),
+            "entrenamiento": ("TRAINING", "live checkpoint · cosine lr"),
+            "tokens":        ("GENERATING", "temp 0.83 · top-p 0.95"),
+        },
+        "clusters": ["groove", "fill", "ghost", "tempo", "silence"],
+        "vocab": ["the", "pulse", "is", "not", "the", "metronome", ",", "it", "is",
+                  "what", "the", "body", "already", "knows", "before", "the"],
+        "mass": "mass  %.3f",
+        "layers": ["input", "attn", "mlp", "attn", "mlp", "logits"],
+        "backward": "backward  ←  ∇ propagating",
+        "forward": "forward   →  activations",
+        "step": "step      %s",
+        "weights": "weights · block 12",
+        "unlock": "✦  emergent capability: ",
+        "unlocks": [
+            "paradiddle at 180 bpm",
+            "left foot independence",
+            "swing without thinking about it",
+            "ghost notes under 30 velocity",
+            "finding the 1 after a fill in 7",
+            "not rushing the chorus",
+            "open hi-hat right before the kick",
+            "cumbia villera in the body",
+            "listening to the bass",
+            "playing quieter when the vocal comes in",
+            "silence as a stroke",
+        ],
+        "thoughts": [
+            "the groove is a prediction problem: the body already knows the next stroke",
+            "hypothesis: the ghost note is the drummer's dropout",
+            "ten thousand hours of funk: do I learn the pocket or only the mean",
+            "the metronome measures the time; the kick decides it",
+            "every fill is a branch of the tree, pruned when it lands on the one",
+            "full attention on the hi-hat: everything else is context",
+            "the costliest error is not missing the stroke, it is hesitating after",
+            "I learned to play loud before I learned to play soft, that was the bias",
+            "silence has the same probability as any other token",
+            "whoever comes back to the camera will have to justify this tempo",
+        ],
+        "cands": ["stroke", "time", "pulse", "silence", "kick", "snare", "air",
+                  "one", "body", "groove", "error", "swing", "note", "hands"],
+        "card_title": "BE RIGHT BACK",
+        "live": "LIVE",
+        "afk": "AFK  %d:%02d",
+        "stay": "the stream is still live, do not close anything",
+        "excuses": [
+            "gone for a piss, back in a second",
+            "gone to find my glasses",
+            "gone for water, back in a minute",
+            "dropped a stick behind the tom",
+            "tuning the kick drum",
+            "arguing with the hi-hat",
+            "left the AGI practising on its own",
+            "technical pause, do not touch anything",
+        ],
+        "marquee": [
+            "the stream is not going anywhere",
+            "leave your favourite tempo in the chat",
+            "back in a minute",
+            "meanwhile the model keeps training",
+            "song requests in the chat",
+        ],
+        "keys": "q quit   space scene   p pause   m music   -/+ volume   b card   h hud",
+        "no_audio": "no audio",
+        "no_music": "no music",
+    },
+}
+
+T = STRINGS["es"]
+
+
+def set_lang(lang):
+    """Pick the language every string is read from; called once, from main()."""
+    global T
+    T = STRINGS[lang]
+
+
 # ---------------------------------------------------------------- scenes
 class Scene:
     name = "scene"
-    title = ""
-    sub = ""
     low = 0.0          # kick and bass, 0..1.4, set by App from the music every frame
     high = 0.0         # hats and arpeggio
+
+    @property
+    def title(self):
+        return T["scene"].get(self.name, ("", ""))[0]
+
+    @property
+    def sub(self):
+        return T["scene"].get(self.name, ("", ""))[1]
 
     def enter(self, w, h, cols, rows):
         self.w, self.h, self.cols, self.rows = w, h, cols, rows
@@ -408,9 +576,6 @@ class Latent(Scene):
     """Particles in a divergence-free flow field, breathing in and out of clusters."""
 
     name = "latent"
-    title = "LATENT SPACE"
-    sub = "12 288 d  ·  proyeccion 2d en vivo"
-    NAMES = ["groove", "fill", "ghost", "tempo", "silencio"]
 
     def enter(self, w, h, cols, rows):
         Scene.enter(self, w, h, cols, rows)
@@ -475,7 +640,7 @@ class Latent(Scene):
         for i in range(len(ACCENTS)):
             splat(cv.px, [ax[i]], [ay[i]], scale(ACCENTS[i], 0.8), 1.2)
         cnt = np.bincount(self.cl, minlength=len(ACCENTS))
-        for i, name in enumerate(self.NAMES):
+        for i, name in enumerate(T["clusters"]):
             row = 3 + i
             n = int(cnt[i])
             bar = "█" * max(1, int(10 * n / max(1, len(self.cl)) * len(ACCENTS)))
@@ -487,14 +652,10 @@ class Attention(Scene):
     """One head of causal self-attention: the query sweeps, the arcs light up."""
 
     name = "attention"
-    title = "SELF-ATTENTION"
-    sub = "softmax(QKᵀ/√d) · capa 42"
-    VOCAB = ["el", "pulso", "no", "es", "el", "metronomo", ",", "es", "lo",
-             "que", "el", "cuerpo", "ya", "sabe", "antes", "de"]
 
     def enter(self, w, h, cols, rows):
         Scene.enter(self, w, h, cols, rows)
-        self.n = len(self.VOCAB)
+        self.n = len(T["vocab"])
         self.head = 0
         self.new_head()
         self.q = 0.0
@@ -552,13 +713,13 @@ class Attention(Scene):
                        AMBER, 0.35 if dy else 0.9)
         # token strip on the character layer
         row = int(self.base / 2) + 2
-        for i, tok in enumerate(self.VOCAB):
+        for i, tok in enumerate(T["vocab"]):
             col = int(xs[i] - len(tok) / 2)
             c = WHITE if i == qi else (AMBER if i == qi + 1 else scale(SLATE, 1.5 if i < qi else 0.9))
             cv.text(row, col, tok, c)
         cv.text(row + 2, int(x0), "head %02d" % self.head, scale(SLATE, 1.4))
         top = np.argsort(-wgt)[:3]
-        s = "  ".join("%s %.2f" % (self.VOCAB[j], wgt[j]) for j in top if wgt[j] > 0.01)
+        s = "  ".join("%s %.2f" % (T["vocab"][j], wgt[j]) for j in top if wgt[j] > 0.01)
         cv.text(row + 2, int(x0) + 10, s, mix(CYAN, WHITE, 0.3))
         # the whole matrix, small, on the left
         mw = max(1, int(w * 0.09) // n * n)
@@ -575,8 +736,6 @@ class Diffusion(Scene):
     """Gray-Scott reaction-diffusion: structure out of two numbers."""
 
     name = "emergence"
-    title = "EMERGENCIA"
-    sub = "reaccion-difusion · sin supervision"
 
     def enter(self, w, h, cols, rows):
         Scene.enter(self, w, h, cols, rows)
@@ -621,15 +780,13 @@ class Diffusion(Scene):
                     (1.00, mix(WHITE, CYAN, 0.35))], v)
         cv.px += img.astype(np.float32) * 0.46
         cv.text(3, 3, "F %.4f   k %.4f" % (self.F, self.k), scale(SLATE, 1.6))
-        cv.text(4, 3, "masa  %.3f" % float(self.V.mean()), mix(CYAN, WHITE, 0.2))
+        cv.text(4, 3, T["mass"] % float(self.V.mean()), mix(CYAN, WHITE, 0.2))
 
 
 class Network(Scene):
     """A stack of layers with the forward pass, then the gradient coming back."""
 
     name = "red"
-    title = "PASADA HACIA ADELANTE"
-    sub = "6 capas · 1.2 B parametros"
     SIZES = [6, 11, 15, 11, 8, 4]
 
     def enter(self, w, h, cols, rows):
@@ -706,9 +863,9 @@ class Network(Scene):
         gap = min(self.h * 0.52 / max(self.SIZES), 5.0)
         row = int((self.h * 0.50 + gap * (max(self.SIZES) - 1) / 2) / 2) + 2
         for li, n in enumerate(self.SIZES):
-            name = ["entrada", "attn", "mlp", "attn", "mlp", "logits"][li]
+            name = T["layers"][li]
             cv.text(row, int(self.nx[li][0] - len(name) / 2), name, scale(SLATE, 1.5))
-        cv.text(3, 3, "backward  ←  ∇ propagando" if self.back else "forward   →  activaciones",
+        cv.text(3, 3, T["backward"] if self.back else T["forward"],
                 mix(col, WHITE, 0.35))
         cv.text(4, 3, "loss  %.4f" % self.loss, scale(SLATE, 1.7))
 
@@ -717,21 +874,6 @@ class Telemetry(Scene):
     """The training run: loss going down, weights cooking, capabilities popping."""
 
     name = "entrenamiento"
-    title = "ENTRENAMIENTO"
-    sub = "checkpoint vivo · lr coseno"
-    UNLOCKS = [
-        "paradiddle a 180 bpm",
-        "independencia del pie izquierdo",
-        "swing sin pensarlo",
-        "ghost notes por debajo de 30 de velocity",
-        "contar el 1 despues de un fill de 7",
-        "no acelerar en el estribillo",
-        "hi-hat abierto justo antes del bombo",
-        "cumbia villera en los cuerpos",
-        "escuchar al bajo",
-        "tocar mas bajo cuando entra la voz",
-        "el silencio como golpe",
-    ]
 
     def enter(self, w, h, cols, rows):
         Scene.enter(self, w, h, cols, rows)
@@ -760,7 +902,7 @@ class Telemetry(Scene):
         np.clip(self.heat, 0, 1, out=self.heat)
         if t > self.next_unlock:
             self.next_unlock = t + np.random.uniform(3.5, 7.0)
-            self.ticker.append([np.random.choice(self.UNLOCKS), t])
+            self.ticker.append([np.random.choice(T["unlocks"]), t])
             self.ticker = self.ticker[-5:]
 
     def draw(self, cv):
@@ -795,41 +937,25 @@ class Telemetry(Scene):
                     (0.8, scale(MAGENTA, 0.8)), (1.0, AMBER)], img) * 0.20
         cv.px[3 : 3 + img.shape[0], w - img.shape[1] - 3 : w - 3] += img.astype(np.float32)
         cv.text(3, 3, "loss      %.4f" % self.loss, mix(CYAN, WHITE, 0.3))
-        cv.text(4, 3, "paso      %s" % ("{:,}".format(self.step).replace(",", " ")), scale(SLATE, 1.7))
+        cv.text(4, 3, T["step"] % ("{:,}".format(self.step).replace(",", " ")), scale(SLATE, 1.7))
         cv.text(5, 3, "accuracy  %.1f %%" % (self.acc * 100), scale(SLATE, 1.7))
-        cv.text(2, self.cols - 22, "pesos · bloque 12", scale(SLATE, 1.4))
+        cv.text(2, self.cols - 22, T["weights"], scale(SLATE, 1.4))
         base = self.rows - 4 - len(self.ticker)
         for i, (msg, _) in enumerate(self.ticker):
             fade = 0.35 + 0.65 * (i + 1) / len(self.ticker)
-            cv.text(base + i, 3, "✦  capacidad emergente: " + msg, scale(mix(AMBER, WHITE, 0.2), fade))
+            cv.text(base + i, 3, T["unlock"] + msg, scale(mix(AMBER, WHITE, 0.2), fade))
 
 
 class TokenStream(Scene):
     """A thought being generated, token by token, with the logits showing."""
 
     name = "tokens"
-    title = "GENERANDO"
-    sub = "temp 0.83 · top-p 0.95"
-    THOUGHTS = [
-        "el groove es un problema de prediccion: el cuerpo ya sabe el proximo golpe",
-        "hipotesis: el ghost note es el dropout del baterista",
-        "si escucho diez mil horas de funk, aprendo el pocket o solo la media",
-        "el metronomo mide el tiempo; el bombo lo decide",
-        "cada fill es una rama del arbol que se poda al caer en el uno",
-        "atencion completa sobre el hi-hat: todo lo demas es contexto",
-        "el error mas caro no es fallar el golpe, es dudar despues",
-        "aprendi a tocar fuerte antes que a tocar bajo, ese fue el sesgo",
-        "el silencio tiene la misma probabilidad que cualquier otro token",
-        "quien vuelva a la camara va a tener que justificar este tempo",
-    ]
-    CANDS = ["golpe", "tiempo", "pulso", "silencio", "bombo", "redoblante", "aire",
-             "uno", "cuerpo", "ritmo", "error", "swing", "nota", "manos"]
 
     def enter(self, w, h, cols, rows):
         Scene.enter(self, w, h, cols, rows)
         self.lines = []
         self.cur = []
-        self.pending = list(np.random.choice(self.THOUGHTS, 1))[0].split(" ")
+        self.pending = list(np.random.choice(T["thoughts"], 1))[0].split(" ")
         self.i = 0
         self.acc = 0.0
         self.cands = self.roll()
@@ -838,7 +964,7 @@ class TokenStream(Scene):
     def roll(self):
         p = np.random.random(5) ** 2 + 0.02
         p = np.sort(p / p.sum())[::-1]
-        return list(zip(np.random.choice(self.CANDS, 5, replace=False), p))
+        return list(zip(np.random.choice(T["cands"], 5, replace=False), p))
 
     def update(self, t, dt):
         self.phase = t
@@ -855,7 +981,7 @@ class TokenStream(Scene):
                 self.lines = self.lines[-6:]
                 self.cur = []
                 self.i = 0
-                self.pending = self.THOUGHTS[np.random.randint(len(self.THOUGHTS))].split(" ")
+                self.pending = T["thoughts"][np.random.randint(len(T["thoughts"]))].split(" ")
 
     def draw(self, cv):
         w, h = self.w, self.h
@@ -887,26 +1013,8 @@ class TokenStream(Scene):
 class Card:
     """The be-right-back card: what a viewer needs to know at a glance."""
 
-    EXCUSES = [
-        "fui a mear, vuelvo en un toque",
-        "fui a buscar los lentes",
-        "fui por agua, ya vuelvo",
-        "se me cayo una baqueta atras del tom",
-        "estoy afinando el bombo",
-        "discutiendo con el hi-hat",
-        "el AGI quedo practicando solo",
-        "pausa tecnica, no toquen nada",
-    ]
-    MARQUEE = [
-        "el stream no se corta",
-        "deja tu tempo favorito en el chat",
-        "seguimos en un minuto",
-        "mientras tanto el modelo sigue entrenando",
-        "pedidos de temas por chat",
-    ]
-
-    def __init__(self, title="YA VUELVO", note=None, channel="twitch.tv/xantwav"):
-        self.title = title
+    def __init__(self, title=None, note=None, channel="twitch.tv/xantwav"):
+        self.title = title or T["card_title"]
         self.note = note
         self.channel = channel
         self.mask = None
@@ -959,15 +1067,16 @@ class Card:
         r1 = (y1 - 1) // 2
         lit = 0.45 + 0.55 * (0.5 + 0.5 * math.sin(t * 3.0)) + 0.5 * low
         cv.text(r0 + 2, x0 // 1 + 3, "●", scale(RED, lit + 0.4))
-        cv.text(r0 + 2, x0 + 5, "EN VIVO", mix(WHITE, RED, 0.25))
-        cv.text(r0 + 2, x0 + 14, "·  " + self.channel, scale(SLATE, 1.6))
-        afk = "AFK  %d:%02d" % (int(elapsed) // 60, int(elapsed) % 60)
+        cv.text(r0 + 2, x0 + 5, T["live"], mix(WHITE, RED, 0.25))
+        cv.text(r0 + 2, x0 + 7 + len(T["live"]), "·  " + self.channel, scale(SLATE, 1.6))
+        afk = T["afk"] % (int(elapsed) // 60, int(elapsed) % 60)
         cv.text(r0 + 2, x1 - 3 - len(afk), afk, mix(AMBER, WHITE, 0.2))
 
         mid = (self.mask.any(axis=1).nonzero()[0])
         tr = (int(mid[-1]) // 2 + 2) if len(mid) else (r0 + r1) // 2
-        cv.text_center(tr + 1, "el stream sigue en vivo, no cierres nada", scale(SLATE, 1.9))
-        note = self.note or self.EXCUSES[int(t / 7.0) % len(self.EXCUSES)]
+        cv.text_center(tr + 1, T["stay"], scale(SLATE, 1.9))
+        exc = T["excuses"]
+        note = self.note or exc[int(t / 7.0) % len(exc)]
         if self.note is None:
             # the excuse types itself in, so a viewer notices it changed
             k = (t % 7.0) / 0.9
@@ -976,7 +1085,7 @@ class Card:
                 note += "█"
         cv.text_center(tr + 3, note, mix(AMBER, WHITE, 0.35))
 
-        m = "   ·   ".join(self.MARQUEE) + "   ·   "
+        m = "   ·   ".join(T["marquee"]) + "   ·   "
         off = int(t * 7) % len(m)
         wide = min(self.cols - 6, 120)
         s = (m[off:] + m[:off])[:wide]
@@ -1004,7 +1113,7 @@ def hud(cv, scene, t, total, fps, show_fps, music=None, lvl=(0.0, 0.0)):
         bar = "".join("█" if i < k else ("▄" if i < j else "·") for i in range(nn))
         cv.text(rows - 1, cols - 2 - nn - (10 if show_fps else 0), bar,
                 mix(CYAN, MAGENTA, min(1.0, hi)))
-    keys = "q salir   espacio escena   p pausa   m musica   -/+ volumen   b tarjeta   h hud"
+    keys = T["keys"]
     cv.text(rows - 1, 2, keys, scale(SLATE, 1.0))
     if show_fps:
         s = "%4.1f fps" % fps
@@ -1101,9 +1210,9 @@ class Music:
 
     def label(self):
         if self.error:
-            return "sin audio"
+            return T["no_audio"]
         if self.track is None:
-            return "sin musica"
+            return T["no_music"]
         return "%s %.0f" % (self.track["key"], self.track["bpm"])
 
     def fade(self, ms):
@@ -1327,10 +1436,20 @@ def snapshot(args):
 
 
 def main(argv=None):
+    # --lang is read before anything else: the help text, the defaults and every
+    # string the screen draws come from the table it picks. `cortina` is the
+    # Spanish command, `curtain` the English one (it passes --lang en).
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--lang", default="es", choices=sorted(STRINGS))
+    lang = pre.parse_known_args(argv)[0].lang
+    set_lang(lang)
     ap = argparse.ArgumentParser(
-        prog="cortina", description=__doc__.split("\n")[0],
+        prog="curtain" if lang == "en" else "cortina", description=__doc__.split("\n")[0],
         formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--title", default="YA VUELVO", help="big text on the card")
+    ap.add_argument("--lang", default=lang, choices=sorted(STRINGS),
+                    help="language of everything on screen (default: %s)" % lang)
+    ap.add_argument("--title", default=None,
+                    help="big text on the card (default: %s)" % T["card_title"])
     ap.add_argument("--note", default=None, help="fixed line under the title (default: it rotates)")
     ap.add_argument("--channel", default="twitch.tv/xantwav")
     ap.add_argument("--scene", default=None, help="lock to one scene: " + ", ".join(c.name for c in SCENES))

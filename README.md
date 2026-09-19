@@ -547,14 +547,15 @@ intro. A course's levels name their style (`Chart.backing`, "punk" for pop
 punk) instead of taking the one their index gives. Toggle it with B during play
 or from Setup, or start with `--no-backing`.
 
-## Waiting screen for the stream (`cortina`)
+## Waiting screen for the stream (`cortina`, `curtain`)
 
 ```
-cortina
+cortina     # in Spanish
+curtain     # the same screen in English
 ```
 
 from any terminal takes over it with a full-screen "be right back" card for the moments
-you walk away from the camera: a pulsing EN VIVO badge, the channel, an AFK
+you walk away from the camera: a pulsing EN VIVO / LIVE badge, the channel, an AFK
 timer, the big title and a line that rotates through the reasons you are not in
 the chair, over an animation that cycles six scenes - a latent space of drifting
 clusters, one head of self-attention with its arcs, Gray-Scott reaction-diffusion,
@@ -575,7 +576,13 @@ it, the arpeggio lights the arcs and the particles. `python -m drumhero.keygen
 
 `~/bin/cortina` is a symlink to `./cortina` in this repo, which finds the repo
 through the link and runs `.venv/bin/python -m drumhero.agi`; if the repo moves,
-`ln -sfn <repo>/cortina ~/bin/cortina` again.
+`ln -sfn <repo>/cortina ~/bin/cortina` again. `curtain` is the same screen in
+English (`~/bin/curtain` -> `./curtain`, which adds `--lang en`): the animation
+is identical, and every string a viewer reads - the badge, the card, the
+excuses, the marquee, the scene titles, the telemetry labels, the thoughts
+being generated, the key legend - comes from the `STRINGS` table in `agi.py`,
+one entry per language. `--lang es` / `--lang en` on either command switches.
+Adding a language is one more dict there.
 
 `q` (or `Esc`, or `Ctrl-C`) closes the curtain instead of cutting it: the whole
 picture fades to black over a second and a bit while the music fades with it, so
@@ -607,6 +614,8 @@ cortina --seconds 40 --fps 24        # slower rotation, cheaper frames
 cortina --no-card                    # just the animation
 cortina --no-music --volume 0.4      # quiet, or silent
 cortina --music-seed 1312 --bpm 155  # that tune again, at that tempo
+curtain --title "BACK IN 5"          # the English one, same flags
+curtain --note "gone for ice"        #   (or cortina --lang en)
 ```
 
 ## Install as a Mac app

@@ -190,6 +190,17 @@ h, f. `--title`, `--note`, `--scene`, `--seconds`, `--fps`, `--no-card`.
   black frame. The fade factor is squared in linear light, which the tone map's
   gamma turns into an even ramp for the eye; it multiplies the character colours
   too, or the HUD would stay lit over a black screen.
+- **English: `curtain`** (asked for 2026-09-19). `./curtain` is `./cortina` plus
+  `--lang en`, its own `~/bin/curtain` symlink; `--lang` works on either command.
+  Every string a viewer reads lives in `STRINGS` in `agi.py` (`T` is the picked
+  language, `set_lang` in `main` before the parser, so the help and the `--title`
+  default follow it): scene titles and subs (a `Scene` reads them from the table
+  by its `name`), the latent clusters, the attention sentence, the layer names,
+  the telemetry labels and unlocks, the thoughts and their candidate tokens, the
+  card (title, badge, AFK, the line, excuses, marquee) and the key legend. Scene
+  `name`s stay Spanish where they are (`red`, `entrenamiento`): they are
+  identifiers for `--scene` and the snapshot files, not text. A new language is
+  one more dict; a new string goes into every dict.
 - `--snap DIR` renders a frame of every scene to PNG (plus the character layer
   as .txt) with SDL_VIDEODRIVER=dummy: that is how the look was checked without
   a terminal, and how to check it after touching a scene.
