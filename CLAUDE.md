@@ -194,14 +194,15 @@ h, f. `--title`, `--note`, `--scene`, `--seconds`, `--fps`, `--no-card`.
   as .txt) with SDL_VIDEODRIVER=dummy: that is how the look was checked without
   a terminal, and how to check it after touching a scene.
 
-## Hints on the results screen (every third attempt short of five stars)
+## Hints on the results screen (every attempt short of five stars)
 
 `drumhero/hints.py`, asked for 2026-09-18: deterministic, no LLM. `App.tries` counts, per level
 key, the finished runs in a row under five stars (a rehearsal with the transport is not an
 attempt, a practice run with P is; five stars reset it; kept as `tries` in the level's progress
-entry). Every `hints.EVERY` (3) attempts `PlayScreen.attempt` runs `hints.analyse` on the
+entry). On every attempt short of five stars `PlayScreen.attempt` runs `hints.analyse` on the
 judged notes (`from_game`) and the results box shows the two costliest faults, in
-`coach_language`, under "after N tries · work on this". The rules are thresholds on plain
+`coach_language`, under "try N · work on this" (it was every third attempt for a day, 2026-09-18:
+with R retried mid-run, the one run played to the end never showed it). The rules are thresholds on plain
 statistics, each hint ordered by the grade points it costs: misses (which body, which beat
 position), strays (soft ones are pedal or stick touches), then one timing hint, the largest of:
 one body against the rest of the kit (>= 15 ms), the left hand against the right, the &s

@@ -189,7 +189,7 @@ class Renderer:
         self.finished_at = None                                  # set by the play screen for the star animation
         self.marker_labels = []
         self.transport = {}      # set by the play screen: practice, the loop range, the pending l gesture
-        self.hints = None        # (attempts, [lines]) from the play screen: what to work on, every third try short of five stars
+        self.hints = None        # (attempts, [lines]) from the play screen: what to work on, on every try short of five stars
 
     def y_for(self, note_t, now):
         return self.line_y - (note_t - now) * self.pps * self.game.speed
@@ -759,7 +759,7 @@ class Renderer:
         if self.hints and self.hints[1]:
             tries, texts = self.hints
             bw = 760
-            lines.append((f"after {tries} tries · work on this", self.f.small, DIM))
+            lines.append(((f"try {tries} · " if tries > 1 else "") + "work on this", self.f.small, DIM))
             for text in texts:
                 for row in wrap(self.f.small, text, (bw - 40) * S):
                     lines.append((row, self.f.small, JUDGE_COLORS["OK"]))

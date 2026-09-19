@@ -2890,8 +2890,8 @@ class PlayScreen(Screen):
 
     def attempt(self):
         """The level just ended: count it as an attempt at five stars (a rehearsal is not one), and
-        every third attempt in a row that falls short work out what went wrong (hints.analyse)
-        for the results box. Five stars reset the count."""
+        when it falls short work out what went wrong (hints.analyse) for the results box. Five
+        stars reset the count."""
         st = self.game.stats()
         if self.game.seeked:
             return
@@ -2900,11 +2900,10 @@ class PlayScreen(Screen):
             self.app.tries[key] = 0
             return
         self.app.tries[key] = self.app.tries.get(key, 0) + 1
-        if self.app.tries[key] % HI.EVERY == 0:
-            notes, strays = HI.from_game(self.game)
-            self.hints = HI.hint_for(notes, strays, self.app.settings.get("coach_language", "es"),
-                                     self.chart.dynamics, self.chart.expression)
-            self.renderer.hints = (self.app.tries[key], self.hints)
+        notes, strays = HI.from_game(self.game)
+        self.hints = HI.hint_for(notes, strays, self.app.settings.get("coach_language", "es"),
+                                 self.chart.dynamics, self.chart.expression)
+        self.renderer.hints = (self.app.tries[key], self.hints)
 
     def update(self):
         if self.loop_digits is not None and time.perf_counter() - self.loop_at > LOOP_GESTURE_S:

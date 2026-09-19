@@ -1,7 +1,8 @@
 """Hints: what went wrong in a run, worked out from the judged notes alone (no LLM), for the
-results screen. Asked for 2026-09-18: every third attempt that does not reach five stars,
-the game says in one or two lines what to work on ("you rush the &s", "the kick lands ahead
-of the rest of the kit", "soft strokes that are not in the chart").
+results screen. Asked for 2026-09-18: every attempt that does not reach five stars, the game
+says in one or two lines what to work on ("you rush the &s", "the kick lands ahead of the
+rest of the kit", "soft strokes that are not in the chart"). It was every third attempt for a
+day; with R retried mid-run the one run played to the end, the one that needs it, never showed it.
 
 analyse() takes the judged notes and the strays in a plain form that both the live Game
 and a run log can produce (`from_game`, `from_runlog`), and returns the hints ordered by
@@ -28,7 +29,6 @@ DRIFT_MS = 15           # second half this far from the first: a tempo drift
 SPREAD_MS = 25          # a std this wide is "irregular" even when the mean is fine
 MIN_NOTES = 4           # never diagnose a group from fewer notes
 STRAY_SOFT = 40         # strays at this velocity or under are touches, not strokes
-EVERY = 3               # attempts under five stars between hints
 
 LABEL = {k: v.lower() for k, v in LABELS.items()}
 LABEL_ES = {"kick": "el bombo", "snare": "el tambor", "hihat": "el hi-hat", "crash": "el crash", "crash2": "el crash derecho",
