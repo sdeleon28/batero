@@ -5,7 +5,7 @@ import time
 
 import pygame
 
-from .chart import COUNT_LABELS, HH_GLYPH, PHRASE_KEYS
+from .chart import COUNT_LABELS, HH_GLYPH, PHRASE_KEYS, art_goal
 from .game import CONTRAST_TARGET, Game
 from .ghost import PEDAL_CLOSED_CC, openness_label
 
@@ -365,9 +365,12 @@ class Renderer:
                     ds = f.text(DYN_LABELS[fl.dyn], f.mid if fl.dyn in ("SOFT", "LOUD") else f.small, lerp(DYN_COLORS[fl.dyn], BG, jt))
                     surf.blit(ds, (cx - ds.get_width() / 2, self.line_y - (44 + 40 * jt) * S))
                 if fl.art and newest_in_lane[fl.lane] is fl:
-                    want, ok = fl.art
+                    # matched: what was heard ("tight edge"); wrong: the openness wanted, never the
+                    # zone, since the zone is not judged (edge strokes read "tight body" as a
+                    # correction until 2026-09-19: the pop punk course writes t, the user plays the edge)
+                    want, ok, played = fl.art
                     col = DYN_COLORS["ACCENT"] if ok else DYN_COLORS["SOFT"]
-                    ds = f.text(want if ok else f"want {want}", f.small if ok else f.mid, lerp(col, BG, jt))
+                    ds = f.text((played or want) if ok else f"want {art_goal(want)}", f.small if ok else f.mid, lerp(col, BG, jt))
                     surf.blit(ds, (cx - ds.get_width() / 2, self.line_y - (44 + 40 * jt) * S))
 
         if latest is not None:
@@ -389,7 +392,7 @@ class Renderer:
                 surf.blit(ds, (self.w / 2 - ds.get_width() / 2, self.h * 0.30 + 90 * S))
                 ds.set_alpha(255)
             elif latest.art and not latest.art[1]:
-                ds = f.text(f"HAT: {latest.art[0].upper()}", f.mid, DYN_COLORS["SOFT"])
+                ds = f.text(f"HAT: {art_goal(latest.art[0]).upper()}", f.mid, DYN_COLORS["SOFT"])
                 ds.set_alpha(int(255 * (1 - jt)))
                 surf.blit(ds, (self.w / 2 - ds.get_width() / 2, self.h * 0.30 + 90 * S))
                 ds.set_alpha(255)

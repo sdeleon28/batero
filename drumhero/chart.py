@@ -79,6 +79,12 @@ def art_matches(want: str, played: str) -> bool:
     return want == played or (want.split()[0] == played.split()[0] and "pedal" not in want)
 
 
+def art_goal(want: str) -> str:
+    """What art_matches actually asks of a chart articulation, for the feedback: 'tight' /
+    'mid' / 'open' (either zone) or 'chick'."""
+    return "chick" if "pedal" in want else want.split()[0]
+
+
 # Charts that use one crash accept either crash pad; only charts with both lanes tell them apart.
 CRASH_PAIR = {"crash": "crash2", "crash2": "crash"}
 INSTRUMENT_ZONES = {inst: [z.key for z in ZONES if z.instrument == inst] for inst in INSTRUMENTS}

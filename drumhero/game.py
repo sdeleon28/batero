@@ -62,7 +62,7 @@ class Flash:
     error_ms: float
     velocity: int
     dyn: str = None      # ACCENT / TAP / SOFT / LOUD when the chart judges dynamics
-    art: tuple = None    # (required articulation, matched) when the chart judges hi-hat expression
+    art: tuple = None    # (required articulation, matched, played) when the chart judges hi-hat expression
 
 
 def is_night(now: float = None) -> bool:
@@ -313,7 +313,8 @@ class Game:
             if dyn in ("ACCENT", "TAP"):
                 self.score += DYN_BONUS
         self.flashes.append(Flash(wall_t, lane, judge, err_ms, velocity, dyn,
-                                  None if note is None or note.art is None or note.art_ok is None else (note.art, note.art_ok)))
+                                  None if note is None or note.art is None or note.art_ok is None
+                                  else (note.art, note.art_ok, note.played)))
         self.hits.append((note.t if note else None, lane, judge, err_ms, velocity, dyn))
 
     # --- per-frame housekeeping ----------------------------------------------
