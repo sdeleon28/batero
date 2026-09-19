@@ -13,6 +13,15 @@ stroke together, open hats): the softest real tap read 29; real bow taps land as
 as 44 ms after an edge accent at 63..85 % of it; a stick landing with the chick reads
 113..126 within 5 ms of it, or 56..127 as a 42 up to 52 ms later; real strokes while
 the pedal is opening read 116..127. Every rule below keeps those.
+
+The kick (2026-09-19, the Pop punk course): burying the beater on the KD pad bounces it back
+onto the head, and the module sends a second kick nobody played: 36..60 ms after the stroke at
+12..54 % of its velocity (most of them), a few up to 93 ms at 13..26 %, and a slower one
+160..250 ms after (the beater settling on release) at 12..48 %. On an acoustic drum a buried
+beater stays on the head and none of these would sound. Measured over every run log (5081 kick
+strokes): no real kick ever came within 70 ms of another, the fastest kick figure in a chart is
+94 ms apart (sixteenths at 160 bpm), and a real second kick within 250 ms is never under 60 %
+of the first (a soft real & at 43 came 300 ms after a 103).
 """
 import time
 from collections import deque
@@ -35,6 +44,11 @@ ANY_MIN_VELOCITY = 8         # below this nothing counts, on any pad
 # come as close as 44 ms at 63..85 %, so only the soft tier is separable; the 42 ms one is
 # accepted. (window ms, max velocity ratio) tiers, checked in order.
 ZONE_CROSSTALK = [(95, 0.58)]
+# Beater bounce on the kick: (window ms, max velocity ratio to the last real kick) tiers, the
+# reference stays the last real kick so a chain of bounces falls whole. 80 ms is under the
+# fastest chart figure (94 ms); 0.4 within 250 ms keeps a soft real double (never under 0.6).
+KICK_NOTES = {36}
+KICK_BOUNCE = [(80, 0.6), (250, 0.4)]
 
 PEDAL_CLOSED_CC = 90         # fully closed on this pedal (0 = fully open)
 TIGHT_MIN = 80               # closedness >= this -> tight
@@ -63,6 +77,7 @@ class GhostFilter:
         self.pedal_cc = PEDAL_CLOSED_CC  # assume closed until the pedal speaks
         self.last_stroke = None          # (t, note, velocity, zone, openness) of the last real hi-hat stroke
         self.last_ghost = None           # (t, note, velocity, why)
+        self.last_kick = None            # (t, velocity) of the last real kick
 
     def control_change(self, control, value, t=None):
         if control != PEDAL_CC:
@@ -88,6 +103,17 @@ class GhostFilter:
             return None
         if velocity < ANY_MIN_VELOCITY:
             return self._flag("too soft", t, note, velocity)
+        if note in KICK_NOTES:
+            lk = self.last_kick
+            if lk:
+                dt = (t - lk[0]) * 1000
+                for window_ms, ratio in KICK_BOUNCE:
+                    if dt <= window_ms:
+                        if velocity <= ratio * lk[1]:
+                            return self._flag("beater bounce", t, note, velocity)
+                        break
+            self.last_kick = (t, velocity)
+            return None
         if note not in HIHAT_STICK_NOTES:
             return None
         if velocity < HIHAT_MIN_VELOCITY:
