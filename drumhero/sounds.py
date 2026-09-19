@@ -770,19 +770,32 @@ def backing_sound(bpm, prog_index=0, bars=4, lead_in_s=0.0):
 # ---------------------------------------------------------------------------
 # Metronome: round, conga-like hits, pre-rendered for the whole level so they
 # are sample-accurate and sit inside the mix instead of on top of it.
+# Level (2026-09-19, "too quiet even at 160 %"): the track's gain tops out at pygame's
+# set_volume ceiling (METRONOME_GAIN * METRO_VOLUME_MAX = 0.96 on a track at full scale),
+# so the only headroom left is in the samples: the hits are driven hard (RMS up at the same
+# peak), get a slap on top (the sine body alone was A-weighted 10 dB under its RMS) and the
+# track goes through a soft limiter (METRO_DRIVE) instead of a peak normalise. Measured on a
+# 90 bpm beat and a 152 bpm pop punk level: +7 dB A-weighted at 100 %, +11 dB at 160 %.
 # ---------------------------------------------------------------------------
 METRONOME_GAIN = 0.6
 METRO_LEVELS = {"low": 1.0, "mid": 0.72, "tap": 0.34}
+METRO_DRIVE = 2.5               # tanh drive of the rendered track's limiter (1.0 is nearly clean)
 
 
-def conga(f=180.0, dur=0.35, drop=1.35, decay=9.0, noise=0.12, seed=7):
-    """A tuned hand-drum: sine with a quick pitch drop, soft saturation, a breath of noise."""
+def conga(f=180.0, dur=0.35, drop=1.35, decay=9.0, noise=0.12, seed=7, slap=0.5, drive=3.5):
+    """A tuned hand-drum: sine with a quick pitch drop, hard saturation (drive), a breath of noise
+    and the hand's slap (slap: a 1.5..5 kHz burst with a bright partial, so the hit reads through
+    the cymbals and the backing)."""
     t = _t(dur)
     freq = f * (1 + (drop - 1) * np.exp(-t * 90))
     phase = 2 * math.pi * np.cumsum(freq) / SR
     body = np.sin(phase) * np.exp(-t * decay)
     attack = _noise(len(t), seed) * np.exp(-t * 350) * noise
-    x = np.tanh(1.6 * (body + attack)) * np.minimum(1.0, t / 0.001)
+    burst = _lowpass(np.diff(_noise(len(t), seed + 100), prepend=0.0), 5) * np.exp(-t * 220)
+    burst /= np.max(np.abs(burst)) or 1.0
+    ping = np.sin(2 * math.pi * f * 9.7 * t) * np.exp(-t * 120)
+    x = np.tanh(drive * (body + attack)) / np.tanh(drive) + slap * (0.7 * burst + 0.4 * ping)
+    x *= np.minimum(1.0, t / 0.001)
     return x / (np.max(np.abs(x)) or 1.0)
 
 
@@ -793,8 +806,10 @@ METRO_HITS = {
 }
 
 
-def _mix_events(events, total_s):
-    """events: [(time_s, mono array, gain)] -> mono float32 of total_s seconds, peak 0.9."""
+def _mix_events(events, total_s, drive=None):
+    """events: [(time_s, mono array, gain)] -> mono float32 of total_s seconds. Without drive
+    the mix is brought down to peak 0.9 if it goes over; with one it is normalised to full scale
+    and soft-limited (tanh, peak 0.98), which lifts every hit's RMS at the same peak."""
     out = np.zeros(int(total_s * SR) + SR)
     for t0, sig, gain in events:
         i = int(round(t0 * SR))
@@ -803,7 +818,9 @@ def _mix_events(events, total_s):
         j = min(i + len(sig), len(out))
         out[i:j] += sig[: j - i] * gain
     peak = np.max(np.abs(out))
-    if peak > 0.9:
+    if drive:
+        out = np.tanh(drive * out / (peak or 1.0)) / np.tanh(drive) * 0.98
+    elif peak > 0.9:
         out *= 0.9 / peak
     return out.astype(np.float32)
 
@@ -823,7 +840,7 @@ def render_metronome(chart, lead_in_s, total_s, mode="full"):
         if mode == "full":
             for k in range(1, sub):
                 events.append((chart.beat_time(i + k / sub) + lead_in_s, hits["tap"], METRO_LEVELS["tap"]))
-    return _mix_events(events, lead_in_s + total_s)
+    return _mix_events(events, lead_in_s + total_s, METRO_DRIVE)
 
 
 def render_backing_track(bpm, prog_index, lead_in_s, total_s, feel="straight"):
