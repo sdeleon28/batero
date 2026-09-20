@@ -53,11 +53,15 @@ ANY_MIN_VELOCITY = 8         # below this nothing counts, on any pad
 # none a chart note): a note on the other zone within CROSSTALK_NEAR_MS at or under
 # CROSSTALK_NEAR_VELOCITY_MAX is that stroke heard twice. Late: 73..111 ms after at 28..56 %
 # (the hardest strokes, 113..127, ring the longest: 95..111 ms, 2026-09-20),
-# where real doubles (44..90 ms at 63..85 %) overlap anything higher, so the ratio stays 0.58.
-# (window ms, max velocity ratio) tiers, checked in order.
+# at up to 0.70 (the run logs, 2026-09-20 evening: 51 escapes between 0.58 and 0.80, hat open or
+# tight alike, one of them a chart note, at 0.71). The double the 2026-09-09 measurement kept
+# (44..90 ms at 63..85 %) is now partly eaten; the user chose one note over two. Within 30 ms
+# the other zone falls at any velocity: 8..25 ms at 0.7..1.5 x, one stroke read on both zones,
+# nobody plays two hat strokes 30 ms apart. (window ms, max velocity ratio) tiers, in order.
+CROSSTALK_ONE_STROKE_MS = 30    # two zones this close are one stroke read twice, whatever the velocities
 CROSSTALK_NEAR_MS = 50
 CROSSTALK_NEAR_VELOCITY_MAX = 95
-ZONE_CROSSTALK = [(115, 0.58)]
+ZONE_CROSSTALK = [(115, 0.70)]
 # Beater bounce on the kick: (window ms, max velocity ratio to the last real kick) tiers, the
 # reference stays the last real kick so a chain of bounces falls whole. 80 ms is under the
 # fastest chart figure (94 ms); 0.4 within 250 ms keeps a soft real double (never under 0.6).
@@ -145,7 +149,7 @@ class GhostFilter:
         ls = self.last_stroke
         if ls and ls[3] != zone:
             dt = (t - ls[0]) * 1000
-            if dt <= CROSSTALK_NEAR_MS and velocity <= CROSSTALK_NEAR_VELOCITY_MAX:
+            if dt <= CROSSTALK_ONE_STROKE_MS or (dt <= CROSSTALK_NEAR_MS and velocity <= CROSSTALK_NEAR_VELOCITY_MAX):
                 return self._flag("zone crosstalk", t, note, velocity)
             for window_ms, ratio in ZONE_CROSSTALK:
                 if dt <= window_ms:
