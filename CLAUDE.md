@@ -308,6 +308,18 @@ pairs, left first" and "Double kick gallop tail", added 2026-09-20 because the g
 right-foot sixteenth came 30 ms early over 53 runs and knowing it did not fix it); any other
 double-kick level is the same argument.
 
+## Scroll speed (D): fixed or following the tempo
+
+`scroll_fixed` in settings (default off), `App.scroll_fixed`, `App.toggle_scroll`; **D** in the
+lists and on the play screen, the Setup row "Scroll speed (D)", saved. Off, the highway shows
+`LOOKAHEAD_S` (2 s) of chart and the notes fall at `pps` times the rate, so at rate 0.6 a
+millisecond is 60 % of the distance it is at 1x and the eye leads slow notes (asked for
+2026-09-20: "the timing feels completely different when the tempo changes"; the judging does
+not move with the rate, verified over 619 runs, the picture does). On, the notes fall at `pps`
+whatever the tempo, an error is always the same distance, and a slow level shows more seconds
+of chart. The HUD's tempo line says "scroll fixed" while it is on. The kit's own sounds moved
+from D to **K** on the play screen that day.
+
 ## The offset fit on the results screen (`drumhero/latency.py`)
 
 Asked for 2026-09-20, after a day of moving `offset_ms` between 20 and 85 without settling: at

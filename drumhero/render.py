@@ -190,11 +190,12 @@ class Renderer:
         self.marker_labels = []
         self.transport = {}      # set by the play screen: practice, the loop range, the pending l gesture
         self.hints = None        # (attempts, [lines]) from the play screen: what to work on, on every try short of five stars
+        self.scroll_fixed = False   # D: the notes fall at pps whatever the tempo (else pps times the rate)
         self.offset_fit = None   # latency.fit_game's dict: the offset line under the timing
         self.intro = None        # the level's intro card while the play screen waits for the snare (intro_card)
 
     def y_for(self, note_t, now):
-        return self.line_y - (note_t - now) * self.pps * self.game.speed
+        return self.line_y - (note_t - now) * self.pps * (1.0 if self.scroll_fixed else self.game.speed)
 
     def note_box(self, n):
         """A note's rectangle: (x, width, height, accent). Accents are taller; in a dynamics
@@ -321,7 +322,7 @@ class Renderer:
             pygame.draw.circle(surf, lane.color, (cx, self.line_y), int(9 * S), 2)
 
         # notes: from a bit before the cursor so missed ones can fade out
-        top = now + LOOKAHEAD_S / speed + 0.2
+        top = now + LOOKAHEAD_S / (1.0 if self.scroll_fixed else speed) + 0.2
         self.markers(surf, now, top, loop)
         for n in g.notes[max(0, lo - 64):]:
             if n.t > top:
@@ -426,7 +427,7 @@ class Renderer:
             line += f"  ghosts {self.ghosts.filtered}"
         surf.blit(f.text(line, f.small, DIM), (12 * S, 70 * S))
         right = [f"{fps:5.0f} fps", f"offset {offset:+.0f} ms",
-                 f"tempo {g.chart.rate:.2f}x" if g.chart.rate != 1.0 else "tempo 1x",
+                 (f"tempo {g.chart.rate:.2f}x" if g.chart.rate != 1.0 else "tempo 1x") + ("  ·  scroll fixed" if self.scroll_fixed else ""),
                  f"{g.chart.bpm:.0f} bpm" + (f" (of {g.chart.bpm / g.chart.rate:.0f})" if g.chart.rate != 1.0 else ""),
                  f"guide {'on' if g.guide else 'off'}" + ("" if g.sounds is None or g.sounds.drums else "  ·  drums off"),
                  f"backing {'on' if g.track_enabled('backing') else 'off'}" if 'backing' in g.tracks else "no backing",

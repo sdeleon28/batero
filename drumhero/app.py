@@ -124,6 +124,7 @@ class App:
         self.practice = False        # P: the run writes no progress
         # S: every level opens on its intro (what it teaches, in Spanish) and waits for a snare hit
         self.intro_on = bool(self.settings.get("intro", True))
+        self.scroll_fixed = bool(self.settings.get("scroll_fixed", False))   # D: notes fall at one speed whatever the tempo
         self.loop_range = None       # (first phrase, last phrase), kept across a retry (tempo change)
         self.loop_on = False
         self.toasts = Toasts()
@@ -293,6 +294,16 @@ class App:
         save_settings(self.settings)
         self.toasts.add("level intro on: each level explains itself and waits for a snare hit" if self.intro_on
                         else "level intro off: levels start right away", ACCENT, key="intro")
+
+    def toggle_scroll(self):
+        """D: the highway's speed. Off, the screen shows two seconds of chart and the notes fall
+        slower at a slower tempo (a millisecond shrinks with the rate); on, they fall at the
+        same pixels per second at every tempo, so an error is always the same distance. Saved."""
+        self.scroll_fixed = not self.scroll_fixed
+        self.settings["scroll_fixed"] = self.scroll_fixed
+        save_settings(self.settings)
+        self.toasts.add("scroll fixed: notes fall at the same speed at every tempo, a millisecond is always the same distance"
+                        if self.scroll_fixed else "scroll follows the tempo: two seconds of chart on screen", ACCENT, key="scroll")
 
     def dyn_scale_label(self):
         """For the Setup row: one number when every body agrees, else the ones that differ."""
@@ -1325,6 +1336,8 @@ class ListScreen(Screen):
                     (f"Guide sounds: {'on' if self.app.guide else 'off'}", "hear the chart as it crosses the line"),
                     (f"Level intro (S): {'on' if self.app.intro_on else 'off'}", "before each level, what it teaches (in Spanish) until a snare hit starts it; "
                                                                              "S toggles it in the lists and in play, saved"),
+                    (f"Scroll speed (D): {'fixed' if self.app.scroll_fixed else 'follows tempo'}", "fixed: the notes fall at the same pixels per second at every tempo, "
+                                                                                                   "so an error is always the same distance; D toggles it in the lists and in play, saved"),
                     (f"Backing loop: {'on' if self.app.backing_on else 'off'}", "bass, chords and arpeggio under the built-in levels"),
                     (f"Metronome: {self.app.metronome_mode} · {self.app.metro_volume:.0%}", "congas: full follows the subdivision, beats only marks the beats; "
                                                                                             "= and - raise / lower its level anywhere, saved"),
@@ -1382,34 +1395,36 @@ class ListScreen(Screen):
             elif self.sel == 5:
                 self.app.toggle_intro()
             elif self.sel == 6:
-                self.app.backing_on = not self.app.backing_on
+                self.app.toggle_scroll()
             elif self.sel == 7:
+                self.app.backing_on = not self.app.backing_on
+            elif self.sel == 8:
                 modes = ["full", "beats", "off"]
                 self.app.metronome_mode = modes[(modes.index(self.app.metronome_mode) + 1) % 3]
-            elif self.sel == 8:
+            elif self.sel == 9:
                 self.app.menu_music_on = not self.app.menu_music_on
                 self.app.update_menu_music()
-            elif self.sel == 9:
-                self.app.cycle_audio_device()
             elif self.sel == 10:
-                self.app.set_volume(VOLUME_STEP if self.app.volume >= 1.0 else self.app.volume + VOLUME_STEP)
+                self.app.cycle_audio_device()
             elif self.sel == 11:
+                self.app.set_volume(VOLUME_STEP if self.app.volume >= 1.0 else self.app.volume + VOLUME_STEP)
+            elif self.sel == 12:
                 top = max(self.app.dyn_scales.values())
                 self.app.set_dyn_scale(GM.DYN_SCALE_MIN if top >= GM.DYN_SCALE_MAX else top + GM.DYN_SCALE_STEP)
-            elif self.sel == 12:
+            elif self.sel == 13:
                 self.app.settings["fullscreen"] = not self.app.settings.get("fullscreen", True)
                 save_settings(self.app.settings)
-            elif self.sel == 13:
-                self.app.toggle_recording()
             elif self.sel == 14:
-                self.app.toggle_stream()
+                self.app.toggle_recording()
             elif self.sel == 15:
-                self.app.go(CameraCheckScreen(self.app, self.app.surface))
+                self.app.toggle_stream()
             elif self.sel == 16:
-                self.app.go(EditScreen(self.app))
+                self.app.go(CameraCheckScreen(self.app, self.app.surface))
             elif self.sel == 17:
-                self.app.go(StatsScreen(self.app))
+                self.app.go(EditScreen(self.app))
             elif self.sel == 18:
+                self.app.go(StatsScreen(self.app))
+            elif self.sel == 19:
                 self.app.go(CoachScreen(self.app))
             else:
                 return False
@@ -1457,6 +1472,8 @@ class ListScreen(Screen):
             self.swap_lead()
         elif key == pygame.K_s:
             self.app.toggle_intro()
+        elif key == pygame.K_d:
+            self.app.toggle_scroll()
         return True
 
     def draw_lead_rows(self, surf, ch, right, y, selected):
@@ -2815,6 +2832,8 @@ class PlayScreen(Screen):
         elif key == pygame.K_g:
             g.guide = self.app.guide = not g.guide
         elif key == pygame.K_d:
+            self.app.toggle_scroll()
+        elif key == pygame.K_k:
             self.app.set_drum_sounds(not self.app.sounds.drums)
         elif key == pygame.K_b:
             self.app.backing_on = not self.app.backing_on
@@ -3022,6 +3041,7 @@ class PlayScreen(Screen):
 
     def draw(self, surf, fps):
         self.renderer.top_inset = self.app.badge_height()
+        self.renderer.scroll_fixed = self.app.scroll_fixed
         if self.renderer.intro is not None:
             self.renderer.intro["practice"] = self.app.practice        # P while the intro is up
         self.renderer.transport = {"practice": self.app.practice,
