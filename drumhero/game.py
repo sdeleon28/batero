@@ -130,6 +130,7 @@ class Game:
             self.paused_total = 0.0
             self.flashes = deque(maxlen=64)
             self.hits = []                      # (chart_t, lane, judge, error_ms) for every judged input
+            self.strokes = []                   # (judged t, key) of every stroke, for the offset fit (latency.py)
             self.combo = self.max_combo = self.score = 0
             self.counts = {k: 0 for k in ("PERFECT", "GOOD", "OK", "MISS", "STRAY")}
             self.dyn_counts = {k: 0 for k in ("ACCENT", "TAP", "SOFT", "LOUD")}
@@ -289,6 +290,7 @@ class Game:
                     if best.art_ok:
                         self.score += ART_BONUS
             self._register(judge, lane, err_ms, velocity, wall_t, best, dyn)
+            self.strokes.append((t, self.lanes[lane].key))
             if self.log is not None:
                 self.log.add("hit", note=note, velocity=velocity, key=self.lanes[lane].key, lane=lane, judge=judge,
                              song_t=round(t, 4), chart_t=round(best.t, 4) if best else None,

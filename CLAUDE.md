@@ -308,6 +308,20 @@ pairs, left first" and "Double kick gallop tail", added 2026-09-20 because the g
 right-foot sixteenth came 30 ms early over 53 runs and knowing it did not fix it); any other
 double-kick level is the same argument.
 
+## The offset fit on the results screen (`drumhero/latency.py`)
+
+Asked for 2026-09-20, after a day of moving `offset_ms` between 20 and 85 without settling: at
+the end of every level the results box says "offset 55 ms · this run best at 62 (+2.4) · last
+15 runs: 58". Every stroke (`Game.strokes`, judged time and key) is re-judged against the chart
+at the run's offset plus a shift of -60..+80 ms with the game's own windows, the grade being the
+timing grade (no dynamics); "best" is where this run peaks (the middle of a flat top), "gain"
+what it would have added, and "last N runs" the offset that maximises the mean grade over this
+run and the profile's recent run logs pooled (`recent_curves`, cached by mtime). **The pooled
+number is the one to set**: a single run's optimum is that run's own timing (measured 2026-09-20,
+44 gallop runs: per-run optima from 22 to 86 ms, pooled 55). The fit goes into the run log as
+`stats["offset_fit"]` (without the curve). `python -m drumhero.latency [--runs N] [--profile ID]`
+prints the sweep over the recent logs. `.` and `,` still move the offset 5 ms during play.
+
 ## Open items
 
 `ROADMAP.md` lists the loose ends with their full context (hi-hat filter eating fast

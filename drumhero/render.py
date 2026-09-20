@@ -190,6 +190,7 @@ class Renderer:
         self.marker_labels = []
         self.transport = {}      # set by the play screen: practice, the loop range, the pending l gesture
         self.hints = None        # (attempts, [lines]) from the play screen: what to work on, on every try short of five stars
+        self.offset_fit = None   # latency.fit_game's dict: the offset line under the timing
         self.intro = None        # the level's intro card while the play screen waits for the snare (intro_card)
 
     def y_for(self, note_t, now):
@@ -809,6 +810,12 @@ class Renderer:
             (f"timing: mean {st['mean_ms']:+.1f} ms, std {st['std_ms']:.1f} ms", self.f.mid, TEXT),
             (f"{st['early']} early · {st['late']} late · {g.counts['STRAY']} stray", self.f.small, DIM),
         ]
+        if self.offset_fit:
+            fo = self.offset_fit
+            s = f"offset {fo['offset']:.0f} ms · this run best at {fo['best']:.0f} ({fo['gain']:+.1f})"
+            if fo.get("pooled") is not None and fo["n"] > 1:
+                s += f" · last {fo['n']} runs: {fo['pooled']:.0f}"
+            lines.append((s, self.f.small, DIM))
         if g.chart.dynamics:
             c = st.get("contrast")
             ok = c is not None and c >= CONTRAST_TARGET
@@ -835,7 +842,7 @@ class Renderer:
                     hint_rows += 1
             hint_rows += 1
         lines.append(("Enter next · R retry · Esc back", self.f.small, DIM))
-        bh = 370 + (40 if g.chart.dynamics else 0) + (40 if g.chart.expression else 0) + (28 if rehearsal else 0) + 28 * hint_rows
+        bh = 370 + (40 if g.chart.dynamics else 0) + (40 if g.chart.expression else 0) + (28 if rehearsal else 0) + (28 if self.offset_fit else 0) + 28 * hint_rows
         box = pygame.Surface((int(bw * S), int(bh * S)))
         box.fill((10, 10, 14))
         box.set_alpha(250)

@@ -291,6 +291,11 @@ INTROS = {
         ["El par flota entre los tiempos: el derecho cae justo antes del hi-hat, no encima.",
          "Si el derecho se apura, queda un hueco largo hasta el tiempo: ese hueco es lo que hay que sentir.",
          "El galope completo es esto más el bombo derecho en el tiempo."]),
+    "Double kick gallop, feet only": (
+        "El galope solo con los pies: derecho, izquierdo, derecho en cada tiempo, y las manos quietas. Toda la atención en el hueco después del primer golpe.",
+        ["El derecho toca el tiempo y se queda: el izquierdo entra recién en el &, una corchea entera después, no antes.",
+         "Es lo que se te adelanta en el galope completo: el par izquierdo-derecho se cierra hacia el tiempo. Acá la guitarra machaca los tres golpes; dejá que ella marque el hueco.",
+         "Cuando salga parejo sin manos, el galope completo es agregarlas en el tiempo."]),
     "Double kick gallop": (
         "El galope con doble pedal: corchea, semicorchea, semicorchea en cada tiempo, derecho, izquierdo, derecho.",
         ["Tres golpes por tiempo con el hueco después del primero: derecho... izquierdo derecho.",

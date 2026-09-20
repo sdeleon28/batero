@@ -31,6 +31,7 @@ from . import stats as ST
 from . import profiles as PR
 from .coach import Coach
 from . import hints as HI
+from . import latency as LA
 from . import coach as CO
 from .devices import DeviceWatcher, Toasts, TOAST_S
 from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, draw_hihat_state, draw_stars, lerp
@@ -2696,6 +2697,7 @@ class PlayScreen(Screen):
         self.recorded = False
         self.finished_at = None
         self.hints = []               # what went wrong, for the results box (attempt())
+        self.offset_fit = None        # latency.fit_game: the offset line of the results box
         self.loop_digits = None       # the phrases typed after l, or None when no gesture is pending
         self.loop_at = 0.0
         self.armed = False            # the intro is up: the game waits, paused at its count-in, for a snare hit
@@ -2949,7 +2951,10 @@ class PlayScreen(Screen):
         if self.app.args.log:
             self.game.write_csv(self.app.args.log)
         if self.game.hits:
-            self.app.runlog.write(self.game.stats())     # once, off the hot path
+            st = self.game.stats()
+            if self.offset_fit:
+                st["offset_fit"] = {k: v for k, v in self.offset_fit.items() if k != "curve"}
+            self.app.runlog.write(st)                    # once, off the hot path
         else:
             self.app.runlog.header = None
 
@@ -2985,6 +2990,16 @@ class PlayScreen(Screen):
                                  self.chart.dynamics, self.chart.expression)
         self.renderer.hints = (self.app.tries[key], self.hints)
 
+    def fit_offset(self):
+        """The results box's offset line: the offset that would have scored this run best and the
+        one that scores the recent runs best together (latency.fit_game). Never costs the screen."""
+        try:
+            self.offset_fit = LA.fit_game(self.game, self.app.offset_ms, self.app.profile_id)
+        except Exception as e:                            # a malformed old log must not hide the results
+            print("offset fit failed:", e)
+            self.offset_fit = None
+        self.renderer.offset_fit = self.offset_fit
+
     def update(self):
         if self.armed:
             if self.start_at is not None:
@@ -2997,6 +3012,7 @@ class PlayScreen(Screen):
         if self.game.finished:
             if self.finished_at is None:
                 self.attempt()
+                self.fit_offset()
             self.record()
             if self.finished_at is None:
                 self.finished_at = time.perf_counter()

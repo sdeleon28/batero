@@ -1010,6 +1010,8 @@ KICK_OSTINATOS = [
                    "LR..LR..LR..LR..", 4, _DK_HANDS_16, backing="kick"),
     _kick_ostinato("Double kick gallop tail", "The gallop's two sixteenths alone: left on the &, right on the a, the beat left to the hats.", 80, 8,
                    "..LR..LR..LR..LR", 4, _DK_HANDS_16, backing="kick"),
+    _kick_ostinato("Double kick gallop, feet only", "The gallop on the feet alone, nothing in the hands: right, left, right on every beat.", 80, 8,
+                   "R.LRR.LRR.LRR.LR", 4, {}, backing="kick"),
     _kick_ostinato("Double kick gallop", "Eighth, sixteenth, sixteenth on every beat: right, left, right.", 80, 8,
                    "R.LRR.LRR.LRR.LR", 4, _DK_HANDS_16, backing="kick"),
     _kick_ostinato("Double kick 16ths", "Sixteenths on the feet, right foot on the beat, under the plain beat.", 80, 8,
