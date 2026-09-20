@@ -420,7 +420,8 @@ INTROS = {
 _SUB = {1: "negras", 2: "corcheas", 3: "tresillos", 4: "semicorcheas", 6: "seisillos"}
 _INST = {"kick": "bombo", "snare": "redoblante", "hihat": "hi-hat", "pedal": "pedal del hi-hat", "crash": "crash izquierdo",
          "crash2": "crash derecho", "tom1": "tom", "floor": "chancha", "ride": "ride"}
-_BACKING = {"cumbia": "una cumbia", "keygen": "el tema de la cortina", "punk": "una banda de pop punk"}
+_BACKING = {"cumbia": "una cumbia", "keygen": "el tema de la cortina", "punk": "una banda de pop punk",
+            "kick": "un metal que machaca la figura del bombo"}
 _SWAP = {"derecha": "izquierda", "izquierda": "derecha", "derecho": "izquierdo", "izquierdo": "derecho",
          "R": "L", "L": "R"}
 

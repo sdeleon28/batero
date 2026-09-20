@@ -295,6 +295,17 @@ crash wash, the skank, fills from eighths to the whole kit, the & crash, stabs, 
 build, kick doubles, the ride bridge, around the kit, a 32-bar anthem. Adding a genre: a list
 of levels plus one `Course(...)` in `COURSES`; nothing else.
 
+## The double-kick levels' backing (`Chart.backing == "kick"`)
+
+Asked for 2026-09-20 (the gallop under a synth pop backing drawn by index "had nothing to do
+with it"): `sounds.KICK_STYLE`, the metal timbres and progressions, with the bass and the power
+chords hammering the level's own kick figure bar after bar, so the ear has the feet's rhythm in
+the music before the feet find it. `Chart.kick_rhythm()` reads the first bar's kick notes into
+(grid 16 or 12, [(slot, gain)]) and `App.tracks_for` passes it to `render_backing_track` /
+`make_arrangement` as `rhythm`; the plan only brings the pad and the lead in and out. So far
+only "Double kick gallop" names it (`_kick_ostinato(..., backing="kick")`); any other
+double-kick level is the same argument.
+
 ## Open items
 
 `ROADMAP.md` lists the loose ends with their full context (hi-hat filter eating fast

@@ -186,7 +186,7 @@ class Chart:
     rate: float = 1.0           # tempo multiplier this chart was scaled by (see at_rate)
     lead: str = None            # "R" / "L": which hand leads; None when the level has no hand lead
                                 # (one instrument per hand, feet, hi-hat lessons). Set by the builders.
-    backing: str = None         # a backing of its own ("cumbia": sounds.CUMBIA_STYLE, "keygen": the waiting screen's tune); None = by subdivision
+    backing: str = None         # a backing of its own ("cumbia": sounds.CUMBIA_STYLE, "keygen": the waiting screen's tune, "kick": sounds.KICK_STYLE on kick_rhythm()); None = by subdivision
 
     @property
     def key(self):
@@ -328,6 +328,16 @@ class Chart:
         if self.segments is None:
             self.segments = infer_segments(self.notes, self.bpm, beat_pos=self.beat_pos)
         return self.segments
+
+    def kick_rhythm(self):
+        """The first bar's kick figure for the music to hammer (backing "kick"): (grid, slots),
+        grid 16 (sixteenths) or 12 (twelfths, for a triplet level), slots [(index, gain)] with
+        the beats at 1.0 and the rest at 0.8. sounds.make_arrangement takes it as `rhythm`."""
+        sub = self.subdivision_at(0)
+        grid = 12 if sub % 3 == 0 else 16
+        per = grid // 4
+        slots = sorted({int(round(n.t / self.beat * per)) for n in self.notes if n.key == "kick" and n.t < 4 * self.beat - 1e-6})
+        return grid, [(s, 1.0 if s % per == 0 else 0.8) for s in slots if s < grid]
 
     def subdivision_at(self, t: float) -> int:
         """Subdivisions per beat for chart time t (negative t = count-in uses the first).
@@ -954,11 +964,11 @@ HIHAT_LESSONS = [
     ], bars=16),
 ]
 # --- double kick: a foot ostinato under simple hands ---------------------------------
-def _kick_ostinato(name, desc, bpm, bars, feet, sub, hands):
+def _kick_ostinato(name, desc, bpm, bars, feet, sub, hands, backing=None):
     """A double-kick level. `feet`: the kick pattern for one bar on a grid of `sub` per
     beat, R / L the foot, "." a rest; it is the sticking strip (rests shown as dots).
     `hands`: GROOVE_KEYS key -> pattern on the same grid (x / X / .). Feet are judged on
-    time only, no dynamics."""
+    time only, no dynamics. backing: see Chart.backing ("kick": the music hammers `feet`)."""
     beat = 60 / bpm
     slots = 4 * sub
     assert len(feet) == slots and all(len(p) == slots for p in hands.values()), name
@@ -976,6 +986,7 @@ def _kick_ostinato(name, desc, bpm, bars, feet, sub, hands):
     ch.sticking = list(feet)
     ch.accents = set()
     ch.sticking_groups = [sub * b for b in range(1, 4)]
+    ch.backing = backing
     return ch
 
 
@@ -992,7 +1003,7 @@ KICK_OSTINATOS = [
     _kick_ostinato("Double kick bursts of two", "Two sixteenths on every beat, right then left, then rest.", 80, 8,
                    "RL..RL..RL..RL..", 4, _DK_HANDS_16),
     _kick_ostinato("Double kick gallop", "Eighth, sixteenth, sixteenth on every beat: right, left, right.", 80, 8,
-                   "R.LRR.LRR.LRR.LR", 4, _DK_HANDS_16),
+                   "R.LRR.LRR.LRR.LR", 4, _DK_HANDS_16, backing="kick"),
     _kick_ostinato("Double kick 16ths", "Sixteenths on the feet, right foot on the beat, under the plain beat.", 80, 8,
                    "RLRLRLRLRLRLRLRL", 4, _DK_HANDS_16),
     _kick_ostinato("Double kick 16ths, left lead", "The same run leading with the left foot: the weak foot lands on the beat.", 80, 8,

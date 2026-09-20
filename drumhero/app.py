@@ -439,7 +439,8 @@ class App:
                 if feel == "keygen":                  # the waiting screen's tune, one per level (seeded by the name)
                     data = keygen.render_level(chart.bpm, zlib.crc32(chart.name.encode()), lead_in, total)
                 else:
-                    data = render_backing_track(chart.bpm, prog_index, lead_in, total, feel)
+                    rhythm = chart.kick_rhythm() if feel == "kick" else None
+                    data = render_backing_track(chart.bpm, prog_index, lead_in, total, feel, rhythm=rhythm)
                 self.track_cache[key] = Track(data, -lead_in, BACKING_GAIN)
             out["backing"] = self.track_cache[key]
         if self.metronome_mode != "off":

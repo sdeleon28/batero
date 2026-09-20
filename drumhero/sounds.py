@@ -466,6 +466,15 @@ CUMBIA_STYLE = dict(
     scale="natural", stab_rhythm=[2, 6, 10, 14], guiro=True, plan=[
         ("cumbia", "stab", None, False, False), ("cumbia", "stab", None, True, False),
         ("cumbia", "stab", None, False, False), ("cumbia", "stab", None, True, False)])
+# A double-kick level's own music (Chart.backing == "kick", asked for 2026-09-20: the gallop under
+# a synth pop backing drawn by index "had nothing to do with it"): metal, and the guitar and the
+# bass hammer the level's own kick figure, bar after bar, so the ear has the feet's rhythm in the
+# music before the feet find it. The rhythm comes from the chart (Chart.kick_rhythm, passed to
+# make_arrangement as `rhythm`); the timbres and the progressions are the metal style's; the
+# plan only brings the pad and the lead in and out, the riff never leaves.
+KICK_STYLE = dict(STYLES["metal"], plan=[
+    ("kick", "chug", None, False, False), ("kick", "chug", None, False, True),
+    ("kick", "chug", None, True, False), ("kick", "chug", None, True, True)])
 STYLE_ORDER = ["synth", "metal", "chiptune", "punk", "organ", "strings", "funk"]
 STAB_RHYTHMS = [[0, 6, 8, 14], [2, 6, 10, 14], [0, 3, 6, 10, 12], [4, 12], [0, 7, 10]]   # sixteenth indices
 STAB_RHYTHMS_TRIPLET = [[3, 9], [0, 2, 6, 8], [3, 5, 9, 11], [2, 5, 8, 11]]              # twelfth indices
@@ -476,8 +485,8 @@ SCALES = {"natural": {"M": [0, 2, 4, 5, 7, 9, 11], "m": [0, 2, 3, 5, 7, 8, 10]},
 
 
 def style_for(prog_index, feel="straight"):
-    if feel == "cumbia":
-        return "cumbia"
+    if feel in ("cumbia", "kick"):
+        return feel
     if feel in STYLES:                  # a course names its style (Chart.backing == "punk")
         return feel
     return "shuffle" if feel in ("triplet", "sextuplet") else STYLE_ORDER[prog_index % len(STYLE_ORDER)]
@@ -525,17 +534,21 @@ def _lowpass(sig, n):
     return np.convolve(sig, np.ones(n) / n, mode="same") if n > 1 else sig
 
 
-def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, feel="straight"):
+def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, feel="straight", rhythm=None):
     """Mono float32 of (intro_bars + bars) bars at bpm: intro (thin) then the arrangement,
     bar 0 of the level at intro_bars * bar seconds. Deterministic per prog_index.
     feel: "straight" (sixteenth grid, style by prog_index) or "triplet" (twelfth grid,
     the shuffle style) for levels whose subdivision is 3; "cumbia" for the cumbia levels;
-    a STYLES name ("punk") for the courses, which choose their music."""
+    a STYLES name ("punk") for the courses, which choose their music; "kick" for the
+    double-kick levels, whose riff is `rhythm` = (grid 16 or 12, [(slot, gain)]), the
+    level's own kick figure (Chart.kick_rhythm)."""
     rng = np.random.default_rng(prog_index if seed is None else seed)
-    triplet = feel in ("triplet", "sextuplet")
+    triplet = feel in ("triplet", "sextuplet") or (feel == "kick" and rhythm[0] == 12)
     style_name = style_for(prog_index, feel)
-    st = CUMBIA_STYLE if feel == "cumbia" else SEXTUPLET_STYLE if feel == "sextuplet" else SHUFFLE_STYLE if triplet else STYLES[style_name]
+    st = CUMBIA_STYLE if feel == "cumbia" else KICK_STYLE if feel == "kick" else SEXTUPLET_STYLE if feel == "sextuplet" else SHUFFLE_STYLE if triplet else STYLES[style_name]
     bass_patterns = BASS_PATTERNS_TRIPLET if triplet else BASS_PATTERNS
+    if feel == "kick":
+        bass_patterns = dict(bass_patterns, kick=[(e, 0, g) for e, g in rhythm[1]])
     stab_rhythms = STAB_RHYTHMS_TRIPLET if triplet else STAB_RHYTHMS
     family = st["progressions"][int(rng.integers(0, len(st["progressions"])))]
     prog = PROGRESSIONS[family][int(rng.integers(0, len(PROGRESSIONS[family])))]
@@ -599,7 +612,7 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, 
                 sig = (_lowpass(_saw(tb * f) + 0.4 * _square(tb * f * 0.5), 10) + pick) * env_ad(tb, 0.002, 7)
             else:  # dist: chugging power root, palm-muted
                 raw = _saw(tb * f) + _saw(tb * f * 1.5) * 0.6 + _saw(tb * f * 2) * 0.4
-                sig = _lowpass(np.tanh(3.0 * raw), 14) * env_ad(tb, 0.002, 18 if pattern in ("chug", "gallop", "pump") else 6)
+                sig = _lowpass(np.tanh(3.0 * raw), 14) * env_ad(tb, 0.002, 18 if pattern in ("chug", "gallop", "pump", "kick") else 6)
             add(t0 + e * step, sig, 0.55 * gain)
 
     # --- chord parts -----------------------------------------------------------------
@@ -843,13 +856,13 @@ def render_metronome(chart, lead_in_s, total_s, mode="full"):
     return _mix_events(events, lead_in_s + total_s, METRO_DRIVE)
 
 
-def render_backing_track(bpm, prog_index, lead_in_s, total_s, feel="straight"):
+def render_backing_track(bpm, prog_index, lead_in_s, total_s, feel="straight", rhythm=None):
     """The arrangement from the count-in to total_s, bar 0 landing on chart time 0.
-    feel: see make_arrangement; "triplet" for levels whose subdivision is 3."""
+    feel: see make_arrangement; "triplet" for levels whose subdivision is 3; rhythm for "kick"."""
     bar = 240 / bpm
     intro_bars = int(round(lead_in_s / bar))
     bars = int(np.ceil(total_s / bar)) + 1
-    data = make_arrangement(bpm, prog_index, bars, intro_bars, feel=feel)
+    data = make_arrangement(bpm, prog_index, bars, intro_bars, feel=feel, rhythm=rhythm)
     n = int((lead_in_s + total_s) * SR) + SR
     if len(data) < n:
         data = np.concatenate([data, np.zeros(n - len(data), dtype=np.float32)])
