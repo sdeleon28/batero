@@ -281,6 +281,16 @@ INTROS = {
         "Ráfagas de dos: dos semicorcheas en cada tiempo, derecho e izquierdo, y descanso.",
         ["Derecho izquierdo y silencio: el segundo golpe es una semicorchea después, no una corchea.",
          "Arrancar y parar limpio: el pie izquierdo no tiene que colgar un tercer golpe."]),
+    "Double kick pairs, left first": (
+        "El par del galope solo, con el izquierdo en el tiempo: izquierdo, derecho, y descanso. El derecho espera su semicorchea entera.",
+        ["El izquierdo cae con el hi-hat; el derecho llega una semicorchea después, ni antes: la guitarra machaca las dos.",
+         "El error típico: el derecho vuelve apurado detrás del izquierdo y el par se cierra 30 ms antes. Escuchá el hueco entre los dos golpes.",
+         "Cuando el par entra parejo, el galope es este par corrido al & y al a."]),
+    "Double kick gallop tail": (
+        "La cola del galope: las dos semicorcheas solas, izquierdo en el &, derecho en el a, y en el tiempo solo el hi-hat.",
+        ["El par flota entre los tiempos: el derecho cae justo antes del hi-hat, no encima.",
+         "Si el derecho se apura, queda un hueco largo hasta el tiempo: ese hueco es lo que hay que sentir.",
+         "El galope completo es esto más el bombo derecho en el tiempo."]),
     "Double kick gallop": (
         "El galope con doble pedal: corchea, semicorchea, semicorchea en cada tiempo, derecho, izquierdo, derecho.",
         ["Tres golpes por tiempo con el hueco después del primero: derecho... izquierdo derecho.",

@@ -1002,6 +1002,14 @@ KICK_OSTINATOS = [
                    "RLRLRLRL", 2, _DK_HANDS_8),
     _kick_ostinato("Double kick bursts of two", "Two sixteenths on every beat, right then left, then rest.", 80, 8,
                    "RL..RL..RL..RL..", 4, _DK_HANDS_16),
+    # The two steps into the gallop (asked for 2026-09-20: over 53 gallop runs the right foot's
+    # closing sixteenth came 30 ms early after the left, the figure squeezed towards the beat,
+    # and knowing it did not fix it). First the pair on its own with the left on the beat, then
+    # the pair as the gallop has it, on the & and the a, with nothing on the beat but the hats.
+    _kick_ostinato("Double kick pairs, left first", "Two sixteenths on every beat, left then right: the right foot waits its whole sixteenth.", 80, 8,
+                   "LR..LR..LR..LR..", 4, _DK_HANDS_16, backing="kick"),
+    _kick_ostinato("Double kick gallop tail", "The gallop's two sixteenths alone: left on the &, right on the a, the beat left to the hats.", 80, 8,
+                   "..LR..LR..LR..LR", 4, _DK_HANDS_16, backing="kick"),
     _kick_ostinato("Double kick gallop", "Eighth, sixteenth, sixteenth on every beat: right, left, right.", 80, 8,
                    "R.LRR.LRR.LRR.LR", 4, _DK_HANDS_16, backing="kick"),
     _kick_ostinato("Double kick 16ths", "Sixteenths on the feet, right foot on the beat, under the plain beat.", 80, 8,

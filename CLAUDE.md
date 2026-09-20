@@ -302,8 +302,10 @@ with it"): `sounds.KICK_STYLE`, the metal timbres and progressions, with the bas
 chords hammering the level's own kick figure bar after bar, so the ear has the feet's rhythm in
 the music before the feet find it. `Chart.kick_rhythm()` reads the first bar's kick notes into
 (grid 16 or 12, [(slot, gain)]) and `App.tracks_for` passes it to `render_backing_track` /
-`make_arrangement` as `rhythm`; the plan only brings the pad and the lead in and out. So far
-only "Double kick gallop" names it (`_kick_ostinato(..., backing="kick")`); any other
+`make_arrangement` as `rhythm`; the plan only brings the pad and the lead in and out. The gallop
+and its two preparatory levels name it (`_kick_ostinato(..., backing="kick")`: "Double kick
+pairs, left first" and "Double kick gallop tail", added 2026-09-20 because the gallop's closing
+right-foot sixteenth came 30 ms early over 53 runs and knowing it did not fix it); any other
 double-kick level is the same argument.
 
 ## Open items
