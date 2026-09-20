@@ -2686,6 +2686,7 @@ class PlayScreen(Screen):
                              "pedal_motion_cc": GH.PEDAL_MOTION_CC, "pedal_motion_ms": GH.PEDAL_MOTION_MS,
                              "pedal_motion_velocity_min": GH.PEDAL_MOTION_VELOCITY_MIN,
                              "pedal_settle_ms": GH.PEDAL_SETTLE_MS, "pedal_settle_velocity_max": GH.PEDAL_SETTLE_VELOCITY_MAX,
+                             "crosstalk_near_ms": GH.CROSSTALK_NEAR_MS, "crosstalk_near_velocity_max": GH.CROSSTALK_NEAR_VELOCITY_MAX,
                              "zone_crosstalk": GH.ZONE_CROSSTALK, "any_min_velocity": GH.ANY_MIN_VELOCITY},
         })
         for name, track in app.tracks_for(self.chart, app.prog_for(cat, index)).items():

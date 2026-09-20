@@ -13,6 +13,14 @@ stroke together, open hats): the softest real tap read 29; real bow taps land as
 as 44 ms after an edge accent at 63..85 % of it; a stick landing with the chick reads
 113..126 within 5 ms of it, or 56..127 as a 42 up to 52 ms later; real strokes while
 the pedal is opening read 116..127. Every rule below keeps those.
+Measured 2026-09-19 over ten days of the MIDI trace (118k notes, two drummers, a friend who
+plays every hat stroke hard on the edge): the near crosstalk is a bow note 8..48 ms after an
+edge stroke (the mass at 40..48), never louder than 92 whatever the stroke (55..127: the
+ratio runs 0.7 at 120 to 1.4 at 55, so a ratio cannot describe it), and in those ten days no
+bow note within 50 ms of an edge stroke was ever a chart note (174 of them, every one a stray;
+the closest hi-hat figure any chart writes is 178 ms). It is one stroke heard twice, so it
+falls now, at the cost of the real tap it overlaps (a double landing edge then bow within
+50 ms at 95 or under, which no chart asks for).
 
 The kick (2026-09-19, the Pop punk course): burying the beater on the KD pad bounces it back
 onto the head, and the module sends a second kick nobody played: 36..60 ms after the stroke at
@@ -39,10 +47,14 @@ PEDAL_MOTION_VELOCITY_MIN = 50   # ...unless this loud: real strokes while openi
 PEDAL_SETTLE_MS = 250        # closed-hat notes (42/22) this long after a chick...
 PEDAL_SETTLE_VELOCITY_MAX = 40   # ...at or below this velocity are the pedal settling (real: >= 56)
 ANY_MIN_VELOCITY = 8         # below this nothing counts, on any pad
-# A hard stroke on one zone makes the other zone fire late: measured 42 ms after the stroke at
-# 70..76 % of its velocity, and 73..93 ms after at 35..56 %. Real bow taps after an edge accent
-# come as close as 44 ms at 63..85 %, so only the soft tier is separable; the 42 ms one is
-# accepted. (window ms, max velocity ratio) tiers, checked in order.
+# A hard stroke on one zone makes the other zone fire late. Near: 8..48 ms after the stroke,
+# never above 92 whatever the stroke's velocity (2026-09-19, 174 cases in ten days of trace,
+# none a chart note): a note on the other zone within CROSSTALK_NEAR_MS at or under
+# CROSSTALK_NEAR_VELOCITY_MAX is that stroke heard twice. Late: 73..93 ms after at 35..56 %,
+# where real doubles (44..90 ms at 63..85 %) overlap anything higher, so the ratio stays 0.58.
+# (window ms, max velocity ratio) tiers, checked in order.
+CROSSTALK_NEAR_MS = 50
+CROSSTALK_NEAR_VELOCITY_MAX = 95
 ZONE_CROSSTALK = [(95, 0.58)]
 # Beater bounce on the kick: (window ms, max velocity ratio to the last real kick) tiers, the
 # reference stays the last real kick so a chain of bounces falls whole. 80 ms is under the
@@ -131,6 +143,8 @@ class GhostFilter:
         ls = self.last_stroke
         if ls and ls[3] != zone:
             dt = (t - ls[0]) * 1000
+            if dt <= CROSSTALK_NEAR_MS and velocity <= CROSSTALK_NEAR_VELOCITY_MAX:
+                return self._flag("zone crosstalk", t, note, velocity)
             for window_ms, ratio in ZONE_CROSSTALK:
                 if dt <= window_ms:
                     if velocity <= ratio * ls[2]:
