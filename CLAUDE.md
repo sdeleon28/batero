@@ -236,9 +236,14 @@ judged notes (`from_game`) and the results box shows the two costliest faults, i
 with R retried mid-run, the one run played to the end never showed it). The rules are thresholds on plain
 statistics, each hint ordered by the grade points it costs: misses (which body, which beat
 position), strays (soft ones are pedal or stick touches), then one timing hint, the largest of:
-one body against the rest of the kit (>= 15 ms), the left hand against the right, the &s
-against the beats (eighth grid only), a drift between the halves of the run, the whole kit's
-bias (>= 15 ms), or the spread alone (std >= 25 ms) when nothing explains it; then soft accents
+one body against the rest of the kit **where they land together** (a chord, >= 15 ms: a flam;
+since 2026-09-20 evening, when comparing the bodies' means read the gallop's early kick
+sixteenths as "the kick ahead of the kit" while every chord was tight), the left hand against
+the right, the notes between the beats against the notes on them per body or for the kit
+(naming the group that is off the click: "el bombo: el tiempo llega 27 ms tarde, las notas
+entre los tiempos están en su lugar"; "los &" when they are all eighths), a drift between the
+halves of the run, the whole kit's bias (>= 15 ms), or the spread alone (std >= 25 ms) when
+nothing explains it; then soft accents
 or loud taps (with the hand when it is one hand), and the hi-hat openness confused most.
 `python -m drumhero.hints [PATH.jsonl ...] [--all] [--lang en]` prints them for a run log
 (`from_runlog`; the run logs carry `expression` and every hit's `art` / `played` / `art_ok`

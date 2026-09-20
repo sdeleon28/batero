@@ -60,6 +60,11 @@ def _pos(beat_pos):
     return f"{int(p) + 1}" if p == int(p) else f"& of {int(p) + 1}"
 
 
+def _onbeat(beat_pos):
+    """True for a note on a beat (any grid)."""
+    return abs(beat_pos - round(beat_pos)) < 0.05
+
+
 def _grid(beat_pos):
     """'on' / 'off' for a note on the eighth grid, None off it."""
     p = _pos(beat_pos)
@@ -195,18 +200,28 @@ def analyse(notes, strays, lang="es", dynamics=False, expression=False):
         c = Counter(n["judge"] for n in hits)
         cost = wq * (len(hits) - (c["PERFECT"] + 0.6 * c["GOOD"] + 0.3 * c["OK"])) / total
         timing = []
-        # one body against the rest
+        # one body against the rest, only where they land together (a chord): comparing the
+        # bodies' means read the gallop's early kick sixteenths as "the kick ahead of the kit"
+        # while every chord was tight (2026-09-20, "I do not feel any flam")
         keys = {n["key"] for n in hits}
-        if len(keys) > 1:
+        chords = defaultdict(list)
+        for n in hits:
+            chords[round(n["t"], 3)].append(n)
+        chords = [c for c in chords.values() if len({n["key"] for n in c}) > 1]
+        if len(keys) > 1 and len(chords) >= MIN_NOTES:
             for key in sorted(keys):
-                mine = [n["err"] for n in hits if n["key"] == key]
-                rest = [n["err"] for n in hits if n["key"] != key]
-                if len(mine) >= MIN_NOTES and len(rest) >= MIN_NOTES:
-                    gap = st.fmean(mine) - st.fmean(rest)
+                gaps = []
+                for c in chords:
+                    mine = [n["err"] for n in c if n["key"] == key]
+                    rest = [n["err"] for n in c if n["key"] != key]
+                    if mine and rest:
+                        gaps.append(st.fmean(mine) - st.fmean(rest))
+                if len(gaps) >= MIN_NOTES:
+                    gap = st.fmean(gaps)
                     if abs(gap) >= GAP_MS:
                         timing.append((abs(gap) + 10, (
-                            f"{_body(key, lang)} queda {'adelantado' if gap < 0 else 'atrasado'} {abs(gap):.0f} ms respecto al resto del kit" if es else
-                            f"{_body(key, lang)} lands {abs(gap):.0f} ms {'ahead of' if gap < 0 else 'behind'} the rest of the kit").capitalize()))
+                            f"cuando van juntos, {_body(key, lang)} cae {abs(gap):.0f} ms {'antes' if gap < 0 else 'después'} que el resto: un flam" if es else
+                            f"when they land together, {_body(key, lang)} is {abs(gap):.0f} ms {'ahead of' if gap < 0 else 'behind'} the rest: a flam").capitalize()))
         # one hand against the other
         hands = {n["hand"] for n in hits if n["hand"] in ("R", "L")}
         if len(hands) == 2:
@@ -218,15 +233,34 @@ def analyse(notes, strays, lang="es", dynamics=False, expression=False):
                     timing.append((abs(gap) + 10, (
                         f"{_hand('L', lang)} queda {'atrasada' if gap > 0 else 'adelantada'} {abs(gap):.0f} ms respecto a la derecha" if es else
                         f"{_hand('L', lang)} lands {abs(gap):.0f} ms {'behind' if gap > 0 else 'ahead of'} the right").capitalize()))
-        # offbeats against downbeats
-        on = [n["err"] for n in hits if _grid(n["beat"]) == "on"]
-        off = [n["err"] for n in hits if _grid(n["beat"]) == "off"]
-        if len(on) >= MIN_NOTES and len(off) >= MIN_NOTES:
-            gap = st.fmean(off) - st.fmean(on)
-            if abs(gap) >= GAP_MS:
-                timing.append((abs(gap) + 5, (
-                    f"los & te salen {'adelantados' if gap < 0 else 'atrasados'} {abs(gap):.0f} ms respecto a los tiempos" if es else
-                    f"your &s land {abs(gap):.0f} ms {'ahead of' if gap < 0 else 'behind'} the beats").capitalize()))
+        # the notes between the beats against the notes on them, per body and for the kit: the
+        # one group that is off the click is named (the gallop: the beat's kick 30 ms late with
+        # the hands, its sixteenths in place; or the sixteenths early with the beat in place)
+        groups = [(None, hits)] + [(k, [n for n in hits if n["key"] == k]) for k in sorted(keys)]
+        found = []
+        for key, ns in groups:
+            on = [n["err"] for n in ns if _onbeat(n["beat"])]
+            off = [n for n in ns if not _onbeat(n["beat"])]
+            if len(on) >= MIN_NOTES and len(off) >= MIN_NOTES:
+                m_on, m_off = st.fmean(on), st.fmean(n["err"] for n in off)
+                if abs(m_off - m_on) >= GAP_MS:
+                    eighths = all(_grid(n["beat"]) == "off" for n in off)
+                    found.append((abs(m_off - m_on), key, m_on, m_off, eighths))
+        if found:
+            found.sort(key=lambda f: (f[1] is None, -f[0]))       # a body's own figure before the whole kit
+            gap, key, m_on, m_off, eighths = found[0]
+            who = _body(key, lang) if key else ("el kit" if es else "the kit")
+            subs = ("los &" if eighths else "las notas entre los tiempos") if es else ("the &s" if eighths else "the notes between the beats")
+            if abs(m_on) > abs(m_off) + 5:                                  # the beat is what is off
+                text = (f"{who}: {'el tiempo llega' if key else 'los tiempos llegan'} {abs(m_on):.0f} ms {'antes' if m_on < 0 else 'tarde'}, {subs} están en su lugar" if es else
+                        f"{who}: the beat lands {abs(m_on):.0f} ms {'early' if m_on < 0 else 'late'}, {subs} are in place")
+            elif abs(m_off) > abs(m_on) + 5:                                # the subdivisions are
+                text = (f"{who}: {subs} {'se adelantan' if m_off < 0 else 'se atrasan'} {abs(m_off):.0f} ms, el tiempo está en su lugar" if es else
+                        f"{who}: {subs} land {abs(m_off):.0f} ms {'early' if m_off < 0 else 'late'}, the beat is in place")
+            else:
+                text = (f"{who}: {subs} llegan {gap:.0f} ms {'antes' if m_off < m_on else 'después'} que los tiempos" if es else
+                        f"{who}: {subs} land {gap:.0f} ms {'ahead of' if m_off < m_on else 'behind'} the beats")
+            timing.append((gap + 5, text.capitalize()))
         # drift: first half against second
         half = len(hits) // 2
         if half >= MIN_NOTES:
