@@ -9,7 +9,9 @@ from dataclasses import dataclass
 
 from .chart import art_matches
 
-PERFECT_MS = 25          # |error| <= this -> PERFECT
+PERFECT_MS = 30          # |error| <= this -> PERFECT (25 until 2026-09-20: five stars asked for 9 in 10 notes
+                         # within 25 ms, a 20 ms spread; the user's best gallop runs sat at 24 ms and 94 was
+                         # reached by 1 run in 132; at 30 by 18, the ones with every note and no stray)
 GOOD_MS = 60             # |error| <= this -> GOOD
 OK_MS = 100              # |error| <= this -> OK; beyond -> the hit is stray / the note is missed
 SCORE = {"PERFECT": 100, "GOOD": 50, "OK": 20}

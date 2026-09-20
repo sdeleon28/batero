@@ -435,6 +435,15 @@ move every body a step from where it stands. A pad's zones share the body's scal
 and edge, snare head and rim): never a threshold per zone. The Setup row's select sets every
 body to the same value.
 
+## Judging windows
+
+PERFECT within 30 ms, GOOD within 60, OK within 100 (`game.PERFECT_MS` etc.); five stars at
+grade 94, where the grade is half accuracy and half quality (PERFECT 1, GOOD 0.6, OK 0.3)
+minus 2 points per stray per 100 notes. PERFECT was 25 ms until 2026-09-20: that asked for a
+20 ms timing spread with no bias, and over 132 gallop runs the user's best (24 ms spread, every
+note, no stray) reached 94 once; at 30 ms 18 of them do and the 31 ms runs stay at four stars.
+Saved stars are not recomputed.
+
 ## Judging: the miss deadline follows the latency offset
 
 `Game.hit_lane` dates a stroke `song_time - offset` (the +45 ms of the user's chain), but
