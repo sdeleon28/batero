@@ -190,6 +190,7 @@ class Renderer:
         self.marker_labels = []
         self.transport = {}      # set by the play screen: practice, the loop range, the pending l gesture
         self.hints = None        # (attempts, [lines]) from the play screen: what to work on, on every try short of five stars
+        self.intro = None        # the level's intro card while the play screen waits for the snare (intro_card)
 
     def y_for(self, note_t, now):
         return self.line_y - (note_t - now) * self.pps * self.game.speed
@@ -448,7 +449,9 @@ class Renderer:
 
         self.transport_bar(surf, now, loop, count_in_end)
         self.loop_badge(surf, loop)
-        if paused:
+        if paused and self.intro:
+            self.intro_card(surf)
+        elif paused:
             f.center(surf, "PAUSED", f.huge, TEXT, self.h * 0.45)
             f.center(surf, "space resume · R restart · Esc menu", f.small, DIM, self.h * 0.45 + 70 * S)
         elif now < 0:
@@ -730,6 +733,69 @@ class Renderer:
                 sep = (i in groups) if groups else (i % (n // max(1, n // 4) if n >= 4 else n) == 0)
                 if sep and i != idxs[0]:
                     pygame.draw.line(surf, (60, 60, 70), (int(cx - cw / 2), int(yr - 12 * S)), (int(cx - cw / 2), int(yr + 12 * S)))
+
+    def intro_card(self, surf):
+        """The level before it starts: what it teaches and what to watch (drumhero.intro), over
+        the dimmed highway with the first notes waiting above the line; the snare starts it."""
+        it, f, S = self.intro, self.f, self.s
+        es = it.get("lang", "es") == "es"
+        snare = next((l.color for l in self.game.lanes if l.key == "snare"), ACCENT)
+        bw = min(int(880 * S), self.w - int(48 * S))
+        inner = bw - int(56 * S)
+        rows = []                                          # [text, font, colour, gap after (px at S=1), centred]
+
+        def add(text, font, colour, gap=2, centre=False):
+            rows.append([text, font, colour, gap, centre])
+
+        def space(gap):
+            rows[-1][3] = gap
+
+        add(it["where"], f.small, DIM, 4)
+        for r in wrap(f.large, it["title"], inner):
+            add(r, f.large, TEXT)
+        for r in wrap(f.small, it["facts"], inner):
+            add(r, f.small, DIM, 1)
+        space(18)
+        add("QUÉ VAMOS A APRENDER" if es else "WHAT THIS LEVEL TEACHES", f.small, ACCENT, 6)
+        for r in wrap(f.mid, it["learn"], inner):
+            add(r, f.mid, TEXT)
+        if it["notes"]:
+            space(16)
+            add("PARA TENER EN CUENTA" if es else "WATCH FOR", f.small, ACCENT, 6)
+            for note in it["notes"]:
+                for i, r in enumerate(wrap(f.small, note, inner - int(18 * S))):
+                    add(("·  " if i == 0 else "   ") + r, f.small, TEXT, 1)
+                space(7)
+        if it["judged"]:
+            space(12)
+            for j in it["judged"]:
+                for r in wrap(f.small, j, inner):
+                    add(r, f.small, DIM, 1)
+        space(22)
+        go = "Golpeá el redoblante para empezar" if es else "Hit the snare to start"
+        if it.get("practice"):
+            go += "  ·  practice"
+        add(go, f.mid, snare, 8, centre=True)
+        add("S  no mostrar esta pantalla   ·   Enter también empieza   ·   Esc  volver" if es else
+            "S  skip this screen   ·   Enter also starts   ·   Esc  back", f.small, DIM, 0, centre=True)
+        bh = min(sum(font.get_height() + gap * S for _, font, _, gap, _ in rows) + 56 * S, self.h - 24 * S)
+        shade = pygame.Surface((self.w, self.h), pygame.SRCALPHA)
+        shade.fill((0, 0, 0, 150))
+        surf.blit(shade, (0, 0))
+        x0, y0 = self.w / 2 - bw / 2, self.h / 2 - bh / 2
+        box = pygame.Rect(int(x0), int(y0), int(bw), int(bh))
+        pygame.draw.rect(surf, (10, 10, 14), box, border_radius=int(16 * S))
+        pygame.draw.rect(surf, lerp(snare, BG, 0.4), box, 2, border_radius=int(16 * S))
+        pulse = 0.55 + 0.45 * (0.5 + 0.5 * math.sin(time.perf_counter() * 4.0))
+        y = y0 + 28 * S
+        for text, font, colour, gap, centre in rows:
+            if colour is snare:
+                colour = lerp(BG, snare, pulse)
+            ts = f.text(text, font, colour)
+            surf.blit(ts, (self.w / 2 - ts.get_width() / 2 if centre else x0 + 28 * S, y))
+            y += font.get_height() + gap * S
+            if y > y0 + bh - 20 * S:
+                break
 
     def results(self, surf):
         g = self.game

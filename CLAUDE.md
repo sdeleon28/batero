@@ -205,6 +205,26 @@ h, f. `--title`, `--note`, `--scene`, `--seconds`, `--fps`, `--no-card`.
   as .txt) with SDL_VIDEODRIVER=dummy: that is how the look was checked without
   a terminal, and how to check it after touching a scene.
 
+## The level intro: a snare hit starts every level (S)
+
+`drumhero/intro.py`, asked for 2026-09-19: with `intro` on in settings (default, `App.intro_on`,
+**S** toggles it in the lists, on the play screen and from the Setup row "Level intro (S)"; the
+hub's S stays the stats) every `PlayScreen` opens **armed**: the game is paused at the top of its
+count-in (`PlayScreen.arm`, nothing plays, no note can be missed) under a card that says, in
+Spanish, what the level teaches and what to watch (`Renderer.intro_card`), and **a snare hit
+starts it** (velocity >= `NAV_MIN_VELOCITY`, after `ARM_GRACE_S` so the stroke that chose the
+level on the results screen cannot start the next one; every other pad only sounds). The MIDI
+thread stamps the hit, `update` starts the count-in dated at it (`PlayScreen.start`) and resets
+the run log's `started`, so the minutes in the stats do not count the reading. Enter and space
+start it too; S while the card is up turns the feature off and starts the level; a retry or a
+tempo change arms again. The texts live in `INTROS` in `intro.py`, one entry per level name (a
+paragraph "qué vamos a aprender" and a few "para tener en cuenta"; "derecha" / "izquierda"
+swapped for the left-hand-lead version like the description's R / L), plus `facts()` (tempo,
+compases, notas, subdivisión, cuerpos) and `judged()` (dinámicas, articulación, mano guía,
+pista de fondo) read from the chart itself. **A new level needs an entry**: `python -m
+drumhero.intro [NAME ...]` prints the cards and names the levels without one (`missing()`).
+With `coach_language` "en" the card shows the English description instead.
+
 ## Hints on the results screen (every attempt short of five stars)
 
 `drumhero/hints.py`, asked for 2026-09-18: deterministic, no LLM. `App.tries` counts, per level

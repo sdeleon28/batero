@@ -10,7 +10,7 @@ DEFAULT_SETTINGS = {"audio_device": None, "fullscreen": True, "midi_trace": None
                     "capture_audio_device": "X18/XR18", "capture_audio_channels": [17, 18], "capture_camera": "iPhone",
                     "capture_pip": 0.28, "capture_corner": "br", "volume": 1.0, "metronome_volume": 1.0, "dyn_scale": 1.0, "dyn_scales": None, "coach_language": "es", "coach_model": None, "claude_bin": None,
                     "twitch_channel": "xantwav", "stream_height": 1080, "stream_kbps": 6000, "stream_url": None, "stream_bandwidth_test": False,
-                    "stream_source": "screen", "stream_display": 0}
+                    "stream_source": "screen", "stream_display": 0, "intro": True}
 
 
 def load_settings(path=SETTINGS_PATH):

@@ -36,6 +36,7 @@ from .devices import DeviceWatcher, Toasts, TOAST_S
 from .render import ACCENT, BG, DIM, JUDGE_COLORS, LANE_BG, TEXT, Fonts, Renderer, draw_hihat_state, draw_stars, lerp
 from .game import TAIL_S, lead_in_for
 from . import ghost as GH
+from . import intro as IN
 from . import keygen
 from .ghost import GhostFilter
 from .sounds import (BACKING_GAIN, METRONOME_GAIN, PROGRESSIONS, SoundBank, Track,
@@ -47,6 +48,7 @@ CAPTURE_S = 1.5           # wizard: keep collecting note numbers this long after
 NAV_MIN_VELOCITY = 25     # softer hits never navigate (sticks resting on the snare read 4..14)
 NAV_SOUND_MIN_VELOCITY = 15  # ...but every hit above this is heard, undebounced, so rolls sound whole
 RESULTS_GRACE_S = 1.0     # after a level ends, ignore drum hits this long before they navigate
+ARM_GRACE_S = 0.4         # the intro ignores snare hits this long after it appears (a flam after the nav hit)
 VOLUME_STEP = 0.05        # { and } move the game's output level by this much
 METRO_VOLUME_STEP = 0.1   # = and - move the metronome's own level by this much
 METRO_VOLUME_MAX = 1.6    # over that the track's gain would clip at the mixer's ceiling
@@ -119,6 +121,8 @@ class App:
         # the transport (play screen): 1..0 jump to a phrase, l35 marks a loop, \ switches it,
         # K gives the numbers back to the lanes (the two are exclusive), P stops saving progress
         self.practice = False        # P: the run writes no progress
+        # S: every level opens on its intro (what it teaches, in Spanish) and waits for a snare hit
+        self.intro_on = bool(self.settings.get("intro", True))
         self.loop_range = None       # (first phrase, last phrase), kept across a retry (tempo change)
         self.loop_on = False
         self.toasts = Toasts()
@@ -280,6 +284,14 @@ class App:
         for inst in C.INSTRUMENTS:
             sc.setdefault(inst, self.settings.get("dyn_scale", 1.0))
         return sc
+
+    def toggle_intro(self):
+        """S: the level intro (what the level teaches, then a snare hit starts it) on or off, saved."""
+        self.intro_on = not self.intro_on
+        self.settings["intro"] = self.intro_on
+        save_settings(self.settings)
+        self.toasts.add("level intro on: each level explains itself and waits for a snare hit" if self.intro_on
+                        else "level intro off: levels start right away", ACCENT, key="intro")
 
     def dyn_scale_label(self):
         """For the Setup row: one number when every body agrees, else the ones that differ."""
@@ -1309,6 +1321,8 @@ class ListScreen(Screen):
                     ("Soundcheck", "hit every pad, see where it lands and hear it"),
                     (f"Drum sounds: {'on' if self.app.sounds.drums else 'off'}", "off: the kit is silent here, the module or Bitwig makes the sound"),
                     (f"Guide sounds: {'on' if self.app.guide else 'off'}", "hear the chart as it crosses the line"),
+                    (f"Level intro (S): {'on' if self.app.intro_on else 'off'}", "before each level, what it teaches (in Spanish) until a snare hit starts it; "
+                                                                             "S toggles it in the lists and in play, saved"),
                     (f"Backing loop: {'on' if self.app.backing_on else 'off'}", "bass, chords and arpeggio under the built-in levels"),
                     (f"Metronome: {self.app.metronome_mode} · {self.app.metro_volume:.0%}", "congas: full follows the subdivision, beats only marks the beats; "
                                                                                             "= and - raise / lower its level anywhere, saved"),
@@ -1364,34 +1378,36 @@ class ListScreen(Screen):
             elif self.sel == 4:
                 self.app.guide = not self.app.guide
             elif self.sel == 5:
-                self.app.backing_on = not self.app.backing_on
+                self.app.toggle_intro()
             elif self.sel == 6:
+                self.app.backing_on = not self.app.backing_on
+            elif self.sel == 7:
                 modes = ["full", "beats", "off"]
                 self.app.metronome_mode = modes[(modes.index(self.app.metronome_mode) + 1) % 3]
-            elif self.sel == 7:
+            elif self.sel == 8:
                 self.app.menu_music_on = not self.app.menu_music_on
                 self.app.update_menu_music()
-            elif self.sel == 8:
-                self.app.cycle_audio_device()
             elif self.sel == 9:
-                self.app.set_volume(VOLUME_STEP if self.app.volume >= 1.0 else self.app.volume + VOLUME_STEP)
+                self.app.cycle_audio_device()
             elif self.sel == 10:
+                self.app.set_volume(VOLUME_STEP if self.app.volume >= 1.0 else self.app.volume + VOLUME_STEP)
+            elif self.sel == 11:
                 top = max(self.app.dyn_scales.values())
                 self.app.set_dyn_scale(GM.DYN_SCALE_MIN if top >= GM.DYN_SCALE_MAX else top + GM.DYN_SCALE_STEP)
-            elif self.sel == 11:
+            elif self.sel == 12:
                 self.app.settings["fullscreen"] = not self.app.settings.get("fullscreen", True)
                 save_settings(self.app.settings)
-            elif self.sel == 12:
-                self.app.toggle_recording()
             elif self.sel == 13:
-                self.app.toggle_stream()
+                self.app.toggle_recording()
             elif self.sel == 14:
-                self.app.go(CameraCheckScreen(self.app, self.app.surface))
+                self.app.toggle_stream()
             elif self.sel == 15:
-                self.app.go(EditScreen(self.app))
+                self.app.go(CameraCheckScreen(self.app, self.app.surface))
             elif self.sel == 16:
-                self.app.go(StatsScreen(self.app))
+                self.app.go(EditScreen(self.app))
             elif self.sel == 17:
+                self.app.go(StatsScreen(self.app))
+            elif self.sel == 18:
                 self.app.go(CoachScreen(self.app))
             else:
                 return False
@@ -1437,6 +1453,8 @@ class ListScreen(Screen):
             self.back()
         elif key in (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_TAB):
             self.swap_lead()
+        elif key == pygame.K_s:
+            self.app.toggle_intro()
         return True
 
     def draw_lead_rows(self, surf, ch, right, y, selected):
@@ -2088,7 +2106,7 @@ class CameraCheckScreen(Screen):
 
     def leave(self):
         self.close()
-        self.app.go(ListScreen(self.app, "crash", 11))
+        self.app.go(ListScreen(self.app, "crash", 15))
 
     def on_drum(self, inst):
         action = NAV.get(inst)
@@ -2296,12 +2314,12 @@ class EditScreen(Screen):
         elif action == "accept":
             self.accept()
         elif action == "back":
-            self.app.go(ListScreen(self.app, "crash", 12))
+            self.app.go(ListScreen(self.app, "crash", 16))
         return True
 
     def on_key(self, key):
         if key in (pygame.K_ESCAPE, pygame.K_h):
-            self.app.go(ListScreen(self.app, "crash", 12))
+            self.app.go(ListScreen(self.app, "crash", 16))
         elif key in (pygame.K_DOWN, pygame.K_j):
             self.sel = (self.sel + 1) % len(self.options())
         elif key in (pygame.K_UP, pygame.K_k):
@@ -2678,17 +2696,70 @@ class PlayScreen(Screen):
         self.hints = []               # what went wrong, for the results box (attempt())
         self.loop_digits = None       # the phrases typed after l, or None when no gesture is pending
         self.loop_at = 0.0
+        self.armed = False            # the intro is up: the game waits, paused at its count-in, for a snare hit
+        self.armed_at = 0.0
+        self.start_at = None          # wall time of the snare hit that starts it (MIDI thread -> update)
         self.game.reset()
         self.apply_loop()             # a loop marked before a tempo change keeps running
+        if app.intro_on:
+            self.arm()
 
     def on_resize(self):
         self.renderer = Renderer(self.game, self.app.size, self.app.fonts, self.app.ghosts)
         self.renderer.finished_at = self.finished_at
+        self.renderer.intro = self.intro() if self.armed else None
+
+    # --- the intro: the level explains itself, a snare hit starts it (S) ---------------------
+    def intro(self):
+        """What the renderer's card shows: the level, where it sits, what it teaches."""
+        lang = self.app.settings.get("coach_language", "es")
+        learn, notes, fx, jd = IN.intro_for(self.chart, lang)
+        items = self.app.items_for(self.cat)
+        course = C.COURSE.get(self.cat)
+        where = course.name if course else next(t for c, t, _ in CATEGORIES if c == self.cat)
+        return {"title": self.chart.title, "where": f"{where}  ·  {self.index + 1} / {len(items)}",
+                "facts": fx, "learn": learn, "notes": notes, "judged": jd, "lang": lang,
+                "practice": self.app.practice}
+
+    def arm(self):
+        """Hold the level at the top of its count-in until the snare is hit: paused from the
+        start, so nothing plays and no note can be missed while the intro is read."""
+        g = self.game
+        with g.lock:
+            if g.paused_at is None:
+                g.paused_at = time.perf_counter()
+        self.armed, self.armed_at, self.start_at = True, time.perf_counter(), None
+        self.renderer.intro = self.intro()
+
+    def start(self, wall=None, by="snare"):
+        """The snare was hit (or Enter): the count-in starts now, dated at the hit."""
+        g = self.game
+        wall = time.perf_counter() if wall is None else wall
+        with g.lock:
+            if g.paused_at is not None:
+                g.paused_total += wall - g.paused_at
+                g.paused_at = None
+        self.armed, self.start_at = False, None
+        self.renderer.intro = None
+        if self.app.runlog.header is not None:
+            self.app.runlog.header["started"] = time.time()   # the minutes count from here, not from the intro
+        self.app.runlog.add("start", by=by)
 
     def nav_ready(self):
         return self.finished_at is not None and time.perf_counter() - self.finished_at > RESULTS_GRACE_S
 
     def on_note(self, note, velocity):        # MIDI thread: judge immediately while playing
+        if self.armed:
+            # the intro: every pad sounds, only the snare starts the level (the main thread does it)
+            inst = self.app.instrument_for(note)
+            if inst is None or velocity < NAV_SOUND_MIN_VELOCITY:
+                return "armed"
+            self.app.sounds.play(inst, velocity, 0.8)
+            now = time.perf_counter()
+            if inst == "snare" and velocity >= NAV_MIN_VELOCITY and now - self.armed_at > ARM_GRACE_S and self.start_at is None:
+                self.start_at = now
+                self.app.legend_flash["snare"] = now
+            return "armed"
         if self.nav_ready():
             self.app.nav_hit(note, velocity)
             return "nav"
@@ -2711,6 +2782,13 @@ class PlayScreen(Screen):
         g = self.game
         if key == pygame.K_ESCAPE:
             self.to_list()
+        elif key == pygame.K_s:
+            # the intro on or off, saved; off while it is up, the level starts right away
+            self.app.toggle_intro()
+            if self.armed and not self.app.intro_on:
+                self.start(by="key")
+        elif self.armed and key in (pygame.K_SPACE, pygame.K_RETURN):
+            self.start(by="key")
         elif key == pygame.K_SPACE:
             if not g.finished:
                 g.toggle_pause()
@@ -2906,6 +2984,11 @@ class PlayScreen(Screen):
         self.renderer.hints = (self.app.tries[key], self.hints)
 
     def update(self):
+        if self.armed:
+            if self.start_at is not None:
+                self.start(self.start_at)
+            else:
+                return                                    # nothing moves until the snare
         if self.loop_digits is not None and time.perf_counter() - self.loop_at > LOOP_GESTURE_S:
             self.loop_digits = None
         self.game.update()
@@ -2921,6 +3004,8 @@ class PlayScreen(Screen):
 
     def draw(self, surf, fps):
         self.renderer.top_inset = self.app.badge_height()
+        if self.renderer.intro is not None:
+            self.renderer.intro["practice"] = self.app.practice        # P while the intro is up
         self.renderer.transport = {"practice": self.app.practice,
                                    "range": self.app.loop_range,
                                    "pending": None if self.loop_digits is None else
