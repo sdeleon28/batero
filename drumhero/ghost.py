@@ -7,7 +7,8 @@ played. Measured on 2026-09-06 while stomping:
   - up to ~250 ms after: note 42 at velocity 22..36 while the pedal settles
 Measured 2026-09-07 hitting the edge with the pedal closed: nearly every hard stroke is
 followed by one or two bow notes (42, sometimes 46), 42 ms later at 70..76 % of the
-stroke's velocity and/or 73..93 ms later at 35..56 %; soft strokes get them rarely.
+stroke's velocity and/or 73..93 ms later at 35..56 % (73..111 ms at 28..56 % after a 113..127,
+measured 2026-09-20 on the kick gallop level); soft strokes get them rarely.
 Re-tuned 2026-09-09 on real playing (paradiddles, fast bow/edge alternation, chick and
 stroke together, open hats): the softest real tap read 29; real bow taps land as close
 as 44 ms after an edge accent at 63..85 % of it; a stick landing with the chick reads
@@ -50,12 +51,13 @@ ANY_MIN_VELOCITY = 8         # below this nothing counts, on any pad
 # A hard stroke on one zone makes the other zone fire late. Near: 8..48 ms after the stroke,
 # never above 92 whatever the stroke's velocity (2026-09-19, 174 cases in ten days of trace,
 # none a chart note): a note on the other zone within CROSSTALK_NEAR_MS at or under
-# CROSSTALK_NEAR_VELOCITY_MAX is that stroke heard twice. Late: 73..93 ms after at 35..56 %,
+# CROSSTALK_NEAR_VELOCITY_MAX is that stroke heard twice. Late: 73..111 ms after at 28..56 %
+# (the hardest strokes, 113..127, ring the longest: 95..111 ms, 2026-09-20),
 # where real doubles (44..90 ms at 63..85 %) overlap anything higher, so the ratio stays 0.58.
 # (window ms, max velocity ratio) tiers, checked in order.
 CROSSTALK_NEAR_MS = 50
 CROSSTALK_NEAR_VELOCITY_MAX = 95
-ZONE_CROSSTALK = [(95, 0.58)]
+ZONE_CROSSTALK = [(115, 0.58)]
 # Beater bounce on the kick: (window ms, max velocity ratio to the last real kick) tiers, the
 # reference stays the last real kick so a chain of bounces falls whole. 80 ms is under the
 # fastest chart figure (94 ms); 0.4 within 250 ms keeps a soft real double (never under 0.6).
