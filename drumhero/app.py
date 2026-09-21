@@ -430,7 +430,7 @@ class App:
 
     def course_stars(self, course):
         """(stars got, stars possible) over a course's levels for the profile playing."""
-        keys = [ch.key for ch in course.levels]
+        keys = [ch.key for ch in course.levels] + [ch.mirrored().key for ch in course.levels if ch.lead]   # both sides count
         return sum(self.results.get(k, {}).get("stars", 0) for k in keys), 5 * len(keys)
 
     def tracks_for(self, chart, prog_index):
@@ -641,19 +641,21 @@ class App:
         return midi, audio, cam
 
     def level_by_name(self, name):
-        """(category, index, lead) for a level name or a left-hand-lead key ("Paradiddle (L)")."""
+        """(category, index, lead) for a level name or its other side's key ("Paradiddle (L)",
+        "5 · Washing the crash (R)")."""
         for cat in self.categories():
             for i, ch in enumerate(self.items_for(cat)):
                 if ch.name == name:
-                    return cat, i, "R"
+                    return cat, i, ch.lead or "R"
                 if ch.lead and ch.mirrored().key == name:
-                    return cat, i, "L"
+                    return cat, i, ch.mirrored().lead
         return None
 
     def chart_for(self, cat, index):
-        """The level to play: the left-hand-lead mirror when that is the chosen lead."""
+        """The level to play: the mirror (the left-hand lead, the wash on the other crash) when
+        the chosen side is not the one the level was written on."""
         ch = self.items_for(cat)[index]
-        return ch.mirrored() if ch.lead and self.lead == "L" else ch
+        return ch.mirrored() if ch.lead and self.lead != ch.lead else ch
 
     def level_names(self):
         return {ch.name for cat in self.categories() for ch in self.items_for(cat)}
@@ -1360,7 +1362,9 @@ class ListScreen(Screen):
                     ("Progress (S)", "streak, minutes, trends, records"),
                     ("Coach (C)", "Claude reads your stats: strengths, weaknesses, focus, playlists"),
                     ("Quit", "")]
-        return [(ch.name, f"{ch.bpm:.0f} bpm · {len(ch.notes):3d} notes · {ch.desc}") for ch in self.app.items_for(self.cat)]
+        # the description of the side chosen (the left-hand lead's R / L, the other crash's left / right)
+        return [(ch.name, f"{ch.bpm:.0f} bpm · {len(ch.notes):3d} notes · {self.app.chart_for(self.cat, i).desc}")
+                for i, ch in enumerate(self.app.items_for(self.cat))]
 
     def fit(self, text, max_w):
         """text clipped with an ellipsis to max_w pixels in the small font."""
@@ -1453,7 +1457,7 @@ class ListScreen(Screen):
         return True
 
     def has_leads(self):
-        return self.cat == "kick"
+        return any(ch.lead for ch in self.app.items_for(self.cat))
 
     def swap_lead(self):
         if self.has_leads():
@@ -1477,11 +1481,12 @@ class ListScreen(Screen):
         return True
 
     def draw_lead_rows(self, surf, ch, right, y, selected):
-        """A two-lead level's best results, one line per hand: R on top, L below, the chosen
-        lead lit on the selected row. Returns the x where the sub text must stop."""
+        """A two-sided level's best results, one line per side: R on top, L below, the chosen
+        side lit on the selected row. Returns the x where the sub text must stop."""
         S, f = self.s, self.f
         stop = right
-        for k, (lead, key) in enumerate((("R", ch.key), ("L", ch.mirrored().key))):
+        m = ch.mirrored()
+        for k, (lead, key) in enumerate(sorted([(ch.lead, ch.key), (m.lead, m.key)], key=lambda r: r[0] != "R")):
             best = self.app.results.get(key)
             yy = y - 3 * S + k * 16 * S
             x = right
@@ -1539,10 +1544,13 @@ class ListScreen(Screen):
                 self.f.center(surf, line, self.f.small, TEXT, self.h - (84 + 22 * (len(lines) - 1 - k)) * S)
         if self.has_leads():
             lead = self.app.lead
-            ls = self.f.text(f"lead hand  {'right' if lead == 'R' else 'left'}", self.f.small, HAND_COLORS[lead])
+            charts = self.app.items_for(self.cat)
+            sel = charts[self.sel] if self.sel < len(charts) and charts[self.sel].lead else next(ch for ch in charts if ch.lead)
+            ls = self.f.text(sel.side_text(lead), self.f.small, HAND_COLORS[lead])
             surf.blit(ls, (self.w * 0.88 - ls.get_width(), 28 * S))
-            self.legend(surf, [("hihat", "down"), ("crash", "up"), ("snare", "select"), ("tom1", "lead R/L"), ("kick", "back")],
-                        keys="arrows or j k · Enter or l · ← → lead · Esc or h")
+            what = "lead" if sel.mirror == "hands" else "crash"
+            self.legend(surf, [("hihat", "down"), ("crash", "up"), ("snare", "select"), ("tom1", f"{what} R/L"), ("kick", "back")],
+                        keys=f"arrows or j k · Enter or l · ← → {what} · Esc or h")
         else:
             self.legend(surf, [("hihat", "down"), ("crash", "up"), ("snare", "select"), ("kick", "back")],
                         keys="arrows or j k · Enter or l · Esc or h")

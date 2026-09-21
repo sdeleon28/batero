@@ -386,6 +386,23 @@ the hub counts both. Old level names map to current keys in `kit.PROGRESS_MIGRAT
 applied when progress loads. Levels with hands on different drums, feet patterns and hi-hat
 lessons have no lead (one version).
 
+**The same toggle picks the crash on a two-crash level** (asked for 2026-09-21 for "5 · Washing
+the crash"): `_groove(..., mirror="crash")` sets `Chart.mirror = "crash"` and `Chart.home` to the
+side written (the crash with more strokes: L for the wash on the left crash), `Chart.lead` being
+the side of the version in hand; `mirrored()` swaps crash and crash2 in the notes and "left" /
+"right" in the description. `Chart.key` is the bare name for the written side and `" (L)"` /
+`" (R)"` for the other one (so the crash-L wash keeps its progress under "5 · Washing the crash"
+and the crash-R version is "5 · Washing the crash (R)"); `App.chart_for` mirrors whenever
+`App.lead` differs from the level's own `lead` (`App.lead` is one setting for both meanings:
+R = right hand leads = the wash on the right crash). The list shows the star row per side, the
+description of the side chosen, "wash on the right crash" top right and "crash R/L" in the
+legend (`Chart.side_text`; `has_leads` is any level with a lead in the list, so the toms and the
+arrows work in a course); the card says "el wash en el crash derecho" and its Spanish swaps
+"izquierdo" / "derecho" like the hands. **The exit from the wash** (that day's question): after
+the crash on the 1 the hand rejoins the hats on the 2 with the snare (`_H8_2`), not on the & of 1:
+from the far crash at 180 the & is a stretch, and the crash should ring until the backbeat. Bars
+1 and 9 of the level; the other course levels keep `_H8C` (their crash sits over the hats).
+
 **Doubles are bracketed on the highway** (asked for 2026-09-16): `Chart.doubles()` finds runs
 of two or three consecutive strokes of one hand (or foot) on one instrument within a beat of
 each other (`ChartNote.hand`; notes without a hand are skipped over, a longer run is a one-hand

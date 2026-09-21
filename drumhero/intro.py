@@ -381,9 +381,11 @@ INTROS = {
          "El cambio de apertura es en el crash: el pie se levanta en el mismo golpe.",
          "El bajo y los acordes abiertos de la guitarra tocan la figura del bombo, compás por compás: escuchala en la música antes de buscarla con el pie."]),
     "5 · Washing the crash": (
-        "El estribillo lava el crash izquierdo en cada corchea en lugar del hi-hat; el crash derecho marca la vuelta a la estrofa.",
+        "El estribillo lava el crash izquierdo en cada corchea en lugar del hi-hat; el crash derecho marca la vuelta a la estrofa y la mano vuelve al hi-hat en el 2, con el redoblante.",
         ["Corcheas en el crash: livianas, es un colchón de platillo, no ocho acentos.",
-         "Dieciséis compases: estrofa, estribillo, y el crash derecho avisa la vuelta."]),
+         "Dieciséis compases: estrofa, estribillo, y el crash derecho avisa la vuelta.",
+         "Después del crash del 1 no hay hi-hat en el & de 1: el platillo suena hasta el backbeat y la mano llega al hi-hat junto con el redoblante.",
+         "El mismo nivel existe lavando el crash derecho: los toms o las flechas en la lista eligen el lado."]),
     "6 · Snare on the &": (
         "El skank: bombo en cada tiempo, redoblante en cada &, hi-hat acompañando. La estrofa hace el skank, el estribillo lava el crash con los pushes.",
         ["El redoblante a contratiempo, nunca en el tiempo: si lo sentís dado vuelta, parás y contás.",
@@ -469,7 +471,9 @@ def judged(chart):
         out.append("se juzgan las dinámicas: acentos fuertes, taps suaves")
     if chart.expression:
         out.append("se juzga la articulación del hi-hat: apertura, zona y chick")
-    if chart.lead:
+    if chart.lead and chart.mirror == "crash":
+        out.append("el wash en el crash " + ("derecho" if chart.lead == "R" else "izquierdo") + " (los toms o las flechas en la lista lo cambian)")
+    elif chart.lead:
         out.append("mano guía " + ("derecha" if chart.lead == "R" else "izquierda") + " (los toms o las flechas en la lista la cambian)")
     if chart.backing:
         out.append("pista de fondo: " + _BACKING.get(chart.backing, chart.backing))
@@ -484,7 +488,7 @@ def intro_for(chart, lang="es"):
         learn, notes = chart.desc, []
     else:
         learn, notes = entry
-        if chart.lead == "L":
+        if chart.lead and chart.lead != chart.home:        # the other hand leads, or the other crash is washed
             learn, notes = _swap_hands(learn), [_swap_hands(n) for n in notes]
     return learn, list(notes), facts(chart), judged(chart)
 

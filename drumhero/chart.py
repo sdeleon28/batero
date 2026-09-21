@@ -184,26 +184,47 @@ class Chart:
     dynamics: bool = False      # judge accents vs taps by velocity
     expression: bool = False    # judge hi-hat articulations (openness, zone, chick)
     rate: float = 1.0           # tempo multiplier this chart was scaled by (see at_rate)
-    lead: str = None            # "R" / "L": which hand leads; None when the level has no hand lead
+    lead: str = None            # "R" / "L": the side this version is played on (the hand that leads, or the
+                                # crash that is washed, see mirror); None when the level has one version only
                                 # (one instrument per hand, feet, hi-hat lessons). Set by the builders.
+    mirror: str = "hands"       # what the other version swaps: "hands" (every R and L: notes, strip, the
+                                # description's R / L tokens) or "crash" (the two crashes, "left" / "right")
+    home: str = "R"             # the side the level was written on: that version's key is the bare name,
+                                # the other's carries " (L)" / " (R)"
     backing: str = None         # a backing of its own ("cumbia": sounds.CUMBIA_STYLE, "keygen": the waiting screen's tune, "kick": sounds.KICK_STYLE on kick_rhythm()); None = by subdivision
     hammer: bool = False        # the music's bass and chords play the level's kick figure, bar by bar (kick_rhythm()); "kick" backing implies it
 
     @property
     def key(self):
-        """The progress / run-log name: the level name, plus " (L)" for the left-hand-lead version."""
-        return self.name + (" (L)" if self.lead == "L" else "")
+        """The progress / run-log name: the level name as written, plus " (L)" / " (R)" for the
+        version on the other side (the left-hand lead, the wash on the right crash)."""
+        return self.name + (f" ({self.lead})" if self.lead and self.lead != self.home else "")
 
     @property
     def title(self):
-        return self.name + ("  ·  left hand lead" if self.lead == "L" else "")
+        if not self.lead or self.lead == self.home:
+            return self.name
+        return self.name + "  ·  " + ("left hand lead" if self.mirror == "hands" else self.side_text(sep=" "))
+
+    def side_text(self, lead=None, sep="  "):
+        """What a side means on this level, for the list and the card: "lead hand  right" or
+        "wash on the  left crash"."""
+        side = "right" if (lead or self.lead) == "R" else "left"
+        return f"lead hand{sep}{side}" if self.mirror == "hands" else f"wash on the{sep}{side} crash"
 
     def mirrored(self):
-        """The same level led by the other hand: every R becomes L and vice versa, in the
-        notes, the sticking strip and the description's R / L tokens. Same name, other key."""
+        """The same level on the other side. mirror "hands": led by the other hand, every R becomes
+        L and vice versa, in the notes, the sticking strip and the description's R / L tokens.
+        mirror "crash": the two crashes swap, in the notes and the description's "left" / "right".
+        Same name, other key."""
         if not self.lead:
             return self
         swap = {"R": "L", "L": "R"}
+        if self.mirror == "crash":
+            crashes = {"crash": "crash2", "crash2": "crash"}
+            notes = [dataclasses.replace(n, key=crashes.get(n.key, n.key)) for n in self.notes]
+            desc = re.sub(r"\b(left|right)\b", lambda m: {"left": "right", "right": "left"}[m.group(0)], self.desc)
+            return dataclasses.replace(self, notes=notes, desc=desc, lead=swap[self.lead])
         notes = [dataclasses.replace(n, hand=swap.get(n.hand, n.hand)) for n in self.notes]
         desc = re.sub(r"\b[RL]\b", lambda m: swap[m.group(0)], self.desc)
         return dataclasses.replace(self, notes=notes, desc=desc, lead=swap[self.lead],
@@ -627,10 +648,12 @@ GROOVE_VEL = {"X": 120, "x": 96, "o": 62}      # only X draws as an accent
 HH_LETTERS = {"t": "tight body", "T": "tight edge", "m": "mid body", "M": "mid edge", "a": "open body", "A": "open edge"}
 
 
-def _groove(name, desc, bpm, phrase, bars=8, backing=None, hammer=False):
+def _groove(name, desc, bpm, phrase, bars=8, backing=None, hammer=False, mirror=None):
     """A groove level from `phrase` (list of bar dicts, see GROOVE_KEYS) repeated to `bars`.
     backing: a style of its own for the music (sounds.make_arrangement's feel), else generic.
-    hammer: the music's bass and chords play the level's kick figure (Chart.hammer)."""
+    hammer: the music's bass and chords play the level's kick figure (Chart.hammer).
+    mirror "crash": the level exists on both crashes (Chart.mirrored swaps them); the side written
+    is the crash with more strokes, the lead toggle picks the other."""
     beat = 60 / bpm
     notes = []
     for bar in range(bars):
@@ -651,6 +674,10 @@ def _groove(name, desc, bpm, phrase, bars=8, backing=None, hammer=False):
     ch.expression = any(n.art for n in notes)
     ch.backing = backing
     ch.hammer = hammer
+    if mirror == "crash":
+        crashes = [n.key for n in notes if n.key in ("crash", "crash2")]
+        ch.mirror = "crash"
+        ch.home = ch.lead = "R" if crashes.count("crash2") > crashes.count("crash") else "L"
     return ch
 
 
@@ -1066,6 +1093,7 @@ class Course:
 _PP_V = "x.....x.x......."            # kick on 1, the & of 2 and 3
 _PP_P = "x.....x.x.....x."            # the same with the push on the & of 4
 _H8C = "..x.x.x.x.x.x.x."             # hats on the eighths under a crash on the 1
+_H8_2 = "....x.x.x.x.x.x."            # hats from the 2: the crash on the 1 rings until the backbeat, the hand comes home with the snare
 _CR1 = "x..............."             # a crash on the 1
 _CR8 = "x.x.x.x.x.x.x.x."             # the crash wash: right hand on the crash, every eighth
 _SK = "..X...X...X...X."              # the skank: snare on every &
@@ -1136,12 +1164,15 @@ POP_PUNK = [
         {"hh": "a.a.a.a.a.a.a.a.", "kk": _PP_V, "sn": _S24},
         {"hh": "a.a.a.a.a.a.a.a.", "kk": _PP_P, "sn": _S24},
     ], backing="punk", hammer=True),
-    _groove("5 · Washing the crash", "The chorus rides the left crash on every eighth instead of the hats; the right crash marks the way back to the verse.", 152, [
-        _PPV1, _PPP, _PPV, _PPP,
+    # The way back to the verse: after the crash on the 1 the hand rejoins the hats on the 2, with
+    # the snare, not on the & of 1 (2026-09-21: from the far crash at 180 the & is a stretch, and
+    # the crash should ring until the backbeat). Both crashes, the lead toggle picks the side.
+    _groove("5 · Washing the crash", "The chorus rides the left crash on every eighth instead of the hats; the right crash marks the way back to the verse, the hats rejoining on the 2.", 152, [
+        {"cl": _CR1, "hh": _H8_2, "kk": _PP_V, "sn": _S24}, _PPP, _PPV, _PPP,
         _PPC, _PPCP, _PPC, _PPCP,
-        {"cr": _CR1, "hh": _H8C, "kk": _PP_V, "sn": _S24}, _PPP, _PPV, _PPP,
+        {"cr": _CR1, "hh": _H8_2, "kk": _PP_V, "sn": _S24}, _PPP, _PPV, _PPP,
         _PPC, _PPCP, _PPC, _PPCP,
-    ], bars=16, backing="punk"),
+    ], bars=16, backing="punk", mirror="crash"),
     _groove("6 · Snare on the &", "The skank: kick on every beat, snare on every &, hats along. The verse skanks, the chorus washes the crash with the pushes.", 152, [
         _SKANK1, _SKANK, _SKANK, _SKANK,
         _PPC, _PPCP, _PPC, _PPCP,
