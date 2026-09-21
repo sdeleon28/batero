@@ -2087,7 +2087,7 @@ class CoachScreen(Screen):
                 y += 50 * S
             if self.playlists():
                 pl = self.playlists()[self.sel]
-                items = ", ".join(f"{it['level']} @{it.get('rate', 1.0):.2g}x" + (f" x{it['reps']}" if it.get('reps', 1) > 1 else "") for it in pl["items"])
+                items = ", ".join(f"{it['level']} @{it.get('rate', 1.0):.3g}x" + (f" x{it['reps']}" if it.get('reps', 1) > 1 else "") for it in pl["items"])
                 for line in wrap(f, items, f.small, colw)[:3]:
                     surf.blit(f.text(line, f.small, DIM), (rx, y)); y += 20 * S
         self.legend(surf, [("hihat", "down"), ("crash", "up"), ("snare", "start session" if r else "ask Claude"), ("kick", "back")],
@@ -2821,7 +2821,7 @@ class PlayScreen(Screen):
         elif key in (pygame.K_LEFTBRACKET, pygame.K_RIGHTBRACKET):
             # tempo: everything (notes, metronome, backing, the record) slows down or speeds up;
             # the level restarts at the new tempo
-            step = 0.1 if key == pygame.K_RIGHTBRACKET else -0.1
+            step = 0.05 if key == pygame.K_RIGHTBRACKET else -0.05
             self.app.rate = round(min(2.0, max(0.3, self.app.rate + step)), 2)
             self.retry()
         elif key in (pygame.K_COMMA, pygame.K_PERIOD):
