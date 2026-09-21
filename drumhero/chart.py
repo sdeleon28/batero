@@ -187,6 +187,7 @@ class Chart:
     lead: str = None            # "R" / "L": which hand leads; None when the level has no hand lead
                                 # (one instrument per hand, feet, hi-hat lessons). Set by the builders.
     backing: str = None         # a backing of its own ("cumbia": sounds.CUMBIA_STYLE, "keygen": the waiting screen's tune, "kick": sounds.KICK_STYLE on kick_rhythm()); None = by subdivision
+    hammer: bool = False        # the music's bass and chords play the level's kick figure, bar by bar (kick_rhythm()); "kick" backing implies it
 
     @property
     def key(self):
@@ -330,14 +331,31 @@ class Chart:
         return self.segments
 
     def kick_rhythm(self):
-        """The first bar's kick figure for the music to hammer (backing "kick"): (grid, slots),
-        grid 16 (sixteenths) or 12 (twelfths, for a triplet level), slots [(index, gain)] with
-        the beats at 1.0 and the rest at 0.8. sounds.make_arrangement takes it as `rhythm`."""
+        """The kick figure for the music to hammer (backing "kick", or `hammer`): (grid, bars),
+        grid 16 (sixteenths) or 12 (twelfths, for a triplet level), bars a list with one entry per
+        bar of the level, [(slot, gain)] with the beats at 1.0 and the rest at 0.8, so a figure
+        that changes from bar to bar (the pop punk push every second bar) is played as written.
+        A bar without kicks repeats the last bar that had them. sounds.make_arrangement takes it
+        as `rhythm`."""
         sub = self.subdivision_at(0)
         grid = 12 if sub % 3 == 0 else 16
         per = grid // 4
-        slots = sorted({int(round(n.t / self.beat * per)) for n in self.notes if n.key == "kick" and n.t < 4 * self.beat - 1e-6})
-        return grid, [(s, 1.0 if s % per == 0 else 0.8) for s in slots if s < grid]
+        n_bars = max(1, int(round(self.length / (4 * self.beat))))
+        by_bar = [set() for _ in range(n_bars)]
+        for n in self.notes:
+            if n.key != "kick":
+                continue
+            slot = int(round(n.t / self.beat * per))
+            b, s = divmod(slot, grid)
+            if 0 <= b < n_bars:
+                by_bar[b].add(s)
+        bars, last = [], None
+        for slots in by_bar:
+            if not slots and last is not None:
+                slots = last
+            bars.append([(s, 1.0 if s % per == 0 else 0.8) for s in sorted(slots)])
+            last = slots or last
+        return grid, bars
 
     def subdivision_at(self, t: float) -> int:
         """Subdivisions per beat for chart time t (negative t = count-in uses the first).
@@ -609,9 +627,10 @@ GROOVE_VEL = {"X": 120, "x": 96, "o": 62}      # only X draws as an accent
 HH_LETTERS = {"t": "tight body", "T": "tight edge", "m": "mid body", "M": "mid edge", "a": "open body", "A": "open edge"}
 
 
-def _groove(name, desc, bpm, phrase, bars=8, backing=None):
+def _groove(name, desc, bpm, phrase, bars=8, backing=None, hammer=False):
     """A groove level from `phrase` (list of bar dicts, see GROOVE_KEYS) repeated to `bars`.
-    backing: a style of its own for the music (sounds.make_arrangement's feel), else generic."""
+    backing: a style of its own for the music (sounds.make_arrangement's feel), else generic.
+    hammer: the music's bass and chords play the level's kick figure (Chart.hammer)."""
     beat = 60 / bpm
     notes = []
     for bar in range(bars):
@@ -631,6 +650,7 @@ def _groove(name, desc, bpm, phrase, bars=8, backing=None):
     ch = Chart(name, notes, bpm, desc)
     ch.expression = any(n.art for n in notes)
     ch.backing = backing
+    ch.hammer = hammer
     return ch
 
 
@@ -1115,7 +1135,7 @@ POP_PUNK = [
         {"hh": "a.a.a.a.a.a.a.a.", "kk": _PP_P, "sn": _S24},
         {"hh": "a.a.a.a.a.a.a.a.", "kk": _PP_V, "sn": _S24},
         {"hh": "a.a.a.a.a.a.a.a.", "kk": _PP_P, "sn": _S24},
-    ], backing="punk"),
+    ], backing="punk", hammer=True),
     _groove("5 · Washing the crash", "The chorus rides the left crash on every eighth instead of the hats; the right crash marks the way back to the verse.", 152, [
         _PPV1, _PPP, _PPV, _PPP,
         _PPC, _PPCP, _PPC, _PPCP,

@@ -378,7 +378,8 @@ INTROS = {
     "4 · Tight and open": (
         "Cuatro compases de estrofa con el hi-hat cerrado, cuatro de estribillo con el hi-hat abierto y el pie fuera del pedal; un crash en el cambio, los pushes siguen.",
         ["Se juzga la apertura: cerrado a fondo en la estrofa, bien abierto en el estribillo.",
-         "El cambio de apertura es en el crash: el pie se levanta en el mismo golpe."]),
+         "El cambio de apertura es en el crash: el pie se levanta en el mismo golpe.",
+         "El bajo y los acordes abiertos de la guitarra tocan la figura del bombo, compás por compás: escuchala en la música antes de buscarla con el pie."]),
     "5 · Washing the crash": (
         "El estribillo lava el crash izquierdo en cada corchea en lugar del hi-hat; el crash derecho marca la vuelta a la estrofa.",
         ["Corcheas en el crash: livianas, es un colchón de platillo, no ocho acentos.",

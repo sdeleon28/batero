@@ -416,12 +416,21 @@ STYLES = {
             ("chug", "chug", None, True, False), ("whole", "pad_only", None, False, True),
             ("gallop", "chug", None, True, False), ("pump", "chug", None, False, False),
             ("chug", "chug", None, True, True)]),
+    # Pop punk (the courses, 2026-09-20 rewrite: "make it sound much better and more punk"): a
+    # power-chord guitar (`guitar` below: two gain stages, a box cabinet, a pick scratch) playing
+    # palm-muted eighths with an open chord ringing on every accent ("drive"), every eighth open in
+    # the chorus ("wash") or the accents alone, the band stopping ("figure"); a picked, gritty
+    # bass; a lead in octaves on the same guitar; no pad; the bus saturated (`bus_drive`). The
+    # accents are the bass pattern's slots, or the level's own kick figure, bar by bar, when the
+    # level hammers it (Chart.hammer: bass "kick" everywhere and the last bar of every "drive"
+    # section stops on the figure), so the ear has the feet's rhythm in the music.
     "punk": dict(
-        progressions=("punk",), pad=None, bass="pick", chord="power", lead=None, lead_kind=None,
-        scale="natural", plan=[
-            ("eighths", "strum", None, False, False), ("eighths", "strum", None, False, False),
-            ("pump", "strum", None, False, False), ("sparse", "stab", None, False, False),
-            ("eighths", "strum", None, False, False), ("octave", "strum", None, False, False)]),
+        progressions=("punk",), pad=None, bass="punk", chord="power", lead="octave", lead_kind="riff",
+        scale="pentatonic", guitar=True, bus_drive=1.6, plan=[
+            ("eighths", "drive", None, False, False), ("eighths", "drive", None, True, False),
+            ("octave", "wash", None, True, False), ("sync", "figure", None, False, False),
+            ("eighths", "drive", None, False, False), ("octave", "wash", None, True, False),
+            ("eighths", "drive", None, True, False), ("sync", "figure", None, True, False)]),
     "organ": dict(
         progressions=("soul",), pad="organ", bass="sub", chord="bell", lead="triangle", lead_kind="phrase",
         scale="dorian", plan=[
@@ -531,24 +540,52 @@ def _arp_order(pattern, chord):
 
 
 def _lowpass(sig, n):
-    return np.convolve(sig, np.ones(n) / n, mode="same") if n > 1 else sig
+    """Moving average over n samples, centred, zeros outside (what np.convolve(sig, ones(n) / n,
+    "same") gives), in O(len) through a cumulative sum."""
+    if n <= 1:
+        return sig
+    cs = np.concatenate([np.zeros(1), np.cumsum(sig, dtype=np.float64)])
+    left, right = n // 2, n - n // 2                      # window [i - left, i + right)
+    idx = np.arange(len(sig))
+    lo = np.clip(idx - left, 0, len(sig))
+    hi = np.clip(idx + right, 0, len(sig))
+    return (cs[hi] - cs[lo]) / n
 
 
-def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, feel="straight", rhythm=None):
+def _eq(sig, points):
+    """sig through a gain curve, [(hz, dB), ...] interpolated over log frequency (FFT, zero phase):
+    the guitar's cabinet, the bass amp. Cheap enough per stroke."""
+    n = len(sig)
+    f = np.fft.rfftfreq(n, 1 / SR)
+    gain = 10 ** (np.interp(np.log(np.maximum(f, 1.0)), np.log([p[0] for p in points]), [p[1] for p in points]) / 20)
+    return np.fft.irfft(np.fft.rfft(sig) * gain, n)
+
+
+# The guitar cabinet: lows cut, a presence bump around 3 kHz, the fizz rolled off; the muted
+# stroke darker; the bass amp round with a bump in the low mids for the pick to read.
+CAB_OPEN = [(40, -30), (90, -10), (150, 0), (700, -2), (1500, 0), (3000, 6), (4500, 4), (6500, -4), (9000, -14), (15000, -30)]
+CAB_MUTED = [(40, -30), (90, -10), (150, 0), (700, -1), (1500, -1), (3000, 2), (4500, -2), (6500, -12), (9000, -24), (15000, -40)]
+BASS_AMP = [(30, -6), (60, 0), (150, 0), (700, 3), (1500, -2), (3000, -10), (6000, -30)]
+
+
+def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, feel="straight", rhythm=None, normalise=True):
     """Mono float32 of (intro_bars + bars) bars at bpm: intro (thin) then the arrangement,
     bar 0 of the level at intro_bars * bar seconds. Deterministic per prog_index.
     feel: "straight" (sixteenth grid, style by prog_index) or "triplet" (twelfth grid,
     the shuffle style) for levels whose subdivision is 3; "cumbia" for the cumbia levels;
     a STYLES name ("punk") for the courses, which choose their music; "kick" for the
-    double-kick levels, whose riff is `rhythm` = (grid 16 or 12, [(slot, gain)]), the
-    level's own kick figure (Chart.kick_rhythm)."""
+    double-kick levels, whose riff is `rhythm` = (grid 16 or 12, [[(slot, gain)], ...]), the
+    level's own kick figure bar by bar (Chart.kick_rhythm); with any other style, `rhythm`
+    makes the bass play the figure in every section (Chart.hammer)."""
     rng = np.random.default_rng(prog_index if seed is None else seed)
-    triplet = feel in ("triplet", "sextuplet") or (feel == "kick" and rhythm[0] == 12)
+    triplet = feel in ("triplet", "sextuplet") or (rhythm is not None and rhythm[0] == 12)
     style_name = style_for(prog_index, feel)
     st = CUMBIA_STYLE if feel == "cumbia" else KICK_STYLE if feel == "kick" else SEXTUPLET_STYLE if feel == "sextuplet" else SHUFFLE_STYLE if triplet else STYLES[style_name]
-    bass_patterns = BASS_PATTERNS_TRIPLET if triplet else BASS_PATTERNS
-    if feel == "kick":
-        bass_patterns = dict(bass_patterns, kick=[(e, 0, g) for e, g in rhythm[1]])
+    bass_patterns = dict(BASS_PATTERNS_TRIPLET if triplet else BASS_PATTERNS)
+    figures = None                                          # the kick figure per bar, when the music hammers it
+    if rhythm is not None:
+        figures = rhythm[1] if rhythm[1] and isinstance(rhythm[1][0], list) else [rhythm[1]]
+        figures = [f or [(0, 1.0)] for f in figures]
     stab_rhythms = STAB_RHYTHMS_TRIPLET if triplet else STAB_RHYTHMS
     family = st["progressions"][int(rng.integers(0, len(st["progressions"])))]
     prog = PROGRESSIONS[family][int(rng.integers(0, len(PROGRESSIONS[family])))]
@@ -597,9 +634,13 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, 
 
     # --- bass ----------------------------------------------------------------------
     def bass(t0, root_note, pattern, kind):
-        for e, degree, gain in bass_patterns[pattern]:
+        slots = bass_patterns[pattern]
+        for k, (e, degree, gain) in enumerate(slots):
             f = _midi_hz(root_note + degree)
-            dur = {"whole": bar, "sparse": beat}.get(pattern, 2 * beat / 3 if triplet else beat / 2)
+            if pattern == "kick":                            # the figure: every note held to the next
+                dur = ((slots[k + 1][0] if k + 1 < len(slots) else (12 if triplet else 16)) - e) * step
+            else:
+                dur = {"whole": bar, "sparse": beat}.get(pattern, 2 * beat / 3 if triplet else beat / 2)
             tb = np.arange(int(dur * sr)) / sr
             if kind == "sine":
                 sig = (np.sin(2 * np.pi * f * tb) * 0.8 + np.sin(4 * np.pi * f * tb) * 0.25 + _saw(tb * f) * 0.15) * env_ad(tb, 0.004, 6)
@@ -610,10 +651,14 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, 
             elif kind == "pick":
                 pick = _noise(len(tb), 21) * np.exp(-tb * 400) * 0.5
                 sig = (_lowpass(_saw(tb * f) + 0.4 * _square(tb * f * 0.5), 10) + pick) * env_ad(tb, 0.002, 7)
+            elif kind == "punk":                              # picked and gritty: saw and square at the root through a pedal, held to the next note
+                pick = _noise(len(tb), 21) * np.exp(-tb * 350) * 0.6
+                raw = 0.8 * _saw(tb * f) + 0.5 * _square(tb * f * 1.001) + pick
+                sig = _eq(np.tanh(2.2 * raw), BASS_AMP) * env_ad(tb, 0.002, 3.5, dur)
             else:  # dist: chugging power root, palm-muted
                 raw = _saw(tb * f) + _saw(tb * f * 1.5) * 0.6 + _saw(tb * f * 2) * 0.4
                 sig = _lowpass(np.tanh(3.0 * raw), 14) * env_ad(tb, 0.002, 18 if pattern in ("chug", "gallop", "pump", "kick") else 6)
-            add(t0 + e * step, sig, 0.55 * gain)
+            add(t0 + e * step, sig, (0.6 if kind == "punk" else 0.55) * gain)
 
     # --- chord parts -----------------------------------------------------------------
     def pluck_tone(f, ta, kind):
@@ -660,20 +705,43 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, 
                 tick = np.diff(_noise(len(tt), 700 + bar_index * 8 + q * 2 + k), prepend=0.0) * np.exp(-tt * 140)
                 add(t0 + q * beat + k * step, tick, 0.07 * gain)
 
-    def power(t0, root_note, pattern_or_rhythm, strum):
-        """Distorted power chord: root, fifth, octave through tanh; on the bass rhythm
-        (chug) or on every eighth (strum)."""
-        steps = [(e * 2, 1.0 if e % 2 == 0 else 0.8) for e in range(8)] if strum else \
-                [(e, g) for e, _, g in bass_patterns[pattern_or_rhythm]]
-        for e, gain in steps:
-            dur = beat / 2 if strum else step * 1.6
+    def power(t0, root_note, pattern):
+        """Distorted power chord: root, fifth, octave through tanh, on the bass rhythm (chug)."""
+        for e, _, gain in bass_patterns[pattern]:
+            dur = step * 1.6
             ta = np.arange(int(max(dur, 0.12) * sr)) / sr
             raw = np.zeros_like(ta)
             for m in (root_note, root_note + 7, root_note + 12):
                 f = _midi_hz(m)
                 raw += _saw(ta * f * 1.002) + _saw(ta * f * 0.998)
-            sig = _lowpass(np.tanh(2.2 * raw), 6) * env_ad(ta, 0.003, 4 if strum else 16, dur)
+            sig = _lowpass(np.tanh(2.2 * raw), 6) * env_ad(ta, 0.003, 16, dur)
             add(t0 + e * step, sig, 0.10 * gain)
+
+    def guitar(t0, root_note, mode, accents, seed):
+        """The punk guitar: a power chord (root, fifth, octave, two detuned saws each) with a
+        pick scratch, through two gain stages with the lows cut between them and a box cabinet.
+        "drive": palm-muted eighths, an open chord ringing until the next stroke on every accent;
+        "wash": every eighth open (the chorus); "figure": the accents alone, the band stopping
+        with the kick. accents: sixteenth slots (the kick figure when the level hammers it)."""
+        acc = sorted(set(accents))
+        slots = acc if mode == "figure" else sorted(set(range(0, 16, 2)) | set(acc))
+        for k, e in enumerate(slots):
+            open_ = mode == "wash" or e in acc
+            gap = ((slots[k + 1] if k + 1 < len(slots) else 16) - e) * step
+            dur = gap if open_ else min(0.11, gap)
+            ta = np.arange(int((dur + 0.02) * sr)) / sr
+            raw = np.zeros_like(ta)
+            for m in (root_note, root_note + 7, root_note + 12):
+                f = _midi_hz(m)
+                raw += _saw(ta * f * 1.0025) + _saw(ta * f * 0.9975)
+            x = raw / 6 + _noise(len(ta), seed + k) * np.exp(-ta * 500) * 0.8
+            x = np.tanh(3.5 * x)                             # the pedal
+            x = x - _lowpass(x, 300)                         # nothing under ~150 Hz into the amp
+            x = np.tanh(2.5 * x)                             # the amp
+            x = _eq(x, CAB_OPEN if open_ else CAB_MUTED)     # the cabinet, a muted stroke darker
+            env = np.minimum(1.0, ta / (0.003 if open_ else 0.002)) * np.exp(-ta * (0.9 if open_ else 22)) \
+                * np.minimum(1.0, np.maximum(0.0, (dur - ta) / 0.02))
+            add(t0 + e * step, x * env, 0.42 if open_ else 0.25)
 
     # --- lead ------------------------------------------------------------------------
     def tone(f, tl, kind):
@@ -685,6 +753,8 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, 
             sig = 2 / np.pi * np.arcsin(np.sin(ph))
         elif kind == "square":
             sig = _lowpass(_square(tl * f), 3) * 0.7
+        elif kind == "octave":                             # the pop punk lead: octaves on the distorted guitar
+            sig = _eq(np.tanh(2.5 * (_saw(tl * f * 1.003) + _saw(tl * f * 0.997) + 0.8 * _saw(tl * f * 2))), CAB_OPEN) * 0.8
         else:  # lead_saw
             sig = _lowpass(_saw(tl * f) + 0.5 * _saw(tl * f * 1.005), 5) * 0.8
         return np.interp(tl * vib, tl, sig) if len(tl) > 1 else sig
@@ -699,8 +769,13 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, 
         tones = {m % 12 for m in chord}
         if kind == "riff":
             if riff is None:                                  # (slot, scale degree index, length in sixteenths)
-                slots = sorted(rng.choice(16, size=int(rng.integers(4, 7)), replace=False))
-                riff = [(int(sl), int(rng.integers(0, len(scale))), 2) for sl in slots]
+                if st["lead"] == "octave":                    # on the eighths, legato: each note held to the next
+                    slots = sorted(2 * int(x) for x in rng.choice(8, size=int(rng.integers(3, 6)), replace=False))
+                    riff = [(sl, int(rng.integers(0, len(scale))), (slots[k + 1] if k + 1 < len(slots) else 16) - sl)
+                            for k, sl in enumerate(slots)]
+                else:
+                    slots = sorted(rng.choice(16, size=int(rng.integers(4, 7)), replace=False))
+                    riff = [(int(sl), int(rng.integers(0, len(scale))), 2) for sl in slots]
             events = [(sl * 0.25, d, ln * 0.25) for sl, d, ln in riff]
         elif kind == "long":
             events = [(0, None, 2.0), (2, None, 2.0)] if bar_in_section % 2 == 0 else [(0, None, 4.0)]
@@ -723,17 +798,26 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, 
             f = _midi_hz(scale[pos])
             dur = length * beat
             tl = np.arange(int(dur * sr)) / sr
-            env = np.minimum(1.0, tl / 0.02) * np.exp(-tl * (2.5 if kind != "long" else 0.6)) * np.minimum(1.0, np.maximum(0.0, (dur - tl) / 0.05))
-            add(t0 + start * beat, tone(f, tl, st["lead"]) * env, 0.13 if kind != "long" else 0.11)
+            decay = 0.6 if kind == "long" else 1.0 if st["lead"] == "octave" else 2.5
+            env = np.minimum(1.0, tl / 0.02) * np.exp(-tl * decay) * np.minimum(1.0, np.maximum(0.0, (dur - tl) / 0.05))
+            add(t0 + start * beat, tone(f, tl, st["lead"]) * env, 0.3 if st["lead"] == "octave" else 0.13 if kind != "long" else 0.11)
 
     plan = st["plan"]
+    if figures is not None and feel != "kick":               # the level hammers its kick figure: the bass plays it in every section
+        plan = [("kick",) + tuple(p[1:]) for p in plan]
     for i in range(total_bars):
         b = i - intro_bars                                    # level bar, negative in the intro
         t0 = i * bar
         root, quality = prog[b % len(prog)]
         root = (root + transpose) % 12
+        if figures is not None:
+            bass_patterns["kick"] = [(e, 0, g) for e, g in figures[b % len(figures)]]
         if b >= 0:
             bass_pat, part, part_pat, lead_on, pad_on = plan[(b // SECTION_BARS) % len(plan)]
+            if figures is not None and part == "drive" and b % SECTION_BARS == SECTION_BARS - 1:
+                part = "figure"                               # the band stops on the figure before every section
+        elif st.get("guitar"):                                # the count-in: one open chord ringing on its 1
+            bass_pat, part, part_pat, lead_on, pad_on = ("whole", "intro", None, False, False)
         else:
             bass_pat, part, part_pat, lead_on, pad_on = ("sparse", None, None, False, st["pad"] is not None)
         inversion = (b // len(prog)) % 3 if b >= 0 and quality != "5" else 0
@@ -741,24 +825,31 @@ def make_arrangement(bpm, prog_index=0, bars=8, intro_bars=0, sr=SR, seed=None, 
         bass_root = _chord_notes(root, quality)[0] - 24
         if pad_on and st["pad"]:
             pad(t0, chord, st["pad"])
-        if part != "pad_only":
+        if part != "pad_only" and st["bass"]:
             bass(t0, bass_root, bass_pat, st["bass"])
         if part == "arp":
             arp(t0, chord, part_pat, st["chord"] if st["chord"] != "power" else "pluck")
         elif part == "stab":
             stab(t0, chord, st["chord"] if st["chord"] != "power" else "pluck", stab_rhythm)
         elif part == "chug":
-            power(t0, bass_root + 12, bass_pat, strum=False)
-        elif part == "strum":
-            power(t0, bass_root + 12, None, strum=True)
+            power(t0, bass_root + 12, bass_pat)
+        elif part in ("drive", "wash", "figure"):
+            accents = [e for e, _, g in bass_patterns[bass_pat] if bass_pat == "kick" or e % 4 == 0 or g >= 0.9]
+            guitar(t0, bass_root + 12, part, accents, seed=1000 + i * 16)
+        elif part == "intro":
+            guitar(t0, bass_root + 12, "figure", [0], seed=1000 + i * 16)
         if lead_on and st["lead"]:
             lead(t0, root, quality, chord, b % SECTION_BARS, st["lead_kind"])
         if st.get("guiro") and b >= 0:
             guiro(t0, i)
 
     out = out[:n]
-    out = out / (np.max(np.abs(out)) or 1.0) * 0.8
-    return out.astype(np.float32)
+    if not normalise:                                         # the raw sum, for measuring the parts against each other
+        return out.astype(np.float32)
+    out = out / (np.max(np.abs(out)) or 1.0)
+    if st.get("bus_drive"):                                   # the bus saturated: denser, the way the genre is mixed
+        out = np.tanh(st["bus_drive"] * out) / np.tanh(st["bus_drive"])
+    return (out * 0.8).astype(np.float32)
 
 
 def make_backing(bpm, prog_index=0, bars=4, sr=SR):

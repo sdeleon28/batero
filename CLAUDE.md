@@ -305,13 +305,42 @@ of levels plus one `Course(...)` in `COURSES`; nothing else.
 Asked for 2026-09-20 (the gallop under a synth pop backing drawn by index "had nothing to do
 with it"): `sounds.KICK_STYLE`, the metal timbres and progressions, with the bass and the power
 chords hammering the level's own kick figure bar after bar, so the ear has the feet's rhythm in
-the music before the feet find it. `Chart.kick_rhythm()` reads the first bar's kick notes into
-(grid 16 or 12, [(slot, gain)]) and `App.tracks_for` passes it to `render_backing_track` /
+the music before the feet find it. `Chart.kick_rhythm()` reads the kick notes of every bar into
+(grid 16 or 12, [[(slot, gain)], ...]) and `App.tracks_for` passes it to `render_backing_track` /
 `make_arrangement` as `rhythm`; the plan only brings the pad and the lead in and out. The gallop
 and its two preparatory levels name it (`_kick_ostinato(..., backing="kick")`: "Double kick
 pairs, left first" and "Double kick gallop tail", added 2026-09-20 because the gallop's closing
 right-foot sixteenth came 30 ms early over 53 runs and knowing it did not fix it); any other
 double-kick level is the same argument.
+
+## The music hammers the kick figure (`Chart.hammer`)
+
+Asked for 2026-09-20 for "4 · Tight and open" ("que el backing ayude a memorizar el patrón de
+bombos"): `_groove(..., hammer=True)` makes the style's bass play the level's kick figure in every
+section and, in the punk style, the guitar's open chords accent it and the last bar of every
+"drive" section stops on it. `Chart.kick_rhythm()` returns the figure **per bar** (grid 16 or 12,
+one slot list per bar of the level, a bar without kicks repeating the last one), so the push on
+the & of 4 every second bar is played as written; `make_arrangement` takes it as `rhythm` and
+indexes it by bar (the double-kick levels' `backing="kick"` is the same mechanism on the metal
+style). Verified by onset detection on the bass alone: 28 kicks in the chart, an onset within
+30 ms of every one, none elsewhere. Any other level is the one argument.
+
+## The punk style (`sounds.STYLES["punk"]`, rewritten 2026-09-20)
+
+"Make it sound much better and more punk": `guitar()` in `make_arrangement` is a power chord
+(root, fifth, octave, two detuned saws each, a pick scratch) through two tanh stages with the
+lows cut between them and a cabinet EQ (`_eq`, an FFT gain curve: `CAB_OPEN` with a presence
+bump at 3 kHz, `CAB_MUTED` darker). Three parts: "drive" (palm-muted eighths, an open chord
+ringing until the next stroke on every accent), "wash" (every eighth open, the chorus), "figure"
+(the accents alone, the band stopping). The accents are the bass pattern's slots, or the kick
+figure when the level hammers it. Bass kind "punk" (saw and square through a pedal, `BASS_AMP`,
+held to the next note), a lead in octaves on the same guitar (`tone` kind "octave", a legato riff
+on the eighths), the count-in one open chord ringing on its 1, and the bus through
+`tanh(bus_drive)`. Balance measured on level 4 at mix level (RMS over the level): guitar -14,
+bass -17, lead -17 while it plays; energy 2..6 kHz went from 1 % to 10 % (the box-filter cabinet
+had closed at 2 kHz). `_lowpass` is now a cumulative-sum box filter (O(n), identical output).
+`make_arrangement(..., normalise=False)` returns the raw sum, for measuring parts against each
+other; a style with `bass=None` has no bass.
 
 ## Scroll speed (D): fixed or following the tempo
 
