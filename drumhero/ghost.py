@@ -31,6 +31,21 @@ beater stays on the head and none of these would sound. Measured over every run 
 strokes): no real kick ever came within 70 ms of another, the fastest kick figure in a chart is
 94 ms apart (sixteenths at 160 bpm), and a real second kick within 250 ms is never under 60 %
 of the first (a soft real & at 43 came 300 ms after a 103).
+
+The snare (2026-09-22, "crosstalk in the snare": a hard stroke on the pad is heard a second
+time 41..60 ms later at 30..60 % of it, on the same zone). The median delay is 51 ms on every
+one of the thirteen days of the MIDI trace, and the median ratio 0.40..0.45: a pad retriggering,
+not a hand. It comes with the hard strokes (that day: 2.5..3.3 % of the strokes at 80 and over,
+none under 80) and it is growing (0.04 % of the day's snare strokes on 09-20, 1.78 % on 09-21,
+2.65 % on 09-22, the highest in the trace), so the module's retrigger-cancel deserves a look
+too. The rim (40) does the same to itself, 21..50 ms later at 0.5..0.6; head and rim do not
+ring each other (in that day's 1106 snare notes, not one 38/40 pair within 200 ms), so each
+zone keeps its own reference. Over the whole trace [(70, 0.6)] drops 367 strays and 81 notes
+the judge had accepted, but 78 of those 81 are followed within 200 ms by a louder snare STRAY:
+the echo had taken the chart note and the real stroke that followed was counted a stray, so
+dropping it gives the note back (seen whole on the six stroke roll at 60 bpm: accent, echo 51 ms
+later judged OK, the next real stroke 100 ms after that a STRAY). The fastest snare figure any
+chart writes is 89 ms apart (16 - Pop punk anthem, written tempo), so 70 ms does not touch it.
 """
 import time
 from collections import deque
@@ -67,6 +82,14 @@ ZONE_CROSSTALK = [(115, 0.70)]
 # fastest chart figure (94 ms); 0.4 within 250 ms keeps a soft real double (never under 0.6).
 KICK_NOTES = {36}
 KICK_BOUNCE = [(80, 0.6), (250, 0.4)]
+# The snare pad heard twice: the same zone again 41..60 ms after a hard stroke at 0.30..0.60 of
+# it (2026-09-22; the median delay is 51 ms on every day of the trace). Same shape as the kick's,
+# (window ms, max velocity ratio to the last real stroke of that zone) tiers, the reference
+# staying the last real stroke so a chain falls whole. 70 ms is under the fastest snare figure
+# any chart writes (89 ms); 0.6 is above every echo measured and under the softest real stroke
+# that follows one that close.
+SNARE_NOTES = {38, 40}          # head and rim, each zone its own reference
+SNARE_BOUNCE = [(70, 0.6)]
 
 PEDAL_CLOSED_CC = 90         # fully closed on this pedal (0 = fully open)
 TIGHT_MIN = 80               # closedness >= this -> tight
@@ -96,6 +119,7 @@ class GhostFilter:
         self.last_stroke = None          # (t, note, velocity, zone, openness) of the last real hi-hat stroke
         self.last_ghost = None           # (t, note, velocity, why)
         self.last_kick = None            # (t, velocity) of the last real kick
+        self.last_snare = {}             # note -> (t, velocity) of the last real stroke on that zone
 
     def control_change(self, control, value, t=None):
         if control != PEDAL_CC:
@@ -131,6 +155,17 @@ class GhostFilter:
                             return self._flag("beater bounce", t, note, velocity)
                         break
             self.last_kick = (t, velocity)
+            return None
+        if note in SNARE_NOTES:
+            ls = self.last_snare.get(note)
+            if ls:
+                dt = (t - ls[0]) * 1000
+                for window_ms, ratio in SNARE_BOUNCE:
+                    if dt <= window_ms:
+                        if velocity <= ratio * ls[1]:
+                            return self._flag("snare rebound", t, note, velocity)
+                        break
+            self.last_snare[note] = (t, velocity)
             return None
         if note not in HIHAT_STICK_NOTES:
             return None

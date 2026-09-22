@@ -2714,7 +2714,8 @@ class PlayScreen(Screen):
                              "pedal_motion_velocity_min": GH.PEDAL_MOTION_VELOCITY_MIN,
                              "pedal_settle_ms": GH.PEDAL_SETTLE_MS, "pedal_settle_velocity_max": GH.PEDAL_SETTLE_VELOCITY_MAX,
                              "crosstalk_one_stroke_ms": GH.CROSSTALK_ONE_STROKE_MS, "crosstalk_near_ms": GH.CROSSTALK_NEAR_MS, "crosstalk_near_velocity_max": GH.CROSSTALK_NEAR_VELOCITY_MAX,
-                             "zone_crosstalk": GH.ZONE_CROSSTALK, "any_min_velocity": GH.ANY_MIN_VELOCITY},
+                             "zone_crosstalk": GH.ZONE_CROSSTALK, "kick_bounce": GH.KICK_BOUNCE,
+                             "snare_bounce": GH.SNARE_BOUNCE, "any_min_velocity": GH.ANY_MIN_VELOCITY},
         })
         for name, track in app.tracks_for(self.chart, app.prog_for(cat, index)).items():
             self.game.set_track(name, track, enabled=(app.backing_on if name == "backing" else True))
