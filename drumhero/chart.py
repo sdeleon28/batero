@@ -1172,7 +1172,7 @@ POP_PUNK = [
         _PPC, _PPCP, _PPC, _PPCP,
         {"cr": _CR1, "hh": _H8_2, "kk": _PP_V, "sn": _S24}, _PPP, _PPV, _PPP,
         _PPC, _PPCP, _PPC, _PPCP,
-    ], bars=16, backing="punk", mirror="crash"),
+    ], bars=16, backing="punk", hammer=True, mirror="crash"),
     _groove("6 · Snare on the &", "The skank: kick on every beat, snare on every &, hats along. The verse skanks, the chorus washes the crash with the pushes.", 152, [
         _SKANK1, _SKANK, _SKANK, _SKANK,
         _PPC, _PPCP, _PPC, _PPCP,

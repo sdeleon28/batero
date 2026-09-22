@@ -385,6 +385,7 @@ INTROS = {
         ["Corcheas en el crash: livianas, es un colchón de platillo, no ocho acentos.",
          "Dieciséis compases: estrofa, estribillo, y el crash derecho avisa la vuelta.",
          "Después del crash del 1 no hay hi-hat en el & de 1: el platillo suena hasta el backbeat y la mano llega al hi-hat junto con el redoblante.",
+         "El bajo y la guitarra tocan la figura del bombo, compás por compás, como en el nivel 4: el push está en la música.",
          "El mismo nivel existe lavando el crash derecho: los toms o las flechas en la lista eligen el lado."]),
     "6 · Snare on the &": (
         "El skank: bombo en cada tiempo, redoblante en cada &, hi-hat acompañando. La estrofa hace el skank, el estribillo lava el crash con los pushes.",

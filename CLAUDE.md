@@ -318,7 +318,10 @@ double-kick level is the same argument.
 Asked for 2026-09-20 for "4 · Tight and open" ("que el backing ayude a memorizar el patrón de
 bombos"): `_groove(..., hammer=True)` makes the style's bass play the level's kick figure in every
 section and, in the punk style, the guitar's open chords accent it and the last bar of every
-"drive" section stops on it. `Chart.kick_rhythm()` returns the figure **per bar** (grid 16 or 12,
+"drive" section stops on it (also on "5 · Washing the crash" since 2026-09-21: the level keeps the
+same push figure and without the hammer the aid vanished on the level after the one that taught
+it; 56 kicks in the chart, a bass onset within 12 ms of every one, none elsewhere. The rest of the
+pop punk course does not hammer). `Chart.kick_rhythm()` returns the figure **per bar** (grid 16 or 12,
 one slot list per bar of the level, a bar without kicks repeating the last one), so the push on
 the & of 4 every second bar is played as written; `make_arrangement` takes it as `rhythm` and
 indexes it by bar (the double-kick levels' `backing="kick"` is the same mechanism on the metal
