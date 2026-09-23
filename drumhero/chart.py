@@ -1138,6 +1138,15 @@ _RIDE = {"rd": _H8, "kk": _KD, "sn": _S24}
 _RIDE_T = {"rd": "x.x.x.x.x.x.x...", "kk": _KD, "sn": _S24, "t1": "..............x."}
 _RIDE1 = {"cr": _CR1, "rd": _H8C, "kk": _KD, "sn": _S24}
 
+def _drill(name, desc, bpm, groove, fill, bars=16):
+    """A fill drill: two bars looping, the groove bar and then the fill, eight times over, so one
+    fill is learnt on its own before the level that puts four of them in a song (asked for
+    2026-09-22: the vocabulary by repetition, one fill per level, "y despues incorporarlos al
+    nivel"). Both bars are the ones the level that uses the fill writes, so what the hands learn
+    here transfers note for note."""
+    return _groove(name, desc, bpm, [groove, fill], bars=bars, backing="punk")
+
+
 POP_PUNK = [
     _groove("1 · Driving eighths", "The pop punk pulse: hats on every eighth, kick on 1 and 3, snare on 2 and 4, a crash opening every four bars. Fast and even.", 140, [
         {"cl": _CR1, "hh": _H8C, "kk": "x.......x.......", "sn": _S24},
@@ -1179,59 +1188,85 @@ POP_PUNK = [
         _SKANK1, _SKANK, _SKANK, _SKANK,
         _PPC, _PPCP, _PPC, _PPCP,
     ], bars=16, backing="punk"),
-    _groove("7 · Eighth-note fills", "Every fourth bar ends in a fill on the eighths: two snares on 4; snare, rack and floor down the kit over 3 and 4; the crash lands on the 1 after it.", 152, [
+    # The two eighth-note fills, one level each, before the level that plays both (2026-09-22).
+    _drill("7 · Drill: two snares on 4", "The first fill alone, every second bar: the hats stop after the & of 3, two snares fall on the eighths of 4, the crash lands on the 1 after it.",
+           152, _PPV1, _pp(_PPP, **_F_SN8)),
+    _drill("8 · Drill: down the kit", "The same two bars with the fill walking down the kit: snare on 3 and its &, rack on 4, floor on the & of 4, the crash on the 1.",
+           152, _PPV1, _pp(_PPP, **_F_TOMS8)),
+    _groove("9 · Eighth-note fills", "Every fourth bar ends in a fill on the eighths: two snares on 4; snare, rack and floor down the kit over 3 and 4; the crash lands on the 1 after it.", 152, [
         _PPV1, _PPP, _PPV, _pp(_PPP, **_F_SN8),
         _PPV1, _PPP, _PPV, _pp(_PPP, **_F_TOMS8),
         _PPV1, _PPP, _PPV, _pp(_PPP, **_F_SN8),
         _PPV1, _PPP, _PPV, _pp(_PPP, **_F_TOMS8),
     ], bars=16, backing="punk"),
-    _groove("8 · Sixteenth fills", "The fills go to sixteenths: four snares on 4; snare and rack in pairs; the walk down snare, rack, floor over 3 and 4; the whole kit from the 2.", 148, [
+    # The four sixteenth fills, one level each, before the level that plays all four.
+    _drill("10 · Drill: four snares on 4", "The sixteenths alone: four snares on the 4, the hats stopping after the & of 3, the crash on the 1 after them. Every second bar.",
+           148, _PPV1, _pp(_PPP, **_F_SN16)),
+    _drill("11 · Drill: snare and rack pairs", "The same four sixteenths split over two drums: two snares on the 4, two racks on its &, every second bar.",
+           148, _PPV1, _pp(_PPP, **_F_SNT)),
+    _drill("12 · Drill: the walk down", "Eight sixteenths in a row over 3 and 4: four snares, two racks, two floors, every second bar.",
+           148, _PPV1, _pp(_PPP, **_F_WALK)),
+    _drill("13 · Drill: the whole kit", "Three beats of fill: snare on 2, rack on 3, floor on 4, four sixteenths each, the hats stopping on the & of 1.",
+           148, _PPV1, _pp(_PPP, **_F_KIT)),
+    _groove("14 · Sixteenth fills", "The fills go to sixteenths: four snares on 4; snare and rack in pairs; the walk down snare, rack, floor over 3 and 4; the whole kit from the 2.", 148, [
         _PPV1, _PPP, _PPV, _pp(_PPP, **_F_SN16),
         _PPV1, _PPP, _PPV, _pp(_PPP, **_F_SNT),
         _PPV1, _PPP, _PPV, _pp(_PPP, **_F_WALK),
         _PPV1, _PPP, _PPV, _pp(_PPP, **_F_KIT),
     ], bars=16, backing="punk"),
-    _groove("9 · Crash on the &", "The right crash lands with the kick on the & of 4 of bars 2 and 4, ahead of the bar line; the left crash answers on the 1. Fills stay.", 156, [
+    _groove("15 · Crash on the &", "The right crash lands with the kick on the & of 4 of bars 2 and 4, ahead of the bar line; the left crash answers on the 1. Fills stay.", 156, [
         _PPV1, _PPV_AND, _PPV1, _pp(_PPV_AND, **_F_SNT),
         _PPV1, _PPV_AND, _PPV1, _pp(_PPV_AND, **_F_WALK),
     ], backing="punk"),
-    _groove("10 · Stabs", "Stop time: the band hits on 1 and the & of 2 and the drums hit with it, kick and both crashes together, nothing between; a snare run on 4 brings the groove back.", 156, [
+    _groove("16 · Stabs", "Stop time: the band hits on 1 and the & of 2 and the drums hit with it, kick and both crashes together, nothing between; a snare run on 4 brings the groove back.", 156, [
         _PPV1, _PPP, _PPV, {**_STAB, **_F_RUN},
         _PPV1, _PPV_AND, _PPV1, {**_STAB, "sn": "..........xxxxxx"},
         _PPC, _PPCP, _PPC, {**_STAB, **_F_RUN},
         _PPC, _PPC_AND, _PPC, {**_STAB, "sn": "..........xxxxxx"},
     ], bars=16, backing="punk"),
-    _groove("11 · Half-time verse", "The verse sits in half time, snare on 3 and kick on 1 and the & of 2; the chorus doubles back to the backbeat on the crash, the right crash on the & of 4.", 160, [
+    _groove("17 · Half-time verse", "The verse sits in half time, snare on 3 and kick on 1 and the & of 2; the chorus doubles back to the backbeat on the crash, the right crash on the & of 4.", 160, [
         _HT1, _HT, _HT, _pp(_HT, **{"hh": "x.x.x.x.x.x.....", "sn": "........X...xxxx"}),
         _PPC, _PPC_AND, _PPC, _pp(_PPC_AND, **{"cl": "x.x.x.x.x.x.x...", "sn": "....X.......xx.."}),
         _HT1, _HT, _HT, _pp(_HT, **{"hh": "x.x.x.x.x.x.....", "sn": "........X...xxxx"}),
         _PPC, _PPC_AND, _PPC, _pp(_PPC_AND, **{"cl": "x.x.x.x.x.x.x...", "sn": "....X.......xx.."}),
     ], bars=16, backing="punk"),
-    _groove("12 · The build", "Half-time verse, then the pre-chorus: snare eighths growing from ghosts to accents over the kick on the beats, sixteenths in the last bar; the chorus lands on the crash.", 160, [
+    _groove("18 · The build", "Half-time verse, then the pre-chorus: snare eighths growing from ghosts to accents over the kick on the beats, sixteenths in the last bar; the chorus lands on the crash.", 160, [
         _HT1, _HT, _HT, _pp(_HT, **{"hh": "x.x.x.x.x.x.....", "sn": "........X...xxxx"}),
         *_BUILD,
         _PPC, _PPCP, _PPC, _PPC_AND,
         _PPC, _PPCP, _PPC, _pp(_PPCP, **{"cl": "x.x.x.x.x.x.....", "sn": "....X.......xxxx"}),
     ], bars=16, backing="punk"),
-    _groove("13 · Kick doubles", "Two kicks in a row on the sixteenths, the & a of 1 and of 3, single pedal, under the hats; the pushes and the sixteenth fills return.", 150, [
+    # "Kick doubles" and "Around the kit" are the beats course's 19 and 25: the names here say what
+    # the punk level does with them (level names are unique across the game).
+    _groove("19 · Doubles under the push", "Two kicks in a row on the sixteenths, the & a of 1 and of 3, single pedal, under the hats; the pushes and the sixteenth fills return.", 150, [
         _KDV1, _KDP_B, _KDV, _pp(_KDP_B, **_F_SN16),
         _KDV1, _KDP_B, _KDV, _pp(_KDP_B, **_F_WALK),
         _KDV1, _KDP_B, _KDV, _pp(_KDP_B, **_F_SNT),
         _KDV1, _KDP_B, _KDV, _pp(_KDP_B, **_F_KIT),
     ], bars=16, backing="punk"),
-    _groove("14 · Ride bridge", "The bridge moves the right hand to the ride over the kick doubles, a rack tom on the & of 4 every other bar; the chorus comes back on the crash.", 160, [
+    _groove("20 · Ride bridge", "The bridge moves the right hand to the ride over the kick doubles, a rack tom on the & of 4 every other bar; the chorus comes back on the crash.", 160, [
         _RIDE1, _RIDE_T, _RIDE, _RIDE_T,
         _RIDE1, _RIDE_T, _RIDE, _pp(_RIDE, **{"rd": "x.x.x.x.........", "sn": "....X...xxxx....", "t1": "............xx..", "ft": "..............xx"}),
         _PPC, _PPCP, _PPC, _PPC_AND,
         _PPC, _PPCP, _PPC, _pp(_PPCP, **{"cl": "x.x.............", "sn": "....xxxx........", "t1": "........xxxx....", "ft": "............xxxx"}),
     ], bars=16, backing="punk"),
-    _groove("15 · Around the kit", "Whole-bar fills every fourth bar: sixteenth singles snare, rack, floor, floor; toms on the eighths with snare pairs between; kick and snare in pairs; both crashes on the 4 to close.", 150, [
+    # The four whole-bar fills, one level each, over the kick doubles groove they live in.
+    _drill("21 · Drill: around the kit", "A whole bar of fill every second bar: sixteenth singles, snare on 1, rack on 2, floor on 3 and 4, over the kick doubles.",
+           150, _KDV1, {"kk": "x...............", "sn": "xxxx............", "t1": "....xxxx........", "ft": "........xxxxxxxx"}),
+    _drill("22 · Drill: toms on the eighths", "The whole-bar fill on the eighths: a tom with the kick on every beat, rack then floor, two snares between each pair.",
+           150, _KDV1, {"kk": "x...x...x...x...", "sn": ".xx..xx..xx..xx.", "t1": "x...x...........", "ft": "........x...x..."}),
+    _drill("23 · Drill: kick and snare pairs", "Feet and hands trading sixteenth pairs through the whole bar: two kicks, two snares, four times over.",
+           150, _KDV1, {"kk": "xx..xx..xx..xx..", "sn": "..xx..xx..xx..xx"}),
+    # The closing fill keeps the 1 empty, so the groove bar of this one carries no crash.
+    _drill("24 · Drill: crashes to close", "The fill that ends a song: snare, rack and floor over 1, 2 and 3, both crashes with the kick on the 4, and the 1 after it left empty.",
+           150, _KDV, {"kk": "x...........x...", "sn": "xxxx............", "t1": "....xxxx........", "ft": "........xxxx....", "cl": "............x...", "cr": "............x..."}),
+    _groove("25 · Whole-bar fills", "Whole-bar fills every fourth bar: sixteenth singles snare, rack, floor, floor; toms on the eighths with snare pairs between; kick and snare in pairs; both crashes on the 4 to close.", 150, [
         _KDV1, _KDP_B, _KDV, {"kk": "x...............", "sn": "xxxx............", "t1": "....xxxx........", "ft": "........xxxxxxxx"},
         _KDV1, _KDP_B, _KDV, {"kk": "x...x...x...x...", "sn": ".xx..xx..xx..xx.", "t1": "x...x...........", "ft": "........x...x..."},
         _KDV1, _KDP_B, _KDV, {"kk": "xx..xx..xx..xx..", "sn": "..xx..xx..xx..xx"},
         _KDV1, _KDP_B, _KDV, {"kk": "x...........x...", "sn": "xxxx............", "t1": "....xxxx........", "ft": "........xxxx....", "cl": "............x...", "cr": "............x..."},
     ], bars=16, backing="punk"),
-    _groove("16 · Pop punk anthem", "Thirty-two bars with everything: a skank intro with stabs, a verse on the pushes with fills, the build, a chorus washing the crash with the & crashes, a half-time bridge on the ride, the last chorus, both crashes to close.", 168, [
+    _groove("26 · Pop punk anthem", "Thirty-two bars with everything: a skank intro with stabs, a verse on the pushes with fills, the build, a chorus washing the crash with the & crashes, a half-time bridge on the ride, the last chorus, both crashes to close.", 168, [
         _SKANK1, _SKANK, _SKANK, {**_STAB, **_F_RUN},                                         # intro
         _PPV1, _PPP, _PPV, _pp(_PPP, **_F_SN16),                                             # verse
         _PPV1, _PPP, _PPV, _pp(_PPP, **_F_WALK),
@@ -1245,7 +1280,7 @@ POP_PUNK = [
 ]
 
 COURSES = [
-    Course("course:pop-punk", "Pop punk", "the driving eighths, the push, the crash wash, the skank, stabs, the build, half time, kick doubles; fills from eighths to the whole kit",
+    Course("course:pop-punk", "Pop punk", "the driving eighths, the push, the crash wash, the skank, stabs, the build, half time, kick doubles; fills from eighths to the whole kit, each one drilled on its own before the level that plays it",
            POP_PUNK),
 ]
 COURSE = {c.key: c for c in COURSES}

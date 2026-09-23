@@ -294,11 +294,26 @@ which opens a `ListScreen` on the course's key; `App.categories()` is `kick`, `s
 course keys, `App.items_for(key)` its levels, `App.prog_for` the backing seed (each course its
 own hundred). Level names are unique across the game (asserted at import): progress, the run
 logs and the coach's playlists are keyed by them. The first course is **Pop punk**
-(`POP_PUNK`, 16 levels, 140..168 bpm written, the style at 160..190 with `]`), each level
+(`POP_PUNK`, 26 levels, 140..168 bpm written, the style at 160..190 with `]`), each level
 keeping what the previous taught: eighths, four on the floor, the push, tight/open hats, the
 crash wash, the skank, fills from eighths to the whole kit, the & crash, stabs, half time, the
-build, kick doubles, the ride bridge, around the kit, a 32-bar anthem. Adding a genre: a list
-of levels plus one `Course(...)` in `COURSES`; nothing else.
+build, kick doubles, the ride bridge, the whole-bar fills, a 32-bar anthem. Adding a genre: a
+list of levels plus one `Course(...)` in `COURSES`; nothing else.
+
+**A fill is drilled before it is used** (asked for 2026-09-22, "aprender el vocabulario antes
+de aplicarlo a través de la repetición", one level per fill): every fill the course introduces
+gets a `_drill(...)` level of its own ahead of the level that plays it — two bars looping
+sixteen bars long, the groove bar the fill lives in and then the fill, eight repetitions, the
+two bars copied from the level that uses them so the hands learn them note for note. The
+level's eight transport phrases are one cell each, so `l11` loops a single groove + fill.
+Levels 7..8 drill the two eighth-note fills of 9, levels 10..13 the four sixteenth fills of 14,
+levels 21..24 the four whole-bar fills of 25 over the kick-doubles groove (24's groove bar
+carries no crash: its fill's crashes land on the 4 and must ring over the 1). Everything from
+the old level 7 on moved up ten places; the old names map to the new ones in
+`kit.PROGRESS_MIGRATIONS` (`stats.per_level` applies the same map, so the run logs written
+under an old name stay with the level), and the two whose new number collided with the beats
+course were renamed: "13 · Kick doubles" is "19 · Doubles under the push" and
+"15 · Around the kit" is "25 · Whole-bar fills". A new fill in any course wants the same pair.
 
 ## The double-kick levels' backing (`Chart.backing == "kick"`)
 

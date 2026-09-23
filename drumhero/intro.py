@@ -391,44 +391,95 @@ INTROS = {
         "El skank: bombo en cada tiempo, redoblante en cada &, hi-hat acompañando. La estrofa hace el skank, el estribillo lava el crash con los pushes.",
         ["El redoblante a contratiempo, nunca en el tiempo: si lo sentís dado vuelta, parás y contás.",
          "El estribillo vuelve al backbeat normal: dos grooves distintos en el mismo nivel."]),
-    "7 · Eighth-note fills": (
+    # The fill drills: one fill each, two bars looping, before the level that plays them all.
+    "7 · Drill: two snares on 4": (
+        "El primer relleno solo, compás por medio: el hi-hat corta después del & de 3, caen dos redoblantes en las "
+        "corcheas del 4 y el crash del 1 lo cierra. Ocho veces seguidas, para que la mano lo sepa de memoria antes "
+        "de que el nivel lo use.",
+        ["Son exactamente los dos compases del nivel «9 · Eighth-note fills»: lo que aprendas acá entra ahí tal cual.",
+         "Cada frase del transporte (1..8) es una celda de dos compases: l11 repite una sola hasta que salga.",
+         "Las dos corcheas del 4 son derecha e izquierda, parejas: no las apures para llegar al crash."]),
+    "8 · Drill: down the kit": (
+        "El relleno que baja por el set, compás por medio: redoblante en el 3 y en su &, tom en el 4, chancha en el "
+        "& de 4, y el crash en el 1.",
+        ["El hi-hat corta en el 3: el relleno empieza un tiempo antes que el del nivel anterior.",
+         "Tres tambores en cuatro corcheas: la vista va adelante de la mano, primero al tom y después a la chancha.",
+         "Con los dos drills hechos, el nivel que sigue es alternarlos."]),
+    "9 · Eighth-note fills": (
         "Cada cuarto compás termina en un relleno en corcheas: dos redoblantes en el 4; redoblante, tom y chancha bajando sobre 3 y 4; el crash cae en el 1 que sigue.",
         ["A esta velocidad las corcheas del relleno van como semicorcheas de un nivel lento: parejas.",
          "El crash del 1 cierra cada relleno: apuntá a ese golpe."]),
-    "8 · Sixteenth fills": (
+    "10 · Drill: four snares on 4": (
+        "Las semicorcheas solas: cuatro redoblantes en el tiempo 4, el hi-hat cortando después del & de 3 y el crash "
+        "en el 1. Compás por medio, ocho veces.",
+        ["Alternadas, derecha izquierda derecha izquierda, de la muñeca y sin apretar la baqueta.",
+         "Si no salen parejas a 148, bajá con [ y subí de a 0,05x cuando salgan.",
+         "Es el primero de los cuatro rellenos de semicorcheas: uno por nivel y después todos juntos."]),
+    "11 · Drill: snare and rack pairs": (
+        "Las mismas cuatro semicorcheas repartidas en dos tambores: dos redoblantes en el 4 y dos toms en su &.",
+        ["El cambio de tambor cae a mitad del tiempo: las cuatro notas tienen que sonar tan parejas como en el redoblante solo.",
+         "Derecha e izquierda en el redoblante, derecha e izquierda en el tom: el brazo se mueve, la mano no cambia."]),
+    "12 · Drill: the walk down": (
+        "Ocho semicorcheas seguidas sobre los tiempos 3 y 4: cuatro redoblantes, dos toms, dos chanchas.",
+        ["Empieza en el 3: el hi-hat corta un tiempo antes que en los dos rellenos anteriores.",
+         "Dos tambores nuevos en la última mitad: bajá con la vista mientras las manos siguen alternando."]),
+    "13 · Drill: the whole kit": (
+        "Tres tiempos de relleno: redoblante en el 2, tom en el 3, chancha en el 4, cuatro semicorcheas en cada uno.",
+        ["El relleno más largo del curso: el hi-hat corta en el & de 1 y hay que contar para llegar al crash.",
+         "Cuatro golpes por tambor, el cambio siempre en el tiempo: si se corre uno, se corre todo el compás."]),
+    "14 · Sixteenth fills": (
         "Los rellenos pasan a semicorcheas: cuatro redoblantes en el 4; redoblante y tom en pares; la bajada redoblante, tom, chancha sobre 3 y 4; todo el set desde el 2.",
         ["Semicorcheas a 148 bpm: alternadas, de la muñeca, sin apretar la baqueta.",
          "El último relleno arranca en el 2: tres tiempos de relleno, contá para llegar al 1."]),
-    "9 · Crash on the &": (
+    "15 · Crash on the &": (
         "El crash derecho cae con el bombo en el & de 4 de los compases 2 y 4, antes de la línea del compás; el crash izquierdo responde en el 1. Los rellenos siguen.",
         ["Crash y bombo juntos en el & de 4: es una anticipación, y el 1 que sigue lleva el otro crash.",
          "Dos crashes seguidos, derecho e izquierdo, separados por una corchea."]),
-    "10 · Stabs": (
+    "16 · Stabs": (
         "Stop time: la banda pega en el 1 y en el & de 2 y la batería pega con ella, bombo y los dos crashes juntos, nada en el medio; una corrida de redoblante en el 4 trae el groove de vuelta.",
         ["Los stabs son silencios con golpes: lo difícil es no tocar entre ellos.",
          "Bombo y dos crashes a la vez: los tres exactamente juntos.",
          "La corrida del 4 es la vuelta al groove: cuatro semicorcheas y el 1."]),
-    "11 · Half-time verse": (
+    "17 · Half-time verse": (
         "La estrofa va en medio tiempo, redoblante en 3 y bombo en 1 y en el & de 2; el estribillo vuelve al backbeat sobre el crash, con el crash derecho en el & de 4.",
         ["Dos velocidades de sensación en el mismo tempo: el hi-hat no cambia, cambia dónde cae el redoblante.",
          "El estribillo tiene los crashes del &: la anticipación de pop punk."]),
-    "12 · The build": (
+    "18 · The build": (
         "Estrofa en medio tiempo, después el pre-estribillo: corcheas en el redoblante creciendo de fantasmas a acentos sobre el bombo en los tiempos, semicorcheas en el último compás; el estribillo cae en el crash.",
         ["El build es dinámico: cada compás más fuerte que el anterior, de casi nada a todo.",
          "El último compás del build va a semicorcheas: el doble de golpes, mismo crescendo."]),
-    "13 · Kick doubles": (
+    "19 · Doubles under the push": (
         "Dobles de bombo: dos bombos seguidos en semicorcheas, el & a de 1 y de 3, un solo pedal, bajo el hi-hat; los pushes y los rellenos en semicorcheas vuelven.",
         ["A 150 bpm el doble sale del rebote: talón-punta o dos golpes de punta, sin levantar la pierna dos veces.",
          "Diecisiete compases con rellenos: el doble no puede desarmar las manos."]),
-    "14 · Ride bridge": (
+    "20 · Ride bridge": (
         "El puente lleva la mano derecha al ride sobre los dobles de bombo, con un tom en el & de 4 compás por medio; el estribillo vuelve al crash.",
         ["Sin hi-hat en este nivel: el ride en las corcheas y el crash en el estribillo.",
          "El tom del & de 4 es una sola nota: la mano izquierda va sola mientras la derecha sigue en el ride."]),
-    "15 · Around the kit": (
+    "21 · Drill: around the kit": (
+        "Un compás entero de relleno compás por medio, sobre el groove de dobles de bombo: semicorcheas simples, "
+        "redoblante en el 1, tom en el 2, chancha en el 3 y en el 4.",
+        ["Ocho semicorcheas seguidas en la chancha al final: son las que se desarman, mantené la altura de la baqueta.",
+         "El compás de groove lleva los dobles de bombo: el pie sigue trabajando entre relleno y relleno."]),
+    "22 · Drill: toms on the eighths": (
+        "El relleno en corcheas: un tom con el bombo en cada tiempo, tom en 1 y 2, chancha en 3 y 4, y dos "
+        "redoblantes entre medio de cada par.",
+        ["El bombo cae junto con el tom en los cuatro tiempos: pie y mano exactamente juntos.",
+         "Los dos redoblantes van entre los tiempos: no son un adorno, son el pulso de semicorcheas."]),
+    "23 · Drill: kick and snare pairs": (
+        "Pies y manos alternando pares de semicorcheas todo el compás: dos bombos, dos redoblantes, cuatro veces.",
+        ["Dos bombos seguidos en semicorcheas: es el mismo doble del groove, ahora en cada tiempo.",
+         "El par de redoblante entra apenas termina el del bombo: sin hueco y sin pisarse."]),
+    "24 · Drill: crashes to close": (
+        "El relleno que cierra una canción: redoblante, tom y chancha sobre 1, 2 y 3, y los dos crashes con el bombo "
+        "en el 4.",
+        ["Los dos crashes y el bombo son un solo golpe: los tres juntos en el 4.",
+         "El compás de groove de este nivel abre sin crash, para que los dos del 4 sigan sonando sobre el 1: no lo llenes."]),
+    "25 · Whole-bar fills": (
         "Rellenos de un compás entero cada cuatro: semicorcheas simples redoblante, tom, chancha, chancha; toms en corcheas con pares de redoblante entre medio; bombo y redoblante en pares; los dos crashes en el 4 para cerrar.",
         ["Cuatro rellenos distintos de un compás: mirá el carril de los toms para saber cuál viene.",
          "El último termina con los dos crashes en el 4 y el 1 vacío: no lo llenes."]),
-    "16 · Pop punk anthem": (
+    "26 · Pop punk anthem": (
         "Treinta y dos compases con todo: una intro con skank y stabs, una estrofa con los pushes y rellenos, el build, un estribillo lavando el crash con los crashes del &, un puente en medio tiempo sobre el ride, el último estribillo, los dos crashes para cerrar.",
         ["Todo el curso en una canción: cada sección de cuatro u ocho compases es uno de los niveles anteriores.",
          "Ocho secciones: usá las frases del transporte (1..0) para practicar la que se caiga.",

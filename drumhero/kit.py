@@ -38,6 +38,19 @@ PROGRESS_MIGRATIONS = {
     "Six stroke roll left lead": "Six stroke roll in triplets (L)",
     "31 · Plena": "31 · Cumbia",                                        # it was a cumbia villera all along (2026-09-14)
     "32 · Reggae: one drop, fills": "33 · Reggae: one drop, fills",     # 32 became the cumbia repiques
+    # Pop punk: ten fill drills went in before the levels that use the fills (2026-09-22), so
+    # everything from the eighth-note fills on moved up; two levels were renamed as well, because
+    # their new number collided with the beats course's own "Kick doubles" and "Around the kit".
+    "7 · Eighth-note fills": "9 · Eighth-note fills",
+    "8 · Sixteenth fills": "14 · Sixteenth fills",
+    "9 · Crash on the &": "15 · Crash on the &",
+    "10 · Stabs": "16 · Stabs",
+    "11 · Half-time verse": "17 · Half-time verse",
+    "12 · The build": "18 · The build",
+    "13 · Kick doubles": "19 · Doubles under the push",
+    "14 · Ride bridge": "20 · Ride bridge",
+    "15 · Around the kit": "25 · Whole-bar fills",
+    "16 · Pop punk anthem": "26 · Pop punk anthem",
 }
 
 

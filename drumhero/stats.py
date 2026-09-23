@@ -13,6 +13,7 @@ from collections import defaultdict
 
 from .runlog import RUNS_DIR
 from .profiles import runs_match
+from .kit import PROGRESS_MIGRATIONS
 
 _cache = {}     # path -> (mtime, header)
 
@@ -109,6 +110,7 @@ def per_level(runs=None, profile=None):
     out = {}
     for r in runs:
         name = r["chart"]["name"]
+        name = PROGRESS_MIGRATIONS.get(name, name)     # a renamed level keeps the runs played under its old name
         s = r["stats"]
         e = out.setdefault(name, {"attempts": 0, "best_grade": 0, "best_stars": 0, "last": 0, "grades": [],
                                   "accuracy": [], "mean_ms": [], "std_ms": [], "dyn_rate": [], "stray_rate": [],
